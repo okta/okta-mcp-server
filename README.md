@@ -26,7 +26,7 @@ This MCP server utilizes [Okta's OpenSource SDK](https://github.com/okta) to com
 1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
 2. Clone the repository:
    ```bash
-   git clone https://github.com/atko-eng/okta-mcp-server.git
+   git clone https://github.com/okta/okta-mcp-server.git
    ```
 3. Run `cd okta-mcp-server && uv sync`
 
