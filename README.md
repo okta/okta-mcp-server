@@ -1,10 +1,33 @@
-# Okta MCP Server
+<div align="center">
 
-This is only for use with Okta, Inc products and services. It is distributed under the terms of the [Apache 2.0 license](LICENSE.md).
+![Okta MCP Server](assets/thumbnail.png)
 
-This server is an [Model Context Protocol](https://modelcontextprotocol.io/introduction) server that provides seamless integration with Okta's Admin Management APIs. It allows LLM agents to interact with Okta in a programmatic way, enabling automation and enhanced management capabilities.
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Python Version](https://img.shields.io/badge/python-%3E%3D3.8-brightgreen.svg)](https://python.org/)
+
+</div>
+
+[MCP (Model Context Protocol)](https://modelcontextprotocol.io/introduction) is an open protocol introduced by Anthropic that standardizes how large language models communicate with external tools, resources or remote services.
+
+> [!CAUTION]
+> **Beta Software Notice: This software is currently in beta and is provided AS IS without any warranties.**
+>
+> - Features, APIs, and functionality may change at any time without notice
+> - Not recommended for production use or critical workloads
+> - Support during the beta period is limited
+> - Issues and feedback can be reported through the [GitHub issue tracker](https://github.com/atko-eng/okta-mcp-server/issues)
+>
+> By using this beta software, you acknowledge and accept these conditions.
+
+The Okta MCP Server integrates with LLMs and AI agents, allowing you to perform various Okta management operations using natural language. For instance, you could simply ask Claude Desktop to perform Okta management operations:
+
+- > Create a new user and add them to the Engineering group
+- > Show me all failed login attempts from the last 24 hours
+- > List all applications that haven't been used in the past month
 
 **Empower your LLM Agents to Manage your Okta Organization**
+
+This server is an [Model Context Protocol](https://modelcontextprotocol.io/introduction) server that provides seamless integration with Okta's Admin Management APIs. It allows LLM agents to interact with Okta in a programmatic way, enabling automation and enhanced management capabilities.
 
 ## Key Features
 
@@ -12,318 +35,420 @@ This server is an [Model Context Protocol](https://modelcontextprotocol.io/intro
 * **Secure Authentication:** Supports both Device Authorization Grant for interactive use and Private Key JWT for secure, automated server-to-server communication.
 * **Integration with Okta Admin Management APIs:** Leverages the official Okta APIs to ensure secure and reliable interaction with your Okta org.
 * **Extensible Architecture:** Designed to be easily extended with new functionalities and support for additional Okta API endpoints.
-* **Potential Use Cases:**
-    * Automating user provisioning and de-provisioning.
-    * Managing group memberships.
-    * Retrieving user information.
-    * Generating reports on Okta activity.
-    * And much more, driven by the capabilities of your LLM agents.
- 
-This MCP server utilizes [Okta's OpenSource SDK](https://github.com/okta) to communicate with the OKTA APIs, ensuring a robust and well-supported integration.
+* **Comprehensive Tool Support:** Full CRUD operations for users, groups, applications, policies, and more.
 
-## Installation
+This MCP server utilizes [Okta's Python SDK](https://github.com/okta/okta-sdk-python) to communicate with the Okta APIs, ensuring a robust and well-supported integration.
 
-1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/)
-2. Clone the repository:
+## 🚀 Getting Started
+
+**Prerequisites:**
+
+- [Python 3.8+](https://python.org/downloads)
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) package manager
+- [Claude Desktop](https://claude.ai/download) or any other [MCP Client](https://modelcontextprotocol.io/clients)
+- [Okta](https://okta.com/) account with appropriate permissions
+
+<br/>
+
+### Install the Okta MCP Server
+
+Install Okta MCP Server and configure it to work with your preferred MCP Client.
+
+**Claude Desktop with all tools**
+
+1. Clone and install the server:
    ```bash
    git clone https://github.com/atko-eng/okta-mcp-server.git
+   cd okta-mcp-server
+   uv sync
    ```
-3. Run `cd okta-mcp-server && uv sync`
 
-## Okta Application Setup
-
-This server supports two authentication methods. Choose the one that best fits your use case. 
-**Note:** mcp automatically chooses its authentication type by detecting if a private key and key ID are available as environment variables.
-
-### Method 1: Device Authorization Grant (Uses Browser for Authentication)-Recommended
-
-1.  In your Okta org, create a **new App Integration**.
-2.  Select **OIDC - OpenID Connect** and **Native Application**.
-3.  Under **Grant type**, ensure **Device Authorization** is checked.
-4.  Go to the Okta API Scopes tab and Grant permissions for the APIs you need (e.g., okta.users.read, okta.groups.manage).
-5.  Save the application and copy the **Client ID**.
-6. **Documentation:** [Okta Device Authorization Grant Guide](https://developer.okta.com/docs/guides/device-authorization-grant/main/)
-
-### Method 2: Private Key JWT (Browserless Authentication)
-
-1.  **Create App:** In your Okta org, create a **new App Integration**. Select **API Services**. Save the app and copy the **Client ID**.
-2.  **Configure Client Authentication:**
-    * On the app's **General** tab, find the **Client Credentials** section and click **Edit**.
-    * Disable **Require Demonstrating Proof of Possession (DPoP) header in token requests** as **Client Credentials** is not supported in DPoP.
-    * Select **Public key / Private key** for the authentication method.
-3.  **Add a Public Key:** You have two options for adding a key.
-    * **Option A: Generate Key in Okta (Recommended)**
-        1.  In the **Public keys** section, click **Add key**.
-        2.  In the dialog, choose **Generate new key**.
-        3.  Okta will instantly generate a key pair. **Download or save the private key** (`private.pem`) and store it securely. You will not be able to download it again.
-        4.  Copy the **Key ID (KID)** displayed for the newly generated key.
-    * **Option B: Use Your Own Key**
-        1.  Generate a key pair locally using the following `openssl` commands:
-            ```bash
-            # Generate a 2048-bit RSA private key
-            openssl genpkey -algorithm RSA -out private.pem -pkeyopt rsa_keygen_bits:2048
-            
-            # Extract the public key from the private key
-            openssl rsa -in private.pem -pubout -out public.pem
-            ```
-        2.  Click **Add key** and paste the contents of your **public key** (`public.pem`) into the dialog.
-        3.  Copy the **Key ID (KID)** displayed for the key you added.
-4.  **Grant API Scopes:** Go to the **Okta API Scopes** tab and **Grant** permissions for the APIs you need (e.g., `okta.users.read`, `okta.groups.manage`).
-5.  **Assign Admin Roles:** To avoid `403 Forbidden` errors, go to the **Admin roles** tab and assign the **Super Administrator** role to this application.
-
-
-### Usage with VS Code
-
-To use the Okta MCP server with Visual Studio Code, follow these steps:
-
-1. Install the GitHub Copilot Extension: Make sure you have the latest version of the GitHub Copilot extension installed in VS Code. This will provide you with access to the "agent mode" required to run the MCP server.
-2. Enable Agent Mode in Copilot:
-   - Open the Copilot chat view in VS Code. 
-   - Click on the dropdown menu at the top of the chat view. 
-   - Select "Agent" to enable agent mode.
-3. Configure settings.json:
-   - Open your VS Code settings.json file. 
-   - Copy and paste the following JSON configuration into your settings.json file:
-
-    ```json
-    {
-      "mcp": {
-        "inputs": [
-          {
-            "type": "promptString",
-            "description": "Okta Organization URL (e.g., https://dev-123456.okta.com)",
-            "id": "OKTA_ORG_URL"
-          },
-          {
-            "type": "promptString",
-            "description": "Okta Client ID",
-            "id": "OKTA_CLIENT_ID",
-            "password": true
-          },
-          {
-            "type": "promptString",
-            "description": "Okta Scopes (separated by whitespace, e.g., 'okta.users.read okta.groups.manage')",
-            "id": "OKTA_SCOPES"
-          },
-          {
-            "type": "promptString",
-            "description": "Okta Private Key. Required for 'browserless' auth.",
-            "id": "OKTA_PRIVATE_KEY",
-            "password": true
-          },
-          {
-            "type": "promptString",
-            "description": "Okta Key ID (KID) for the private key. Required for 'browserless' auth.",
-            "id": "OKTA_KEY_ID",
-            "password": true
-          }
-        ],
-        "servers": {
-          "okta-mcp-server": {
-            "command": "uv",
-            "args": [
-              "run",
-              "--directory",
-              "/path/to/the/okta-mcp-server",
-              "okta-mcp-server"
-            ],
-            "env": {
-              "OKTA_ORG_URL": "${input:OKTA_ORG_URL}",
-              "OKTA_CLIENT_ID": "${input:OKTA_CLIENT_ID}",
-              "OKTA_SCOPES": "${input:OKTA_SCOPES}",
-              "OKTA_PRIVATE_KEY": "${input:OKTA_PRIVATE_KEY}",
-              "OKTA_KEY_ID": "${input:OKTA_KEY_ID}"
-            }
-          }
-        }
-      }
-    }
-    ```
-
-4. Start the MCP Server:
-   - After you have configured your settings.json file, you will see an option to start the "okta-mcp-server". 
-   - Click on the "Start" button to launch the server. 
-   - If you are running the server for the first time, you will be prompted to enter the following information:
-      * Okta Organization URL: Your Okta tenant URL. 
-      * Okta Client ID: The client ID of the application you created in your Okta organization. 
-      * Okta Scopes: The scopes that you want to grant to the application, separated by spaces.
-
-### Usage with Claude Desktop
-
-To use the Okta MCP server with the Claude Desktop app, you'll need to edit its configuration file directly.
-1. Find the Configuration File:
-   - In the Claude Desktop app, navigate to Settings -> Developer and click Edit Config. 
-   - This will open the claude_desktop_config.json file in your default text editor. The file is located at:
-     * macOS: ~/Library/Application Support/Claude/claude_desktop_config.json 
-     * Windows: %APPDATA%\Claude\claude_desktop_config.json
-
-2. Add the Server Configuration:
-   - Add the following mcpServers block to the claude_desktop_config.json file. If the block already exists, simply add the "okta-mcp-server" entry inside it.
-
-    ```json
-       {
-         "mcpServers": {
-           "okta-mcp-server": {
-             "command": "uv",
-             "args": [
-               "run",
-               "--directory",
-               "/path/to/the/okta-mcp-server",
-               "okta-mcp-server"
-             ],
-             "env": {
-               "OKTA_ORG_URL": "<OKTA_ORG_URL>",
-               "OKTA_CLIENT_ID": "<OKTA_CLIENT_ID>",
-               "OKTA_SCOPES": "<OKTA_SCOPES>",
-               "OKTA_PRIVATE_KEY": "<PRIVATE_KEY_IF_NEEDED>",
-               "OKTA_KEY_ID": "<KEY_ID_IF_NEEDED>"
-             }
-           }
+2. Configure Claude Desktop by adding the following to your `claude_desktop_config.json`:
+   ```json
+   {
+     "mcpServers": {
+       "okta-mcp-server": {
+         "command": "uv",
+         "args": [
+           "run",
+           "--directory",
+           "/path/to/okta-mcp-server",
+           "okta-mcp-server"
+         ],
+         "env": {
+           "OKTA_ORG_URL": "<OKTA_ORG_URL>",
+           "OKTA_CLIENT_ID": "<OKTA_CLIENT_ID>",
+           "OKTA_SCOPES": "<OKTA_SCOPES>",
+           "OKTA_PRIVATE_KEY": "<PRIVATE_KEY_IF_NEEDED>",
+           "OKTA_KEY_ID": "<KEY_ID_IF_NEEDED>"
          }
        }
-    ```
-3. Update Placeholders:
-   - Replace /path/to/your/okta-mcp-server with the absolute path to where you cloned the repository. 
-   - Replace the placeholder values for OKTA_ORG_URL, OKTA_CLIENT_ID, and OKTA_SCOPES with your specific credentials from the Okta application you configured.
-4. Restart Claude Desktop:
-   - Completely quit the Claude Desktop app from the system tray (Windows) or menu bar (macOS) and restart it. The Okta tools will now be available for use.
+     }
+   }
+   ```
 
-### Usage with AWS Bedrock
+**VS Code**
 
-To use the Okta MCP server with AWS Bedrock, you will need to configure the server to run as a Bedrock agent. Follow these steps:
-1. Click the settings icon in the app, navigate to developer settings, and click on open config file. 
-2. Paste the following mcpServers block into the configuration file. 
-3. Update the /path/to/your/okta-mcp-server and the environment variables with your specific Okta details. 
-4. Once done, completely quit and restart the desktop application.
-
+Add the following to your VS Code `settings.json`:
 ```json
 {
-  "mcpServers" : {
-    "okta-mcp-server" : {
-      "command" : "uv",
-      "env" : {
-        "OKTA_ORG_URL": "<OKTA_ORG_URL>",
-        "OKTA_CLIENT_ID": "<OKTA_CLIENT_ID>",
-        "OKTA_SCOPES": "<OKTA_SCOPES>",
-        "OKTA_PRIVATE_KEY": "<PRIVATE_KEY_IF_NEEDED>",
-        "OKTA_KEY_ID": "<KEY_ID_IF_NEEDED>"
+  "mcp": {
+    "inputs": [
+      {
+        "type": "promptString",
+        "description": "Okta Organization URL (e.g., https://dev-123456.okta.com)",
+        "id": "OKTA_ORG_URL"
       },
-      "args" : [
-        "run",
-        "--directory",
-        "/path/to/the/okta-mcp-server",
-        "okta-mcp-server"
-      ]
+      {
+        "type": "promptString",
+        "description": "Okta Client ID",
+        "id": "OKTA_CLIENT_ID",
+        "password": true
+      },
+      {
+        "type": "promptString",
+        "description": "Okta Scopes (separated by whitespace, e.g., 'okta.users.read okta.groups.manage')",
+        "id": "OKTA_SCOPES"
+      },
+      {
+        "type": "promptString",
+        "description": "Okta Private Key. Required for 'browserless' auth.",
+        "id": "OKTA_PRIVATE_KEY",
+        "password": true
+      },
+      {
+        "type": "promptString",
+        "description": "Okta Key ID (KID) for the private key. Required for 'browserless' auth.",
+        "id": "OKTA_KEY_ID",
+        "password": true
+      }
+    ],
+    "servers": {
+      "okta-mcp-server": {
+        "command": "uv",
+        "args": [
+          "run",
+          "--directory",
+          "/path/to/the/okta-mcp-server",
+          "okta-mcp-server"
+        ],
+        "env": {
+          "OKTA_ORG_URL": "${input:OKTA_ORG_URL}",
+          "OKTA_CLIENT_ID": "${input:OKTA_CLIENT_ID}",
+          "OKTA_SCOPES": "${input:OKTA_SCOPES}",
+          "OKTA_PRIVATE_KEY": "${input:OKTA_PRIVATE_KEY}",
+          "OKTA_KEY_ID": "${input:OKTA_KEY_ID}"
+        }
+      }
     }
   }
 }
 ```
 
-### Available Tools
+**Other MCP Clients**
 
-<details>
+To use Okta MCP Server with any other MCP Client, you can manually add this configuration to the client and restart for changes to take effect:
 
-<summary>Users</summary>
+```json
+{
+  "mcpServers": {
+    "okta-mcp-server": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--directory",
+        "/path/to/okta-mcp-server",
+        "okta-mcp-server"
+      ],
+      "env": {
+        "OKTA_ORG_URL": "<OKTA_ORG_URL>",
+        "OKTA_CLIENT_ID": "<OKTA_CLIENT_ID>",
+        "OKTA_SCOPES": "<OKTA_SCOPES>",
+        "OKTA_PRIVATE_KEY": "<PRIVATE_KEY_IF_NEEDED>",
+        "OKTA_KEY_ID": "<KEY_ID_IF_NEEDED>"
+      }
+    }
+  }
+}
+```
 
+### Authenticate with Okta
 
-- **list_users** - List all users in your Okta organization.
-- **get_user_profile_attributes** - Retrieve all supported user profile attributes in your Okta org.
-- **get_user** - Get detailed information about a specific user by their ID.
-- **create_user** - Create a new user in your Okta organization with a custom profile.
-- **update_user** - Update an existing user's profile information.
-- **deactivate_user** - Deactivate a user, making them inactive and eligible for deletion.
-- **delete_deactivated_user** - Permanently delete a user who has already been deactivated.
+The server supports two authentication methods. Choose the one that best fits your use case.
 
-</details>
+**Method 1: Device Authorization Grant (Interactive)**
 
-<details>
+1. In your Okta org, create a **new App Integration**.
+2. Select **OIDC - OpenID Connect** and **Native Application**.
+3. Under **Grant type**, ensure **Device Authorization** is checked.
+4. Go to the Okta API Scopes tab and Grant permissions for the APIs you need (e.g., okta.users.read, okta.groups.manage).
+5. Save the application and copy the **Client ID**.
+6. **Documentation:** [Okta Device Authorization Grant Guide](https://developer.okta.com/docs/guides/device-authorization-grant/main/)
 
-<summary>Groups</summary>
+**Method 2: Private Key JWT (Browserless)**
 
-- **list_groups** - List all groups in your Okta organization.
-- **get_group** - Get detailed information about a specific group by its ID.
-- **create_group** - Create a new group in your Okta organization.
-- **delete_group** - Delete a group by its ID (requires confirmation).
-- **confirm_delete_group** - Confirm and execute the deletion of a group after explicit confirmation.
-- **update_group** - Update the profile information of an existing group.
-- **list_group_users** - List all users who are members of a specific group.
-- **list_group_apps** - List all applications assigned to a specific group.
-- **add_user_to_group** - Add a user to a group by their respective IDs.
-- **remove_user_from_group** - Remove a user from a group by their respective IDs.
+1. **Create App:** In your Okta org, create a **new App Integration**. Select **API Services**. Save the app and copy the **Client ID**.
+2. **Configure Client Authentication:**
+   * On the app's **General** tab, find the **Client Credentials** section and click **Edit**.
+   * Disable **Require Demonstrating Proof of Possession (DPoP) header in token requests**.
+   * Select **Public key / Private key** for the authentication method.
+3. **Add a Public Key:** You have two options for adding a key.
+   * **Option A: Generate Key in Okta (Recommended)**
+     1. In the **Public keys** section, click **Add key**.
+     2. In the dialog, choose **Generate new key**.
+     3. Okta will instantly generate a key pair. **Download or save the private key** (`private.pem`) and store it securely.
+     4. Copy the **Key ID (KID)** displayed for the newly generated key.
+   * **Option B: Use Your Own Key**
+     1. Generate a key pair locally using the following `openssl` commands:
+        ```bash
+        # Generate a 2048-bit RSA private key
+        openssl genpkey -algorithm RSA -out private.pem -pkeyopt rsa_keygen_bits:2048
+        
+        # Extract the public key from the private key
+        openssl rsa -in private.pem -pubout -out public.pem
+        ```
+     2. Click **Add key** and paste the contents of your **public key** (`public.pem`) into the dialog.
+     3. Copy the **Key ID (KID)** displayed for the key you added.
+4. **Grant API Scopes:** Go to the **Okta API Scopes** tab and **Grant** permissions for the APIs you need.
+5. **Assign Admin Roles:** To avoid `403 Forbidden` errors, go to the **Admin roles** tab and assign the **Super Administrator** role to this application.
 
-</details>
+### Verify your integration
 
-<details>
+Restart your MCP Client (Claude Desktop, VS Code, etc.) and ask it to help you manage your Okta tenant:
 
-<summary>Applications</summary>
+> Show me the users in my Okta organization
 
-- **list_applications** - List all applications in your Okta organization.
-- **get_application** - Get detailed information about a specific application by its ID.
-- **create_application** - Create a new application in your Okta organization.
-- **update_application** - Update the configuration of an existing application.
-- **delete_application** - Delete an application by its ID (requires confirmation).
-- **confirm_delete_application** - Confirm and execute the deletion of an application after explicit confirmation.
-- **activate_application** - Activate an application, making it available for use.
-- **deactivate_application** - Deactivate an application, making it unavailable for use.
+## 🛠️ Supported Tools
 
-</details>
+The Okta MCP Server provides the following tools for LLMs to interact with your Okta tenant:
 
-<details>
+### Users
 
-<summary>Policies</summary>
+| Tool                            | Description                                              | Usage Examples                                                                                                                                                |
+| ------------------------------- | -------------------------------------------------------- |---------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `list_users`                    | List all users in your Okta organization                | - `Show me the users in my Okta org` <br> - `Find users with 'john' in their name` <br> - `What users do I have in the Engineering department?`                 |
+| `get_user`                      | Get detailed information about a specific user          | - `Show me details for user john.doe@company.com` <br> - `Get information about user ID 00u1234567890` <br> - `What groups is Jane Smith a member of?`        |
+| `create_user`                   | Create a new user in your Okta organization             | - `Create a new user named John Doe with email john.doe@company.com` <br> - `Add a new employee to the Sales department` <br> - `Set up a contractor account` |
+| `update_user`                   | Update an existing user's profile information           | - `Update John Doe's department to Engineering` <br> - `Change the phone number for user jane.smith@company.com` <br> - `Update the manager for this user`    |
+| `deactivate_user`               | Deactivate a user, making them inactive                 | - `Deactivate the user john.doe@company.com` <br> - `Disable access for former employee Jane Smith` <br> - `Suspend the contractor account temporarily`       |
+| `delete_deactivated_user`       | Permanently delete a deactivated user                   | - `Delete the deactivated user john.doe@company.com` <br> - `Remove former employee Jane Smith permanently` <br> - `Clean up old contractor accounts`         |
+| `get_user_profile_attributes`   | Retrieve all supported user profile attributes          | - `What user profile fields are available?` <br> - `Show me all the custom attributes we can set` <br> - `List the standard Okta user attributes`             |
 
-- **list_policies** - List all policies in your Okta organization.
-- **get_policy** - Get detailed information about a specific policy by its ID.
-- **create_policy** - Create a new policy in your Okta organization.
-- **update_policy** - Update the configuration of an existing policy.
-- **delete_policy** - Delete a policy by its ID.
-- **activate_policy** - Activate a policy, making it enforceable.
-- **deactivate_policy** - Deactivate a policy, making it inactive.
-- **list_policy_rules** - List all rules for a specific policy.
-- **get_policy_rule** - Get detailed information about a specific policy rule by its ID.
-- **create_policy_rule** - Create a new rule for a specific policy.
-- **update_policy_rule** - Update the configuration of an existing policy rule.
-- **delete_policy_rule** - Delete a rule from a specific policy.
-- **activate_policy_rule** - Activate a policy rule, making it enforceable.
-- **deactivate_policy_rule** - Deactivate a policy rule, making it inactive.
+### Groups
 
-</details>
+| Tool                    | Description                                       | Usage Examples                                                                                                                                                |
+| ----------------------- | ------------------------------------------------- |---------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `list_groups`           | List all groups in your Okta organization        | - `Show me the groups in my Okta org` <br> - `Find groups with 'Engineering' in their name` <br> - `What security groups do we have?`                         |
+| `get_group`             | Get detailed information about a specific group  | - `Show me details for the Engineering group` <br> - `How many members are in the Administrators group?` <br> - `What applications are assigned to Sales?`    |
+| `create_group`          | Create a new group                                | - `Create a new group called DevOps Team` <br> - `Set up a security group for the Finance department` <br> - `Add a group for temporary contractors`          |
+| `update_group`          | Update an existing group's information            | - `Update the description for the Engineering group` <br> - `Change the name of the Sales group to Revenue Team` <br> - `Modify the Finance group settings`   |
+| `delete_group`          | Delete a group (requires confirmation)            | - `Delete the old Marketing group` <br> - `Remove the temporary project group` <br> - `Clean up unused security groups`                                       |
+| `list_group_users`      | List all users who are members of a group        | - `Who are the members of the Engineering group?` <br> - `Show me all administrators` <br> - `List users in the Finance department`                           |
+| `list_group_apps`       | List all applications assigned to a group        | - `What applications does the Engineering group have access to?` <br> - `Show apps assigned to Sales team` <br> - `List all applications for Administrators`  |
+| `add_user_to_group`     | Add a user to a group                             | - `Add john.doe@company.com to the Engineering group` <br> - `Give Jane Smith access to the Finance applications` <br> - `Add the new hire to the Sales team` |
+| `remove_user_from_group`| Remove a user from a group                        | - `Remove john.doe@company.com from the Engineering group` <br> - `Revoke Jane's admin privileges` <br> - `Remove the contractor from the Finance group`      |
 
-<details>
+### Applications
 
-<summary>Logs</summary>
+| Tool                          | Description                                       | Usage Examples                                                                                                                                                |
+| ----------------------------- | ------------------------------------------------- |---------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `list_applications`           | List all applications in your Okta organization  | - `Show me the applications in my Okta org` <br> - `Find applications with 'API' in their name` <br> - `What SSO applications do we have configured?`         |
+| `get_application`             | Get detailed information about a specific app    | - `Show me details for the Salesforce application` <br> - `What are the callback URLs for our mobile app?` <br> - `Get the client ID for our web application` |
+| `create_application`          | Create a new application                          | - `Create a new SAML application for our HR system` <br> - `Set up a new API service application` <br> - `Add a mobile app integration`                       |
+| `update_application`          | Update an existing application                    | - `Update the callback URLs for our web app` <br> - `Change the logo for the Salesforce application` <br> - `Modify the SAML settings for our HR system`      |
+| `delete_application`          | Delete an application (requires confirmation)     | - `Delete the old legacy application` <br> - `Remove the unused test application` <br> - `Clean up deprecated integrations`                                   |
+| `activate_application`        | Activate an application                           | - `Activate the new HR application` <br> - `Enable the Salesforce integration` <br> - `Turn on the mobile app for users`                                      |
+| `deactivate_application`      | Deactivate an application                         | - `Deactivate the legacy CRM application` <br> - `Temporarily disable the mobile app` <br> - `Turn off access to the test environment`                        |
 
-- **get_logs** - Retrieve system logs from your Okta organization.
+### Policies
 
-</details>
+| Tool                        | Description                                    | Usage Examples                                                                                                                                                |
+| --------------------------- | ---------------------------------------------- |---------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `list_policies`             | List all policies in your Okta organization   | - `Show me the security policies` <br> - `What password policies do we have?` <br> - `List all MFA enrollment policies`                                       |
+| `get_policy`                | Get detailed information about a policy       | - `Show me the details of our password policy` <br> - `What are the MFA requirements?` <br> - `Display the sign-on policy for contractors`                    |
+| `create_policy`             | Create a new policy                            | - `Create a new password policy for contractors` <br> - `Set up MFA requirements for high-risk applications` <br> - `Add a sign-on policy for remote workers` |
+| `update_policy`             | Update an existing policy                      | - `Update the password complexity requirements` <br> - `Modify the MFA policy for executives` <br> - `Change the session timeout for contractors`             |
+| `delete_policy`             | Delete a policy                                | - `Delete the old password policy` <br> - `Remove the deprecated MFA policy` <br> - `Clean up unused security policies`                                       |
+| `activate_policy`           | Activate a policy                              | - `Activate the new password policy` <br> - `Enable the MFA requirements` <br> - `Turn on the contractor sign-on policy`                                      |
+| `deactivate_policy`         | Deactivate a policy                            | - `Deactivate the old security policy` <br> - `Temporarily disable MFA for testing` <br> - `Turn off the strict password requirements`                        |
+| `list_policy_rules`         | List all rules for a specific policy          | - `Show me all rules for the password policy` <br> - `What MFA rules are configured?` <br> - `List the exceptions in our sign-on policy`                      |
+| `get_policy_rule`           | Get detailed information about a policy rule  | - `Show me the details of the contractor MFA rule` <br> - `What are the conditions for the VPN access rule?` <br> - `Display the emergency access rule`       |
+| `create_policy_rule`        | Create a new rule for a policy                 | - `Add an exception rule for executives` <br> - `Create a rule for contractor access` <br> - `Set up emergency access rules for IT admins`                    |
+| `update_policy_rule`        | Update an existing policy rule                 | - `Update the location restrictions for remote workers` <br> - `Modify the device trust requirements` <br> - `Change the risk-based authentication settings`  |
+| `delete_policy_rule`        | Delete a rule from a policy                    | - `Delete the old contractor exception` <br> - `Remove the deprecated VPN rule` <br> - `Clean up unused policy exceptions`                                    |
+| `activate_policy_rule`      | Activate a policy rule                         | - `Activate the new emergency access rule` <br> - `Enable the contractor restrictions` <br> - `Turn on the location-based access rule`                        |
+| `deactivate_policy_rule`    | Deactivate a policy rule                       | - `Deactivate the old emergency rule` <br> - `Temporarily disable location restrictions` <br> - `Turn off the device trust requirements for testing`          |
 
-### Logging
+### Logs
 
-To enable logging for the Okta MCP server, you can set the `OKTA_LOG_LEVEL` environment variable to one of the following
-values: `TRACE`, `DEBUG`, `INFO`, `SUCCESS`, `WARNING`, `ERROR`, or `CRITICAL`. This will control the verbosity of the logs generated by the server.
+| Tool        | Description                              | Usage Examples                                                                                                                                             |
+| ----------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_logs`  | Retrieve system logs from your Okta org | - `Show me recent login attempts` <br> - `Find failed logins from the past 24 hours` <br> - `Get authentication logs for user john.doe@company.com`     |
 
-You can also specify a log file by setting the `OKTA_LOG_FILE` environment variable to the desired file path. If this variable is set, all logs will be written to the specified file.
+## 🔐 Authentication
 
-### Troubleshooting
+The Okta MCP Server uses the Okta Management API and requires authentication to access your Okta tenant.
 
-"Claude's response was interrupted ... "
+### Authentication Flow
 
-If you see this message, Claude likely hit its context-length limit and stopped mid-reply. This happens most often on servers that trigger many chained tool calls such as the observability server.
+The server uses OAuth 2.0 device authorization flow for secure authentication with Okta, or Private Key JWT for browserless authentication. Your credentials are managed securely and are never exposed in plain text.
 
-To reduce the chance of running in to this issue:
+### Initial Setup
 
-Try to be specific, keep your queries concise.
-If a single request calls multiple tools, try to to break it into several smaller tool calls to keep the responses short.
+The MCP Server will automatically initiate the appropriate authentication flow based on your configuration:
 
+- **Device Authorization Grant**: Interactive browser-based authentication
+- **Private Key JWT**: Browserless authentication using client credentials
 
-### Contributing
+> [!NOTE]
+> Device authorization flow is not supported for **private cloud** tenants. Private Cloud users should use Private Key JWT authentication with client credentials.
 
-Interested in contributing, and running this server locally? See CONTRIBUTING.md to get started.
+> [!IMPORTANT]
+> Using the MCP Server will consume Management API rate limits according to your subscription plan. Refer to the [Rate Limit Policy](https://developer.okta.com/docs/reference/rate-limits/) for more information.
+
+## 🩺 Troubleshooting
+
+When encountering issues with the Okta MCP Server, several troubleshooting options are available to help diagnose and resolve problems.
+
+### 🐞 Debug Mode
+
+Enable debug mode for more detailed logging:
+
+```bash
+export OKTA_LOG_LEVEL=DEBUG
+```
+
+> [!TIP]
+> Debug mode is particularly useful when troubleshooting connection or authentication issues.
+
+### 🚨 Common Issues
+
+1. **Authentication Failures**
+   - Ensure you have the correct permissions in your Okta tenant
+   - Verify your `OKTA_ORG_URL`, `OKTA_CLIENT_ID`, and `OKTA_SCOPES` are correct
+   - Check that your application has the necessary API scopes granted
+
+2. **MCP Client Can't Connect to the Server**
+   - Restart your MCP client after installation
+   - Verify the server path is correct in your configuration
+   - Check that `uv` is installed and accessible in your PATH
+
+3. **API Errors or Permission Issues**
+   - Enable debug mode with `export OKTA_LOG_LEVEL=DEBUG`
+   - Verify your Okta application has the required scopes
+   - Ensure your application has appropriate admin roles assigned
+   - Check the Okta System Log for detailed error information
+
+4. **"Claude's response was interrupted..." Error**
+   - This typically happens when Claude hits its context-length limit
+   - Try to be more specific and keep queries concise
+   - Break large requests into smaller, focused operations
+
+> [!TIP]
+> Most connection issues can be resolved by restarting both the server and your MCP client.
+
+## 📋 Debug Logs
+
+Enable debug mode to view detailed logs:
+
+```bash
+export OKTA_LOG_LEVEL=DEBUG
+```
+
+You can also specify a log file:
+
+```bash
+export OKTA_LOG_FILE="/path/to/okta-mcp.log"
+```
+
+## 👨‍💻 Development
+
+### Building from Source
+
+```bash
+# Clone the repository
+git clone https://github.com/atko-eng/okta-mcp-server.git
+cd okta-mcp-server
+
+# Install dependencies
+uv sync
+
+# Run the server directly
+uv run okta-mcp-server
+```
+
+### Development Scripts
+
+```bash
+# Run with debug logs enabled
+OKTA_LOG_LEVEL=DEBUG uv run okta-mcp-server
+
+# Run tests
+uv run pytest
+
+# Install in development mode
+uv pip install -e .
+```
+
+> [!NOTE]
+> This server requires [Python 3.8 or higher](https://python.org/downloads) and [uv](https://docs.astral.sh/uv/).
+
+## 🔒 Security
+
+The Okta MCP Server prioritizes security:
+
+- Credentials are managed through secure authentication flows
+- No sensitive information is stored in plain text  
+- Authentication uses OAuth 2.0 device authorization flow or Private Key JWT
+- Supports fine-grained API scope permissions
+- Easy credential management through environment variables
+
+> [!IMPORTANT]
+> For security best practices, always review the permissions requested during the authentication process to ensure they align with your security requirements.
+
+> [!CAUTION]
+> Always use the principle of least privilege when granting API scopes to your Okta application.
+
+## 🧪 Security Scanning
+
+We recommend regularly scanning this server, and any other MCP-compatible servers you deploy, with community tools built to surface protocol-level risks and misconfigurations.
+
+These scanners help identify issues across key vulnerability classes including: server implementation bugs, tool definition and lifecycle risks, interaction and data flow weaknesses, and configuration or environment gaps.
+
+If you discover a vulnerability, please follow our [responsible disclosure process](https://www.okta.com/security/).
+
+## 💬 Feedback and Contributing
+
+We appreciate feedback and contributions to this project! Before you get started, please see:
+
+- [Okta's general contribution guidelines](CONTRIBUTING.md)
+
+### Reporting Issues
+
+To provide feedback or report a bug, please [raise an issue on our issue tracker](https://github.com/atko-eng/okta-mcp-server/issues).
+
+### Vulnerability Reporting
+
+Please do not report security vulnerabilities on the public GitHub issue tracker. Please follow the [responsible disclosure process](https://www.okta.com/security/).
+
+## 📄 License
+
+This project is licensed under the Apache 2.0 license. See the [LICENSE](LICENSE.md) file for more info.
 
 ---
+
+## What is Okta?
+
+<p align="center">
+  <picture>
+    <img alt="Okta Logo" src="assets/logo.png" width="150">
+  </picture>
+</p>
+<p align="center">
+  Okta is the leading independent identity provider. To learn more checkout <a href="https://www.okta.com/why-okta/">Why Okta?</a>
+</p>
 
 Copyright © 2025-Present, Okta, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0. Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
-
 
