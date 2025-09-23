@@ -1,0 +1,53 @@
+name: 'Bug report'
+description: 'File a bug report'
+
+labels:
+  - 'bug'
+
+body:
+  - type: 'markdown'
+    attributes:
+      value: 'Thank you for filing a bug. Please complete the form below so we can triage, reproduce, and fix your issue.'
+
+  - id: 'new_issue'
+    type: 'checkboxes'
+    attributes:
+      label: 'New issue?'
+      options:
+        - label: 'I have reviewed the [Existing Issues](https://github.com/atko-eng/okta-mcp-server/issues) and confirm this is not an existing issue.'
+          required: true
+
+  - id: 'tldr'
+    type: 'textarea'
+    attributes:
+      label: 'Bug'
+      description: 'Describe the bug in 1-2 sentences.'
+    validations:
+      required: true
+
+  - id: 'expected_behavior'
+    type: 'textarea'
+    attributes:
+      label: 'Expected behavior'
+      description: 'What did you expect to happen?'
+    validations:
+      required: true
+
+  - id: 'observed_behavior'
+    type: 'textarea'
+    attributes:
+      label: 'Observed behavior'
+      description: 'What happened instead?'
+
+  - id: 'logs'
+    type: 'textarea'
+    attributes:
+      label: 'Relevant log output'
+      description: 'Please copy and paste any relevant log output. This will be automatically formatted into code, so no need for backticks.'
+      render: 'text'
+
+  - id: 'additional'
+    type: 'textarea'
+    attributes:
+      label: 'Additional information'
+      description: 'Is there anything else you think we should know?'

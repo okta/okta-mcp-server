@@ -1,0 +1,26 @@
+# Metadata for all Bacon test suites. For options, see:
+# https://oktawiki.atlassian.net/wiki/spaces/ESS/pages/635280223/.Bacon.yaml
+test_suites:
+  - name: 'build'
+    script_path: /root/okta/okta-mcp-server/.bacon
+    script_name: build
+    sort_order: '0'
+    timeout: '50'
+    criteria: MERGE
+    queue_name: small
+  - name: 'test'
+    script_path: /root/okta/okta-mcp-server/.bacon
+    script_name: test
+    sort_order: '1'
+    timeout: '50'
+    criteria: MERGE
+    queue_name: small
+    prereq_test_suite_name: "build"
+  - name: sca_scan
+    script_path: /root/okta/okta-mcp-server
+    script_name: dependency_scan
+    sort_order: '1'
+    timeout: '200'
+    criteria: MAINLINE
+    queue_name: small
+    trigger: AUTO

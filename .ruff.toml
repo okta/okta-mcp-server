@@ -1,0 +1,47 @@
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".bacon",
+    ".git",
+    ".github",
+    ".git-rewrite",
+    ".ipynb_checkpoints",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".venv",
+    ".vscode",
+    ".idea",
+    "__pypackages__",
+    "_build",
+    "build",
+    "dist",
+    "venv",
+]
+
+line-length = 119
+indent-width = 4
+
+[lint]
+preview = true
+select = ["F",      # Pyflakes
+          "E",      # pycodestyle
+          "I",      # isort
+          "RUF"]    # Ruff-specific rules
+
+# Allow fix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+unfixable = []
+
+
+[format]
+line-ending = "auto" # Automatically detect the appropriate line ending.
+quote-style = "double" # Use double quotes for strings.
+indent-style = "space" # Indent with spaces, rather than tabs.
+skip-magic-trailing-comma = false # Respect magic trailing commas.
+
+
+# Enable auto-formatting of code examples in docstrings. Markdown,
+# reStructuredText code/literal blocks and doctests are all supported.
+docstring-code-format = true
+
