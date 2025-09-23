@@ -15,7 +15,7 @@
 > - Features, APIs, and functionality may change at any time without notice
 > - Not recommended for production use or critical workloads
 > - Support during the beta period is limited
-> - Issues and feedback can be reported through the [GitHub issue tracker](https://github.com/atko-eng/okta-mcp-server/issues)
+> - Issues and feedback can be reported through the [GitHub issue tracker](https://github.com/okta/okta-mcp-server/issues)
 >
 > By using this beta software, you acknowledge and accept these conditions.
 
@@ -58,7 +58,7 @@ Install Okta MCP Server and configure it to work with your preferred MCP Client.
 
 1. Clone and install the server:
    ```bash
-   git clone https://github.com/atko-eng/okta-mcp-server.git
+   git clone https://github.com/okta/okta-mcp-server.git
    cd okta-mcp-server
    uv sync
    ```
@@ -367,7 +367,7 @@ export OKTA_LOG_FILE="/path/to/okta-mcp.log"
 
 ```bash
 # Clone the repository
-git clone https://github.com/atko-eng/okta-mcp-server.git
+git clone https://github.com/okta/okta-mcp-server.git
 cd okta-mcp-server
 
 # Install dependencies
@@ -425,7 +425,7 @@ We appreciate feedback and contributions to this project! Before you get started
 
 ### Reporting Issues
 
-To provide feedback or report a bug, please [raise an issue on our issue tracker](https://github.com/atko-eng/okta-mcp-server/issues).
+To provide feedback or report a bug, please [raise an issue on our issue tracker](https://github.com/okta/okta-mcp-server/issues).
 
 ### Vulnerability Reporting
 
