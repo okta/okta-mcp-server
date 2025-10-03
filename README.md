@@ -433,7 +433,7 @@ Please do not report security vulnerabilities on the public GitHub issue tracker
 
 ## 📄 License
 
-This project is licensed under the Apache 2.0 license. See the [LICENSE](LICENSE.md) file for more info.
+This project is licensed under the Apache 2.0 license. See the [LICENSE](LICENSE) file for more info.
 
 ---
 
