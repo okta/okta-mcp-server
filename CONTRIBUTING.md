@@ -13,7 +13,7 @@ Summary
 This document covers how to contribute to an Okta Open Source project. These
 instructions assume you have a GitHub .com account, so if you don't have one
 you will have to create one. Your proposed code changes will be published to
-your own fork of the Okta Golang SDK project and you will submit a Pull Request
+your own fork of the Okta MCP Server project and you will submit a Pull Request
 for your changes to be added.
 
 _Lets get started!!!_
@@ -23,7 +23,7 @@ Fork the code
 -------------
 
 In your browser, navigate to:
-[https://github.com/okta/okta-sdk-golang](https://github.com/okta/okta-sdk-golang)
+[https://github.com/okta/okta-mcp-server](https://github.com/okta/okta-mcp-server)
 
 Fork the repository by clicking on the 'Fork' button on the top right hand
 side.  The fork will happen and you will be taken to your own fork of the
@@ -32,12 +32,12 @@ the URL on the right hand side of the page under '**HTTPS** clone URL'.  You
 will paste this URL when doing the following `git clone` command.
 
 On your computer, follow these steps to setup a local repository for working on
-the Okta Golang SDK:
+the Okta MCP Server:
 
 ``` bash
-$ git clone https://github.com/YOUR_ACCOUNT/okta-sdk-golang.git
-$ cd okta-sdk-golang
-$ git remote add upstream https://github.com/okta/okta-sdk-golang.git
+$ git clone https://github.com/YOUR_ACCOUNT/okta-mcp-server.git
+$ cd okta-mcp-server
+$ git remote add upstream https://github.com/okta/okta-mcp-server.git
 $ git checkout master
 $ git fetch upstream
 $ git rebase upstream/master
@@ -52,7 +52,7 @@ not change the `master` branch (other than to rebase in changes from
 changes to a branch called `feature_x`.  This `feature_x` branch will be
 created on your local repository and will be pushed to your forked repository
 on GitHub.  Once this branch is on your fork you will create a Pull Request for
-the changes to be added to the Okta Golang SDK project.
+the changes to be added to the Okta MCP Server project.
 
 It is best practice to create a new branch each time you want to contribute to
 the project and only track the changes for that pull request in this branch.
@@ -63,7 +63,7 @@ $ git checkout -b feature_x
    (make your changes)
 $ git status
 $ git add <files>
-$ git commit -m "descriptive commit message for your changes"
+$ git commit -m "feat: add new feature description"
 ```
 
 > The `-b` specifies that you want to create a new branch called `feature_x`.
@@ -71,13 +71,45 @@ $ git commit -m "descriptive commit message for your changes"
 > new branch.  Once the `feature_x` branch exists, you can later switch to it
 > with only `git checkout feature_x`.
 
+### Commit Message Format
+
+Please follow the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) specification for your commit messages. This helps maintain a consistent commit history and enables automated changelog generation.
+
+The commit message should be structured as follows:
+
+```
+<type>[optional scope]: <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+**Types:**
+- `feat`: A new feature
+- `fix`: A bug fix
+- `docs`: Documentation only changes
+- `style`: Changes that do not affect the meaning of the code (white-space, formatting, missing semi-colons, etc)
+- `refactor`: A code change that neither fixes a bug nor adds a feature
+- `perf`: A code change that improves performance
+- `test`: Adding missing tests or correcting existing tests
+- `chore`: Changes to the build process or auxiliary tools and libraries
+
+**Examples:**
+```
+feat: add user authentication support
+fix: resolve issue with group deletion
+docs: update API documentation for policies
+test: add unit tests for application creation
+```
+
 
 Rebase `feature_x` to include updates from `upstream/master`
 ------------------------------------------------------------
 
 It is important that you maintain an up-to-date `master` branch in your local
 repository.  This is done by rebasing in the code changes from
-`upstream/master` (the official Okta Golang SDK project repository) into your
+`upstream/master` (the official Okta MCP Server project repository) into your
 local repository.  You will want to do this before you start working on a
 feature as well as right before you submit your changes as a pull request.  I
 recommend you do this process periodically while you work to make sure you are
@@ -125,7 +157,7 @@ can initiate the pull request.
 To initiate the pull request, do the following:
 
 1. In your browser, navigate to your forked repository:
-   [https://github.com/YOUR_ACCOUNT/okta-sdk-golang](https://github.com/YOUR_ACCOUNT/okta-sdk-golang)
+   [https://github.com/YOUR_ACCOUNT/okta-mcp-server](https://github.com/YOUR_ACCOUNT/okta-mcp-server)
 2. Click the new button called '**Compare & pull request**' that showed up just
    above the main area in your forked repository
 3. Validate the pull request will be into the upstream `master` and will be
@@ -157,3 +189,4 @@ $ git checkout master
 $ git branch -D feature_x
 $ git push origin :feature_x
 ```
+
