@@ -15,6 +15,9 @@ jobs:
       - run:
           name: Build
           command: uv pip install . 
+      - run:
+          name: Prepare Requirements
+          command: uv pip compile pyproject.toml -o requirements.txt
       - persist_to_workspace:
           root: .
           paths:
@@ -26,6 +29,12 @@ jobs:
       - attach_workspace: # Allows for sharing of build-workspace (containing downloaded dependencies) (optional)
           at: ~/project # This is the working directory for CCI containers, change if necessary
       - checkout
+      - run: |
+          uv pip compile pyproject.toml -o requirements.txt
+          pip install -r requirements.txt
+      - run:
+          name: Prepare Requirements
+          command: uv pip compile pyproject.toml -o requirements.txt
       - platform-helpers-general/step-run-snyk-monitor:
           scan-all-projects: true
           skip-unresolved: false
