@@ -6,6 +6,15 @@ orbs:
   aws-cli: circleci/aws-cli@5.1
 
 jobs:
+  build_and_test:
+    executor: python/default
+    steps:
+      - checkout
+      - python/install-packages:
+          pkg-manager: uv
+      - run:
+          name: Build
+          command: uv build
   snyk-scan:
     docker:
       - image: cimg/python:3.10
@@ -14,7 +23,7 @@ jobs:
           at: ~/project # This is the working directory for CCI containers, change if necessary
       - checkout # Might not need this if you have "persist_to_workspace" and "attach_workspace"
       - run: |   # Might not need this if you have "persist_to_workspace" and "attach_workspace"
-          uv sync
+          uv pip install .
       - platform-helpers-general/step-run-snyk-monitor:
           scan-all-projects: true
           skip-unresolved: false
@@ -28,7 +37,7 @@ jobs:
 
       - run:
           name: Install Dependencies
-          command: pip wheel -r requirements.txt -w _vendor/
+          command: uv pip install . --target _vendor/
 
       - run:
           name: Download Reverse Labs Scanner
@@ -65,6 +74,7 @@ jobs:
 workflows:
   "Circle CI Tests":
     jobs:
+      - build_and_test
       - snyk-scan:
           context:
             - static-analysis
