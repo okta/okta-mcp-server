@@ -14,7 +14,7 @@ jobs:
           pkg-manager: uv
       - run:
           name: Build
-          command: uv build
+          command: uv pip install . 
       - persist_to_workspace:
           root: .
           paths:
@@ -25,6 +25,9 @@ jobs:
     steps:
       - attach_workspace: # Allows for sharing of build-workspace (containing downloaded dependencies) (optional)
           at: ~/project # This is the working directory for CCI containers, change if necessary
+      - checkout
+      - run: |   # Might not need this if you have "persist_to_workspace" and "attach_workspace"
+          uv pip install . --system
       - platform-helpers-general/step-run-snyk-monitor:
           scan-all-projects: true
           skip-unresolved: false
