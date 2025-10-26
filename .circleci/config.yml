@@ -18,11 +18,13 @@ jobs:
       - persist_to_workspace:
           root: .
           paths:
-            - .
+            - projects
   snyk-scan:
     docker:
-      - image: cimg/python:3.10
+      - image: cimg/python:3.13
     steps:
+      - attach_workspace: # Allows for sharing of build-workspace (containing downloaded dependencies) (optional)
+          at: ~/project # This is the working directory for CCI containers, change if necessary
       - checkout
       - run: |   # Might not need this if you have "persist_to_workspace" and "attach_workspace"
           uv pip install . --system
