@@ -21,7 +21,7 @@ jobs:
             - .
   snyk-scan:
     docker:
-      - image: cimg/python:3.13
+      - image: cimg/python:3.10
     steps:
       - checkout
       - run: |   # Might not need this if you have "persist_to_workspace" and "attach_workspace"
