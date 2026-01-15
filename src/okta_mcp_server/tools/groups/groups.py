@@ -73,7 +73,7 @@ async def list_groups(
         query_params = build_query_params(search=search, filter=filter, q=q, after=after, limit=limit)
 
         logger.debug("Calling Okta API to list groups")
-        groups, response, err = await client.list_groups(query_params)
+        groups, response, err = await client.list_groups(**query_params)
 
         if err:
             logger.error(f"Okta API error while listing groups: {err}")
@@ -330,7 +330,7 @@ async def list_group_users(
         logger.debug(f"Calling Okta API to list users in group {group_id}")
 
         query_params = build_query_params(after=after, limit=limit)
-        users, response, err = await client.list_group_users(group_id, query_params)
+        users, response, err = await client.list_group_users(group_id, **query_params)
 
         if err:
             logger.error(f"Okta API error while listing group users for {group_id}: {err}")
