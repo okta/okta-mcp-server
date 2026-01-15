@@ -62,7 +62,7 @@ async def list_policies(
             params["after"] = after
 
         logger.debug("Calling Okta API to list policies")
-        policies, _, err = await okta_client.list_policies(**params)
+        policies, _, err = await okta_client.list_policies(params)
 
         if err:
             logger.error(f"Error listing policies: {err}")

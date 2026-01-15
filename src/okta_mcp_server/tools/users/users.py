@@ -80,7 +80,7 @@ async def list_users(
         query_params = build_query_params(search=search, filter=filter, q=q, after=after, limit=limit)
 
         logger.debug("Calling Okta API to list users")
-        users, response, err = await client.list_users(**query_params)
+        users, response, err = await client.list_users(query_params)
 
         if err:
             logger.error(f"Okta API error while listing users: {err}")
@@ -131,7 +131,7 @@ async def get_user_profile_attributes(ctx: Context = None) -> list:
         client = await get_okta_client(manager)
         logger.debug("Fetching first user to extract profile attributes")
 
-        users, _, err = await client.list_users(limit=1)
+        users, _, err = await client.list_users({"limit": 1})
 
         if err:
             logger.error(f"Okta API error while fetching profile attributes: {err}")
