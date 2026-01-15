@@ -55,11 +55,9 @@ async def list_policies(
 
     try:
         okta_client = await get_okta_client(manager)
-        params = {"type": type, "limit": limit}
+        params = {"type": type}
         if status:
             params["status"] = status
-        if q:
-            params["q"] = q
         if after:
             params["after"] = after
 
