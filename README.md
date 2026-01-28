@@ -43,8 +43,8 @@ This MCP server utilizes [Okta's Python SDK](https://github.com/okta/okta-sdk-py
 
 **Prerequisites:**
 
-- [Python 3.8+](https://python.org/downloads)
-- [uv](https://docs.astral.sh/uv/getting-started/installation/) package manager
+- [Python 3.8+](https://python.org/downloads) OR [Docker](https://docs.docker.com/get-docker/)
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) package manager (if not using Docker)
 - [Claude Desktop](https://claude.ai/download) or any other [MCP Client](https://modelcontextprotocol.io/clients)
 - [Okta](https://okta.com/) account with appropriate permissions
 
@@ -54,7 +54,155 @@ This MCP server utilizes [Okta's Python SDK](https://github.com/okta/okta-sdk-py
 
 Install Okta MCP Server and configure it to work with your preferred MCP Client.
 
-**Claude Desktop with all tools**
+Choose one of the following installation methods:
+
+<details open>
+<summary><b>🐳 Option 1: Docker (Recommended)</b></summary>
+
+Docker provides a consistent environment without needing to install Python or uv locally.
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/okta/okta-mcp-server.git
+   cd okta-mcp-server
+   ```
+
+2. Create a `.env` file from the example:
+   ```bash
+   cp .env.example .env
+   # Edit .env and add your Okta credentials
+   ```
+
+3. Build and run with Docker Compose:
+   ```bash
+   docker-compose up -d
+   ```
+
+4. Configure your MCP Client to use the Docker container:
+
+**Claude Desktop with Docker:**
+```json
+{
+  "mcpServers": {
+    "okta-mcp-server": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "-e",
+        "OKTA_ORG_URL=<OKTA_ORG_URL>",
+        "-e",
+        "OKTA_CLIENT_ID=<OKTA_CLIENT_ID>",
+        "-e",
+        "OKTA_SCOPES=<OKTA_SCOPES>",
+        "-e",
+        "OKTA_PRIVATE_KEY=<PRIVATE_KEY_IF_NEEDED>",
+        "-e",
+        "OKTA_KEY_ID=<KEY_ID_IF_NEEDED>",
+        "okta-mcp-server"
+      ]
+    }
+  }
+}
+```
+
+**VS Code with Docker:**
+```json
+{
+  "mcp": {
+    "inputs": [
+      {
+        "type": "promptString",
+        "description": "Okta Organization URL (e.g., https://dev-123456.okta.com)",
+        "id": "OKTA_ORG_URL"
+      },
+      {
+        "type": "promptString",
+        "description": "Okta Client ID",
+        "id": "OKTA_CLIENT_ID",
+        "password": true
+      },
+      {
+        "type": "promptString",
+        "description": "Okta Scopes (separated by whitespace)",
+        "id": "OKTA_SCOPES"
+      },
+      {
+        "type": "promptString",
+        "description": "Okta Private Key (optional, for browserless auth)",
+        "id": "OKTA_PRIVATE_KEY",
+        "password": true
+      },
+      {
+        "type": "promptString",
+        "description": "Okta Key ID (optional, for browserless auth)",
+        "id": "OKTA_KEY_ID",
+        "password": true
+      }
+    ],
+    "servers": {
+      "okta-mcp-server": {
+        "command": "docker",
+        "args": [
+          "run",
+          "-i",
+          "--rm",
+          "-e",
+          "OKTA_ORG_URL=${input:OKTA_ORG_URL}",
+          "-e",
+          "OKTA_CLIENT_ID=${input:OKTA_CLIENT_ID}",
+          "-e",
+          "OKTA_SCOPES=${input:OKTA_SCOPES}",
+          "-e",
+          "OKTA_PRIVATE_KEY=${input:OKTA_PRIVATE_KEY}",
+          "-e",
+          "OKTA_KEY_ID=${input:OKTA_KEY_ID}",
+          "okta-mcp-server"
+        ]
+      }
+    }
+  }
+}
+```
+
+**Alternatively, use docker-compose (requires .env file):**
+```json
+{
+  "mcp": {
+    "servers": {
+      "okta-mcp-server": {
+        "command": "docker-compose",
+        "args": [
+          "-f",
+          "/path/to/okta-mcp-server/docker-compose.yml",
+          "run",
+          "--rm",
+          "okta-mcp-server"
+        ]
+      }
+    }
+  }
+}
+```
+
+**Alternatively, build and run directly:**
+```bash
+# Build the image
+docker build -t okta-mcp-server .
+
+# Run the container
+docker run -i --rm \
+  -e OKTA_ORG_URL="<OKTA_ORG_URL>" \
+  -e OKTA_CLIENT_ID="<OKTA_CLIENT_ID>" \
+  -e OKTA_SCOPES="<OKTA_SCOPES>" \
+  okta-mcp-server
+```
+
+</details>
+
+<details>
+<summary><b>📦 Option 2: uv (Python Package Manager)</b></summary>
 
 1. Clone and install the server:
    ```bash
@@ -87,7 +235,12 @@ Install Okta MCP Server and configure it to work with your preferred MCP Client.
    }
    ```
 
-**VS Code**
+</details>
+
+### Configure with Different MCP Clients
+
+<details>
+<summary><b>VS Code</b></summary>
 
 Add the following to your VS Code `settings.json`:
 ```json
@@ -145,7 +298,10 @@ Add the following to your VS Code `settings.json`:
 }
 ```
 
-**Other MCP Clients**
+</details>
+
+<details>
+<summary><b>Other MCP Clients</b></summary>
 
 To use Okta MCP Server with any other MCP Client, you can manually add this configuration to the client and restart for changes to take effect:
 
@@ -171,6 +327,8 @@ To use Okta MCP Server with any other MCP Client, you can manually add this conf
   }
 }
 ```
+
+</details>
 
 ### Authenticate with Okta
 

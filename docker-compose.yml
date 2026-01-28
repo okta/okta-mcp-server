@@ -1,0 +1,34 @@
+version: "3.8"
+
+services:
+  okta-mcp-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: okta-mcp-server
+    environment:
+      # Required: Okta Organization URL
+      - OKTA_ORG_URL=${OKTA_ORG_URL}
+
+      # Required: OAuth Client ID
+      - OKTA_CLIENT_ID=${OKTA_CLIENT_ID}
+
+      # Required: API Scopes (space-separated)
+      - OKTA_SCOPES=${OKTA_SCOPES:-okta.users.read okta.groups.read}
+
+      # Optional: For Private Key JWT authentication (browserless)
+      - OKTA_PRIVATE_KEY=${OKTA_PRIVATE_KEY:-}
+      - OKTA_KEY_ID=${OKTA_KEY_ID:-}
+
+      # Optional: Logging configuration
+      - OKTA_LOG_LEVEL=${OKTA_LOG_LEVEL:-INFO}
+      - OKTA_LOG_FILE=${OKTA_LOG_FILE:-}
+
+    # Use stdin_open and tty for interactive sessions
+    stdin_open: true
+    tty: true
+
+    restart: "no"
+
+    volumes:
+      - ./logs:/app/logs
