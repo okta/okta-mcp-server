@@ -123,7 +123,7 @@ This method requires browser-based authentication. When the server starts, it wi
       "command": "docker",
       "args": [
         "run", "-i", "--rm",
-        "-v", "okta-keyring:/root/.local/share/python_keyring",
+        "-v", "okta-keyring:/home/appuser/.local/share/python_keyring",
         "-e", "OKTA_ORG_URL",
         "-e", "OKTA_CLIENT_ID",
         "-e", "OKTA_SCOPES",
@@ -140,7 +140,7 @@ This method requires browser-based authentication. When the server starts, it wi
 }
 ```
 
-The `-v okta-keyring:/root/.local/share/python_keyring` volume persists tokens between container restarts.
+The `-v okta-keyring:/home/appuser/.local/share/python_keyring` volume persists tokens between container restarts.
 
 **VS Code with Docker (Private Key JWT - Recommended for Docker):**
 
@@ -225,7 +225,7 @@ The `-v okta-keyring:/root/.local/share/python_keyring` volume persists tokens b
         "command": "docker",
         "args": [
           "run", "-i", "--rm",
-          "-v", "okta-keyring:/root/.local/share/python_keyring",
+          "-v", "okta-keyring:/home/appuser/.local/share/python_keyring",
           "-e", "OKTA_ORG_URL=${input:OKTA_ORG_URL}",
           "-e", "OKTA_CLIENT_ID=${input:OKTA_CLIENT_ID}",
           "-e", "OKTA_SCOPES=${input:OKTA_SCOPES}",
@@ -574,7 +574,7 @@ export OKTA_LOG_LEVEL=DEBUG
      ```bash
      -e PYTHON_KEYRING_BACKEND=keyrings.alt.file.PlaintextKeyring
      ```
-   - Use a volume to persist tokens: `-v okta-keyring:/root/.local/share/python_keyring`
+   - Use a volume to persist tokens: `-v okta-keyring:/home/appuser/.local/share/python_keyring`
    - Alternatively, use Private Key JWT authentication which doesn't require keyring storage
 
 5. **Docker: "Invalid code" when using Device Authorization**

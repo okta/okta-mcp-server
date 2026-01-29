@@ -1,5 +1,12 @@
 FROM python:3.13-slim
 
+LABEL Title="Okta MCP Server" \
+      Description="Model Context Protocol server for Okta API integration" \
+      Authors="Okta" \
+      Licenses="Apache-2.0" \
+      Version="1.0.0" \
+      Maintainer="Okta"
+
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
@@ -14,6 +21,11 @@ COPY src ./src
 COPY README.md ./
 
 RUN uv sync --no-dev
+
+# Create non-root user for security
+RUN useradd --create-home --shell /bin/bash appuser \
+    && chown -R appuser:appuser /app
+USER appuser
 
 # Set environment variables
 ENV PATH="/app/.venv/bin:$PATH"
