@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   okta-mcp-server:
     build:
@@ -31,4 +29,5 @@ services:
     # restart: "no"
 
     volumes:
+      - okta-keyring:/root/.local/share/python_keyring
       - ./logs:/app/logs
