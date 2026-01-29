@@ -18,6 +18,8 @@ RUN uv sync --no-dev
 # Set environment variables
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
+# Use file-based keyring backend for Docker (no system keyring available)
+ENV PYTHON_KEYRING_BACKEND=keyrings.alt.file.PlaintextKeyring
 
 # Run the server using the console script entry point
 ENTRYPOINT ["okta-mcp-server"]

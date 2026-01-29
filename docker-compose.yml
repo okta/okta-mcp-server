@@ -28,7 +28,7 @@ services:
     stdin_open: true
     tty: true
 
-    restart: "no"
+    # restart: "no"
 
     volumes:
       - ./logs:/app/logs

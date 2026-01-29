@@ -80,34 +80,70 @@ Docker provides a consistent environment without needing to install Python or uv
 
 4. Configure your MCP Client to use the Docker container:
 
-**Claude Desktop with Docker:**
+**Claude Desktop with Docker (Private Key JWT - Recommended for Docker):**
+
+This method requires no browser interaction and is ideal for containerized environments.
+
 ```json
 {
   "mcpServers": {
     "okta-mcp-server": {
       "command": "docker",
       "args": [
-        "run",
-        "-i",
-        "--rm",
-        "-e",
-        "OKTA_ORG_URL=<OKTA_ORG_URL>",
-        "-e",
-        "OKTA_CLIENT_ID=<OKTA_CLIENT_ID>",
-        "-e",
-        "OKTA_SCOPES=<OKTA_SCOPES>",
-        "-e",
-        "OKTA_PRIVATE_KEY=<PRIVATE_KEY_IF_NEEDED>",
-        "-e",
-        "OKTA_KEY_ID=<KEY_ID_IF_NEEDED>",
+        "run", "-i", "--rm",
+        "-e", "OKTA_ORG_URL",
+        "-e", "OKTA_CLIENT_ID",
+        "-e", "OKTA_SCOPES",
+        "-e", "OKTA_PRIVATE_KEY",
+        "-e", "OKTA_KEY_ID",
         "okta-mcp-server"
-      ]
+      ],
+      "env": {
+        "OKTA_ORG_URL": "https://your-org.okta.com",
+        "OKTA_CLIENT_ID": "your-client-id",
+        "OKTA_SCOPES": "okta.users.read okta.groups.read",
+        "OKTA_PRIVATE_KEY": "-----BEGIN RSA PRIVATE KEY-----\nYour private key content here\n-----END RSA PRIVATE KEY-----",
+        "OKTA_KEY_ID": "your-key-id"
+      }
     }
   }
 }
 ```
 
-**VS Code with Docker:**
+**Claude Desktop with Docker (Device Authorization Grant):**
+
+This method requires browser-based authentication. When the server starts, it will display an authentication URL in the logs. Copy and paste this URL into your browser to complete the authentication.
+
+> **Note:** Docker containers cannot open a browser on the host automatically. You must manually copy the URL from `docker logs okta-mcp-server` and paste it into your browser.
+
+```json
+{
+  "mcpServers": {
+    "okta-mcp-server": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-v", "okta-keyring:/root/.local/share/python_keyring",
+        "-e", "OKTA_ORG_URL",
+        "-e", "OKTA_CLIENT_ID",
+        "-e", "OKTA_SCOPES",
+        "-e", "PYTHON_KEYRING_BACKEND=keyrings.alt.file.PlaintextKeyring",
+        "okta-mcp-server"
+      ],
+      "env": {
+        "OKTA_ORG_URL": "https://your-org.okta.com",
+        "OKTA_CLIENT_ID": "your-client-id",
+        "OKTA_SCOPES": "okta.users.read okta.groups.read"
+      }
+    }
+  }
+}
+```
+
+The `-v okta-keyring:/root/.local/share/python_keyring` volume persists tokens between container restarts.
+
+**VS Code with Docker (Private Key JWT - Recommended for Docker):**
+
 ```json
 {
   "mcp": {
@@ -130,13 +166,13 @@ Docker provides a consistent environment without needing to install Python or uv
       },
       {
         "type": "promptString",
-        "description": "Okta Private Key (optional, for browserless auth)",
+        "description": "Okta Private Key (for browserless auth)",
         "id": "OKTA_PRIVATE_KEY",
         "password": true
       },
       {
         "type": "promptString",
-        "description": "Okta Key ID (optional, for browserless auth)",
+        "description": "Okta Key ID (for browserless auth)",
         "id": "OKTA_KEY_ID",
         "password": true
       }
@@ -145,19 +181,55 @@ Docker provides a consistent environment without needing to install Python or uv
       "okta-mcp-server": {
         "command": "docker",
         "args": [
-          "run",
-          "-i",
-          "--rm",
-          "-e",
-          "OKTA_ORG_URL=${input:OKTA_ORG_URL}",
-          "-e",
-          "OKTA_CLIENT_ID=${input:OKTA_CLIENT_ID}",
-          "-e",
-          "OKTA_SCOPES=${input:OKTA_SCOPES}",
-          "-e",
-          "OKTA_PRIVATE_KEY=${input:OKTA_PRIVATE_KEY}",
-          "-e",
-          "OKTA_KEY_ID=${input:OKTA_KEY_ID}",
+          "run", "-i", "--rm",
+          "-e", "OKTA_ORG_URL=${input:OKTA_ORG_URL}",
+          "-e", "OKTA_CLIENT_ID=${input:OKTA_CLIENT_ID}",
+          "-e", "OKTA_SCOPES=${input:OKTA_SCOPES}",
+          "-e", "OKTA_PRIVATE_KEY=${input:OKTA_PRIVATE_KEY}",
+          "-e", "OKTA_KEY_ID=${input:OKTA_KEY_ID}",
+          "okta-mcp-server"
+        ]
+      }
+    }
+  }
+}
+```
+
+**VS Code with Docker (Device Authorization Grant):**
+
+> **Note:** Device Authorization requires manual browser interaction. When the server starts, check the MCP output panel for the authentication URL, then copy and paste it into your browser.
+
+```json
+{
+  "mcp": {
+    "inputs": [
+      {
+        "type": "promptString",
+        "description": "Okta Organization URL (e.g., https://dev-123456.okta.com)",
+        "id": "OKTA_ORG_URL"
+      },
+      {
+        "type": "promptString",
+        "description": "Okta Client ID",
+        "id": "OKTA_CLIENT_ID",
+        "password": true
+      },
+      {
+        "type": "promptString",
+        "description": "Okta Scopes (separated by whitespace)",
+        "id": "OKTA_SCOPES"
+      }
+    ],
+    "servers": {
+      "okta-mcp-server": {
+        "command": "docker",
+        "args": [
+          "run", "-i", "--rm",
+          "-v", "okta-keyring:/root/.local/share/python_keyring",
+          "-e", "OKTA_ORG_URL=${input:OKTA_ORG_URL}",
+          "-e", "OKTA_CLIENT_ID=${input:OKTA_CLIENT_ID}",
+          "-e", "OKTA_SCOPES=${input:OKTA_SCOPES}",
+          "-e", "PYTHON_KEYRING_BACKEND=keyrings.alt.file.PlaintextKeyring",
           "okta-mcp-server"
         ]
       }
@@ -497,7 +569,21 @@ export OKTA_LOG_LEVEL=DEBUG
    - Ensure your application has appropriate admin roles assigned
    - Check the Okta System Log for detailed error information
 
-4. **"Claude's response was interrupted..." Error**
+4. **Docker: "No recommended backend was available" (Keyring Error)**
+   - Docker containers don't have a system keyring. Set the environment variable:
+     ```bash
+     -e PYTHON_KEYRING_BACKEND=keyrings.alt.file.PlaintextKeyring
+     ```
+   - Use a volume to persist tokens: `-v okta-keyring:/root/.local/share/python_keyring`
+   - Alternatively, use Private Key JWT authentication which doesn't require keyring storage
+
+5. **Docker: "Invalid code" when using Device Authorization**
+   - The MCP client may restart the server, generating a new device code
+   - Copy the URL immediately from the logs and complete authentication quickly
+   - Consider using Private Key JWT authentication for Docker environments
+   - Use a persistent volume to cache tokens and avoid repeated authentication
+
+6. **"Claude's response was interrupted..." Error**
    - This typically happens when Claude hits its context-length limit
    - Try to be more specific and keep queries concise
    - Break large requests into smaller, focused operations
