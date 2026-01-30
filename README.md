@@ -9,16 +9,6 @@
 
 [MCP (Model Context Protocol)](https://modelcontextprotocol.io/introduction) is an open protocol introduced by Anthropic that standardizes how large language models communicate with external tools, resources or remote services.
 
-> [!CAUTION]
-> **Beta Software Notice: This software is currently in beta and is provided AS IS without any warranties.**
->
-> - Features, APIs, and functionality may change at any time without notice
-> - Not recommended for production use or critical workloads
-> - Support during the beta period is limited
-> - Issues and feedback can be reported through the [GitHub issue tracker](https://github.com/okta/okta-mcp-server/issues)
->
-> By using this beta software, you acknowledge and accept these conditions.
-
 The Okta MCP Server integrates with LLMs and AI agents, allowing you to perform various Okta management operations using natural language. For instance, you could simply ask Claude Desktop to perform Okta management operations:
 
 - > Create a new user and add them to the Engineering group
@@ -43,8 +33,8 @@ This MCP server utilizes [Okta's Python SDK](https://github.com/okta/okta-sdk-py
 
 **Prerequisites:**
 
-- [Python 3.8+](https://python.org/downloads)
-- [uv](https://docs.astral.sh/uv/getting-started/installation/) package manager
+- [Python 3.8+](https://python.org/downloads) OR [Docker](https://docs.docker.com/get-docker/)
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) package manager (if not using Docker)
 - [Claude Desktop](https://claude.ai/download) or any other [MCP Client](https://modelcontextprotocol.io/clients)
 - [Okta](https://okta.com/) account with appropriate permissions
 
@@ -54,7 +44,227 @@ This MCP server utilizes [Okta's Python SDK](https://github.com/okta/okta-sdk-py
 
 Install Okta MCP Server and configure it to work with your preferred MCP Client.
 
-**Claude Desktop with all tools**
+Choose one of the following installation methods:
+
+<details open>
+<summary><b>🐳 Option 1: Docker (Recommended)</b></summary>
+
+Docker provides a consistent environment without needing to install Python or uv locally.
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/okta/okta-mcp-server.git
+   cd okta-mcp-server
+   ```
+
+2. Create a `.env` file from the example:
+   ```bash
+   cp .env.example .env
+   # Edit .env and add your Okta credentials
+   ```
+
+3. Build and run with Docker Compose:
+   ```bash
+   docker-compose up -d
+   ```
+
+4. Configure your MCP Client to use the Docker container:
+
+**Claude Desktop with Docker (Private Key JWT - Recommended for Docker):**
+
+This method requires no browser interaction and is ideal for containerized environments.
+
+```json
+{
+  "mcpServers": {
+    "okta-mcp-server": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "OKTA_ORG_URL",
+        "-e", "OKTA_CLIENT_ID",
+        "-e", "OKTA_SCOPES",
+        "-e", "OKTA_PRIVATE_KEY",
+        "-e", "OKTA_KEY_ID",
+        "okta-mcp-server"
+      ],
+      "env": {
+        "OKTA_ORG_URL": "https://your-org.okta.com",
+        "OKTA_CLIENT_ID": "your-client-id",
+        "OKTA_SCOPES": "okta.users.read okta.groups.read",
+        "OKTA_PRIVATE_KEY": "-----BEGIN RSA PRIVATE KEY-----\nYour private key content here\n-----END RSA PRIVATE KEY-----",
+        "OKTA_KEY_ID": "your-key-id"
+      }
+    }
+  }
+}
+```
+
+**Claude Desktop with Docker (Device Authorization Grant):**
+
+This method requires browser-based authentication. When the server starts, it will display an authentication URL in the logs. Copy and paste this URL into your browser to complete the authentication.
+
+> **Note:** Docker containers cannot open a browser on the host automatically. You must manually copy the URL from `docker logs okta-mcp-server` and paste it into your browser.
+
+```json
+{
+  "mcpServers": {
+    "okta-mcp-server": {
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-v", "okta-keyring:/home/appuser/.local/share/python_keyring",
+        "-e", "OKTA_ORG_URL",
+        "-e", "OKTA_CLIENT_ID",
+        "-e", "OKTA_SCOPES",
+        "-e", "PYTHON_KEYRING_BACKEND=keyrings.alt.file.PlaintextKeyring",
+        "okta-mcp-server"
+      ],
+      "env": {
+        "OKTA_ORG_URL": "https://your-org.okta.com",
+        "OKTA_CLIENT_ID": "your-client-id",
+        "OKTA_SCOPES": "okta.users.read okta.groups.read"
+      }
+    }
+  }
+}
+```
+
+The `-v okta-keyring:/home/appuser/.local/share/python_keyring` volume persists tokens between container restarts.
+
+**VS Code with Docker (Private Key JWT - Recommended for Docker):**
+
+```json
+{
+  "mcp": {
+    "inputs": [
+      {
+        "type": "promptString",
+        "description": "Okta Organization URL (e.g., https://dev-123456.okta.com)",
+        "id": "OKTA_ORG_URL"
+      },
+      {
+        "type": "promptString",
+        "description": "Okta Client ID",
+        "id": "OKTA_CLIENT_ID",
+        "password": true
+      },
+      {
+        "type": "promptString",
+        "description": "Okta Scopes (separated by whitespace)",
+        "id": "OKTA_SCOPES"
+      },
+      {
+        "type": "promptString",
+        "description": "Okta Private Key (for browserless auth)",
+        "id": "OKTA_PRIVATE_KEY",
+        "password": true
+      },
+      {
+        "type": "promptString",
+        "description": "Okta Key ID (for browserless auth)",
+        "id": "OKTA_KEY_ID",
+        "password": true
+      }
+    ],
+    "servers": {
+      "okta-mcp-server": {
+        "command": "docker",
+        "args": [
+          "run", "-i", "--rm",
+          "-e", "OKTA_ORG_URL=${input:OKTA_ORG_URL}",
+          "-e", "OKTA_CLIENT_ID=${input:OKTA_CLIENT_ID}",
+          "-e", "OKTA_SCOPES=${input:OKTA_SCOPES}",
+          "-e", "OKTA_PRIVATE_KEY=${input:OKTA_PRIVATE_KEY}",
+          "-e", "OKTA_KEY_ID=${input:OKTA_KEY_ID}",
+          "okta-mcp-server"
+        ]
+      }
+    }
+  }
+}
+```
+
+**VS Code with Docker (Device Authorization Grant):**
+
+> **Note:** Device Authorization requires manual browser interaction. When the server starts, check the MCP output panel for the authentication URL, then copy and paste it into your browser.
+
+```json
+{
+  "mcp": {
+    "inputs": [
+      {
+        "type": "promptString",
+        "description": "Okta Organization URL (e.g., https://dev-123456.okta.com)",
+        "id": "OKTA_ORG_URL"
+      },
+      {
+        "type": "promptString",
+        "description": "Okta Client ID",
+        "id": "OKTA_CLIENT_ID",
+        "password": true
+      },
+      {
+        "type": "promptString",
+        "description": "Okta Scopes (separated by whitespace)",
+        "id": "OKTA_SCOPES"
+      }
+    ],
+    "servers": {
+      "okta-mcp-server": {
+        "command": "docker",
+        "args": [
+          "run", "-i", "--rm",
+          "-v", "okta-keyring:/home/appuser/.local/share/python_keyring",
+          "-e", "OKTA_ORG_URL=${input:OKTA_ORG_URL}",
+          "-e", "OKTA_CLIENT_ID=${input:OKTA_CLIENT_ID}",
+          "-e", "OKTA_SCOPES=${input:OKTA_SCOPES}",
+          "-e", "PYTHON_KEYRING_BACKEND=keyrings.alt.file.PlaintextKeyring",
+          "okta-mcp-server"
+        ]
+      }
+    }
+  }
+}
+```
+
+**Alternatively, use docker-compose (requires .env file):**
+```json
+{
+  "mcp": {
+    "servers": {
+      "okta-mcp-server": {
+        "command": "docker-compose",
+        "args": [
+          "-f",
+          "/path/to/okta-mcp-server/docker-compose.yml",
+          "run",
+          "--rm",
+          "okta-mcp-server"
+        ]
+      }
+    }
+  }
+}
+```
+
+**Alternatively, build and run directly:**
+```bash
+# Build the image
+docker build -t okta-mcp-server .
+
+# Run the container
+docker run -i --rm \
+  -e OKTA_ORG_URL="<OKTA_ORG_URL>" \
+  -e OKTA_CLIENT_ID="<OKTA_CLIENT_ID>" \
+  -e OKTA_SCOPES="<OKTA_SCOPES>" \
+  okta-mcp-server
+```
+
+</details>
+
+<details>
+<summary><b>📦 Option 2: uv (Python Package Manager)</b></summary>
 
 1. Clone and install the server:
    ```bash
@@ -87,7 +297,12 @@ Install Okta MCP Server and configure it to work with your preferred MCP Client.
    }
    ```
 
-**VS Code**
+</details>
+
+### Configure with Different MCP Clients
+
+<details>
+<summary><b>VS Code</b></summary>
 
 Add the following to your VS Code `settings.json`:
 ```json
@@ -145,7 +360,10 @@ Add the following to your VS Code `settings.json`:
 }
 ```
 
-**Other MCP Clients**
+</details>
+
+<details>
+<summary><b>Other MCP Clients</b></summary>
 
 To use Okta MCP Server with any other MCP Client, you can manually add this configuration to the client and restart for changes to take effect:
 
@@ -171,6 +389,8 @@ To use Okta MCP Server with any other MCP Client, you can manually add this conf
   }
 }
 ```
+
+</details>
 
 ### Authenticate with Okta
 
@@ -339,7 +559,21 @@ export OKTA_LOG_LEVEL=DEBUG
    - Ensure your application has appropriate admin roles assigned
    - Check the Okta System Log for detailed error information
 
-4. **"Claude's response was interrupted..." Error**
+4. **Docker: "No recommended backend was available" (Keyring Error)**
+   - Docker containers don't have a system keyring. Set the environment variable:
+     ```bash
+     -e PYTHON_KEYRING_BACKEND=keyrings.alt.file.PlaintextKeyring
+     ```
+   - Use a volume to persist tokens: `-v okta-keyring:/home/appuser/.local/share/python_keyring`
+   - Alternatively, use Private Key JWT authentication which doesn't require keyring storage
+
+5. **Docker: "Invalid code" when using Device Authorization**
+   - The MCP client may restart the server, generating a new device code
+   - Copy the URL immediately from the logs and complete authentication quickly
+   - Consider using Private Key JWT authentication for Docker environments
+   - Use a persistent volume to cache tokens and avoid repeated authentication
+
+6. **"Claude's response was interrupted..." Error**
    - This typically happens when Claude hits its context-length limit
    - Try to be more specific and keep queries concise
    - Break large requests into smaller, focused operations

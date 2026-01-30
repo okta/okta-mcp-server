@@ -1,0 +1,57 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+
+# Virtual environments
+.venv
+venv/
+ENV/
+env/
+
+# IDEs
+.idea/
+.vscode/
+.cursorignore
+.cursorindexingignore
+
+# CI/CD
+.circleci/
+.github/
+
+# Documentation and misc
+*.md
+!README.md
+LICENSE
+NOTICE.md
+SECURITY.md
+CONTRIBUTING.md
+CHANGELOG.md
+assets/
+
+# Test files
+tests/
+
+# Build artifacts
+.ruff_cache/
+.bacon
+.bacon.yml
+
+# Other
+dependency_scan.sh
+.python-version
+.ruff.toml
