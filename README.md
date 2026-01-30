@@ -9,16 +9,6 @@
 
 [MCP (Model Context Protocol)](https://modelcontextprotocol.io/introduction) is an open protocol introduced by Anthropic that standardizes how large language models communicate with external tools, resources or remote services.
 
-> [!CAUTION]
-> **Beta Software Notice: This software is currently in beta and is provided AS IS without any warranties.**
->
-> - Features, APIs, and functionality may change at any time without notice
-> - Not recommended for production use or critical workloads
-> - Support during the beta period is limited
-> - Issues and feedback can be reported through the [GitHub issue tracker](https://github.com/okta/okta-mcp-server/issues)
->
-> By using this beta software, you acknowledge and accept these conditions.
-
 The Okta MCP Server integrates with LLMs and AI agents, allowing you to perform various Okta management operations using natural language. For instance, you could simply ask Claude Desktop to perform Okta management operations:
 
 - > Create a new user and add them to the Engineering group
