@@ -430,7 +430,7 @@ The server supports two authentication methods. Choose the one that best fits yo
      2. Click **Add key** and paste the contents of your **public key** (`public.pem`) into the dialog.
      3. Copy the **Key ID (KID)** displayed for the key you added.
 4. **Grant API Scopes:** Go to the **Okta API Scopes** tab and **Grant** permissions for the APIs you need.
-5. **Assign Admin Roles:** To avoid `403 Forbidden` errors, go to the **Admin roles** tab and assign the **Super Administrator** role to this application.
+5. **Assign Admin Roles:** Go to the **Admin roles** tab and assign the appropriate admin role to this application.
 
 ### Verify your integration
 
