@@ -170,11 +170,11 @@ def build_query_params(
     if after:
         query_params["after"] = after
     if limit:
-        query_params["limit"] = str(limit)
+        query_params["limit"] = limit
 
     # Add any additional parameters
     for key, value in kwargs.items():
         if value is not None and value != "":
-            query_params[key] = str(value)
+            query_params[key] = value
 
     return query_params
