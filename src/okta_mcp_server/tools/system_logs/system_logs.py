@@ -13,6 +13,7 @@ from mcp.server.fastmcp import Context
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, paginate_all_results
+from okta_mcp_server.utils.serialization import serialize
 
 
 @mcp.tool()
@@ -92,17 +93,22 @@ async def get_logs(
             logger.debug(f"First log entry timestamp: {logs[0].published if hasattr(logs[0], 'published') else 'N/A'}")
             logger.debug(f"Log types found: {set(log.eventType for log in logs[:10] if hasattr(log, 'eventType'))}")
 
+        log_items = [serialize(log) for log in logs]
+
         if fetch_all and response and hasattr(response, "has_next") and response.has_next():
             logger.info(f"fetch_all=True, auto-paginating from initial {log_count} log entries")
             all_logs, pagination_info = await paginate_all_results(response, logs)
+            all_log_items = [serialize(log) for log in all_logs]
 
             logger.info(
-                f"Successfully retrieved {len(all_logs)} log entries across {pagination_info['pages_fetched']} pages"
+                f"Successfully retrieved {len(all_log_items)} log entries across {pagination_info['pages_fetched']} pages"
             )
-            return create_paginated_response(all_logs, response, fetch_all_used=True, pagination_info=pagination_info)
+            return create_paginated_response(
+                all_log_items, response, fetch_all_used=True, pagination_info=pagination_info
+            )
         else:
             logger.info(f"Successfully retrieved {log_count} system log entries")
-            return create_paginated_response(logs, response, fetch_all_used=fetch_all)
+            return create_paginated_response(log_items, response, fetch_all_used=fetch_all)
 
     except Exception as e:
         logger.error(f"Exception while retrieving system logs: {type(e).__name__}: {e}")

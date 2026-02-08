@@ -13,6 +13,7 @@ from mcp.server.fastmcp import Context
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, paginate_all_results
+from okta_mcp_server.utils.serialization import serialize
 
 
 @mcp.tool()
@@ -129,10 +130,10 @@ async def get_group(group_id: str, ctx: Context = None) -> list:
             return {"error": f"Error: {err}"}
 
         logger.info(f"Successfully retrieved group: {group_id}")
-        return [group]
+        return serialize(group)
     except Exception as e:
         logger.error(f"Exception while getting group {group_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return {"error": f"Exception: {e}"}
 
 
 @mcp.tool()
@@ -166,10 +167,10 @@ async def create_group(profile: dict, ctx: Context = None) -> list:
         logger.info(
             f"Successfully created group: {group.id} ({group.profile.name if hasattr(group, 'profile') else 'N/A'})"
         )
-        return [group]
+        return serialize(group)
     except Exception as e:
         logger.error(f"Exception while creating group: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return {"error": f"Exception: {e}"}
 
 
 @mcp.tool()
@@ -272,10 +273,10 @@ async def update_group(group_id: str, profile: dict, ctx: Context = None) -> lis
             return {"error": f"Error: {err}"}
 
         logger.info(f"Successfully updated group: {group_id}")
-        return [group]
+        return serialize(group)
     except Exception as e:
         logger.error(f"Exception while updating group {group_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return {"error": f"Exception: {e}"}
 
 
 @mcp.tool()
@@ -387,10 +388,10 @@ async def list_group_apps(group_id: str, ctx: Context = None) -> list:
         app_count = len(apps) if apps else 0
         logger.info(f"Successfully retrieved {app_count} applications for group {group_id}")
 
-        return [app for app in apps]
+        return [serialize(app) for app in apps]
     except Exception as e:
         logger.error(f"Exception while listing applications for group {group_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return {"error": f"Exception: {e}"}
 
 
 @mcp.tool()
