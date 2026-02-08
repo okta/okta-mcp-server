@@ -9,9 +9,16 @@ dependencies = [
     "mcp[cli]>=1.9.2",
     "okta>=2.9.13",
     "requests>=2.32.4",
-    "ruff>=0.11.13",
     "keyring>=25.6.0",
-    "keyrings.alt>=5.0.0"
+    "keyrings.alt>=5.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.11.13",
 ]
 
 [build-system]
@@ -23,3 +30,14 @@ packages = ["src/okta_mcp_server"]
 
 [project.scripts]
 okta-mcp-server = "okta_mcp_server:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["okta_mcp_server"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
