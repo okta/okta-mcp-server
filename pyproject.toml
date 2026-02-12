@@ -22,5 +22,11 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/okta_mcp_server"]
 
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+]
+
 [project.scripts]
 okta-mcp-server = "okta_mcp_server:main"

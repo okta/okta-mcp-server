@@ -12,6 +12,7 @@ from mcp.server.fastmcp import Context
 
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
+from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, paginate_all_results
 
 
@@ -257,15 +258,27 @@ async def deactivate_user(user_id: str, ctx: Context = None) -> list:
     """Deactivates a user from the Okta organization.
 
     This tool deactivates a user from the Okta organization by their ID.
+    The user will be asked for confirmation before the deactivation proceeds.
     Deactivating the user is a prerequisite for deleting the user.
 
     Parameters:
-        user_id (str, required): The ID of the user to delete.
+        user_id (str, required): The ID of the user to deactivate.
 
     Returns:
         List containing the result of the deactivation operation.
     """
-    logger.info(f"Deactivating user with ID: {user_id}")
+    logger.info(f"Deactivation requested for user: {user_id}")
+
+    outcome = await elicit_or_fallback(
+        ctx,
+        message=f"Are you sure you want to deactivate user {user_id}? The user will lose access to all applications.",
+        schema=DeactivateConfirmation,
+        auto_confirm_on_fallback=True,
+    )
+
+    if not outcome.confirmed:
+        logger.info(f"User deactivation cancelled for {user_id}")
+        return [{"message": "User deactivation cancelled by user."}]
 
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
@@ -290,7 +303,8 @@ async def deactivate_user(user_id: str, ctx: Context = None) -> list:
 async def delete_deactivated_user(user_id: str, ctx: Context = None) -> list:
     """Delete a user from the Okta organization who has already been deactivated or deprovisioned.
 
-    This tool deletes a user from the Okta organization by their ID who has already been deactivated or deprovisioned.
+    This tool permanently deletes a deactivated/deprovisioned user. The user will be
+    asked for confirmation before the deletion proceeds.
 
     Parameters:
         user_id (str, required): The ID of the deactivated or deprovisioned user to delete.
@@ -298,7 +312,18 @@ async def delete_deactivated_user(user_id: str, ctx: Context = None) -> list:
     Returns:
         List containing the result of the deletion operation.
     """
-    logger.info(f"Deleting deactivated user with ID: {user_id}")
+    logger.info(f"Deletion requested for deactivated user: {user_id}")
+
+    outcome = await elicit_or_fallback(
+        ctx,
+        message=f"Are you sure you want to permanently delete user {user_id}? This action cannot be undone.",
+        schema=DeleteConfirmation,
+        auto_confirm_on_fallback=True,
+    )
+
+    if not outcome.confirmed:
+        logger.info(f"User deletion cancelled for {user_id}")
+        return [{"message": "User deletion cancelled by user."}]
 
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 

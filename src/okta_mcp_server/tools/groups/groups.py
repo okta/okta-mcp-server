@@ -12,6 +12,7 @@ from mcp.server.fastmcp import Context
 
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
+from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, paginate_all_results
 
 
@@ -173,38 +174,73 @@ async def create_group(profile: dict, ctx: Context = None) -> list:
 
 
 @mcp.tool()
-def delete_group(group_id: str, ctx: Context = None) -> list:
+async def delete_group(group_id: str, ctx: Context = None) -> list:
     """Delete a group by ID from the Okta organization.
 
-    This tool deletes a group by its ID from the Okta organization, but requires confirmation. Wait for the
-    user to confirm the deletion before proceeding.
-
-    IMPORTANT: After calling this function, you MUST STOP and wait for the human user to type 'DELETE'
-    as confirmation. DO NOT automatically call confirm_delete_group afterward.
+    This tool deletes a group by its ID from the Okta organization.
+    The user will be asked for confirmation before the deletion proceeds.
 
     Parameters:
         group_id (str, required): The ID of the group to delete.
 
     Returns:
-        List containing the result of the deletion operation or a confirmation request.
+        List containing the result of the deletion operation.
     """
-    logger.warning(f"Deletion requested for group {group_id}, awaiting confirmation")
+    logger.warning(f"Deletion requested for group {group_id}")
 
-    # Step 1: First prompt - this is handled by the parameter request
+    fallback_payload = {
+        "confirmation_required": True,
+        "message": (
+            f"To confirm deletion of group {group_id}, please call the "
+            f"'confirm_delete_group' tool with group_id='{group_id}' and "
+            f"confirmation='DELETE'."
+        ),
+        "group_id": group_id,
+        "tool_to_use": "confirm_delete_group",
+    }
 
-    # Step 2: Ask for confirmation
-    return [
-        {
-            "confirmation_required": True,
-            "message": f"To confirm deletion of group {group_id}, please type 'DELETE'",
-            "group_id": group_id,
-        }
-    ]
+    outcome = await elicit_or_fallback(
+        ctx,
+        message=f"Are you sure you want to delete group {group_id}? This action cannot be undone.",
+        schema=DeleteConfirmation,
+        fallback_payload=fallback_payload,
+    )
+
+    if not outcome.used_elicitation:
+        logger.info(f"Elicitation unavailable for group {group_id} — returning fallback confirmation prompt")
+        return [outcome.fallback_response]
+
+    if not outcome.confirmed:
+        logger.info(f"Group deletion cancelled for {group_id}")
+        return [{"message": "Group deletion cancelled by user."}]
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        logger.debug(f"Calling Okta API to delete group {group_id}")
+
+        _, err = await client.delete_group(group_id)
+
+        if err:
+            logger.error(f"Okta API error while deleting group {group_id}: {err}")
+            return [{"error": f"Error: {err}"}]
+
+        logger.info(f"Successfully deleted group: {group_id}")
+        return [{"message": f"Group {group_id} deleted successfully"}]
+    except Exception as e:
+        logger.error(f"Exception while deleting group {group_id}: {type(e).__name__}: {e}")
+        return [{"error": f"Exception: {e}"}]
 
 
 @mcp.tool()
 async def confirm_delete_group(group_id: str, confirmation: str, ctx: Context = None) -> list:
     """Confirm and execute group deletion after receiving confirmation.
+
+    .. deprecated::
+        This tool exists for backward compatibility with clients that do not
+        support MCP elicitation.  New clients should rely on the built-in
+        elicitation prompt in ``delete_group`` instead.
 
     This function MUST ONLY be called after the human user has explicitly typed 'DELETE' as confirmation.
     NEVER call this function automatically after delete_group.
@@ -216,9 +252,8 @@ async def confirm_delete_group(group_id: str, confirmation: str, ctx: Context = 
     Returns:
         List containing the result of the deletion operation.
     """
-    logger.info(f"Processing deletion confirmation for group {group_id}")
+    logger.info(f"Processing deletion confirmation for group {group_id} (deprecated flow)")
 
-    # Step 3: Check confirmation and delete if correct
     if confirmation != "DELETE":
         logger.warning(f"Group deletion cancelled for {group_id} - incorrect confirmation")
         return [{"error": "Deletion cancelled. Confirmation 'DELETE' was not provided correctly."}]
