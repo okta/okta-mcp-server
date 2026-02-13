@@ -12,6 +12,7 @@ from mcp.server.fastmcp import Context
 
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
+from okta_mcp_server.utils.validation import InvalidOktaIdError, validate_okta_id
 
 
 @mcp.tool()
@@ -101,6 +102,12 @@ async def get_application(ctx: Context, app_id: str, expand: Optional[str] = Non
     """
     logger.info(f"Getting application with ID: {app_id}")
 
+    try:
+        validate_okta_id(app_id, "app_id")
+    except InvalidOktaIdError as e:
+        logger.error(f"Invalid app_id: {e}")
+        return {"error": str(e)}
+
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
     try:
@@ -171,6 +178,12 @@ async def update_application(ctx: Context, app_id: str, app_config: Dict[str, An
     """
     logger.info(f"Updating application with ID: {app_id}")
 
+    try:
+        validate_okta_id(app_id, "app_id")
+    except InvalidOktaIdError as e:
+        logger.error(f"Invalid app_id: {e}")
+        return {"error": str(e)}
+
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
     try:
@@ -232,6 +245,12 @@ async def confirm_delete_application(ctx: Context, app_id: str, confirmation: st
     """
     logger.info(f"Processing deletion confirmation for application {app_id}")
 
+    try:
+        validate_okta_id(app_id, "app_id")
+    except InvalidOktaIdError as e:
+        logger.error(f"Invalid app_id: {e}")
+        return [f"Error: {e}"]
+
     if confirmation != "DELETE":
         logger.warning(f"Application deletion cancelled for {app_id} - incorrect confirmation")
         return ["Error: Deletion cancelled. Confirmation 'DELETE' was not provided correctly."]
@@ -267,6 +286,12 @@ async def activate_application(ctx: Context, app_id: str) -> list:
     """
     logger.info(f"Activating application: {app_id}")
 
+    try:
+        validate_okta_id(app_id, "app_id")
+    except InvalidOktaIdError as e:
+        logger.error(f"Invalid app_id: {e}")
+        return [f"Error: {e}"]
+
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
     try:
@@ -297,6 +322,12 @@ async def deactivate_application(ctx: Context, app_id: str) -> list:
         List containing the result of the deactivation operation.
     """
     logger.info(f"Deactivating application: {app_id}")
+
+    try:
+        validate_okta_id(app_id, "app_id")
+    except InvalidOktaIdError as e:
+        logger.error(f"Invalid app_id: {e}")
+        return [f"Error: {e}"]
 
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
