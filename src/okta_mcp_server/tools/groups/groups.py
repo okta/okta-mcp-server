@@ -13,6 +13,7 @@ from mcp.server.fastmcp import Context
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, paginate_all_results
+from okta_mcp_server.utils.validation import InvalidOktaIdError, validate_okta_id
 
 
 @mcp.tool()
@@ -116,6 +117,12 @@ async def get_group(group_id: str, ctx: Context = None) -> list:
     """
     logger.info(f"Getting group with ID: {group_id}")
 
+    try:
+        validate_okta_id(group_id, "group_id")
+    except InvalidOktaIdError as e:
+        logger.error(f"Invalid group_id: {e}")
+        return {"error": f"Error: {e}"}
+
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
     try:
@@ -218,6 +225,12 @@ async def confirm_delete_group(group_id: str, confirmation: str, ctx: Context = 
     """
     logger.info(f"Processing deletion confirmation for group {group_id}")
 
+    try:
+        validate_okta_id(group_id, "group_id")
+    except InvalidOktaIdError as e:
+        logger.error(f"Invalid group_id: {e}")
+        return [{"error": f"Error: {e}"}]
+
     # Step 3: Check confirmation and delete if correct
     if confirmation != "DELETE":
         logger.warning(f"Group deletion cancelled for {group_id} - incorrect confirmation")
@@ -257,6 +270,12 @@ async def update_group(group_id: str, profile: dict, ctx: Context = None) -> lis
     """
     logger.info(f"Updating group with ID: {group_id}")
     logger.debug(f"Updated fields: {list(profile.keys())}")
+
+    try:
+        validate_okta_id(group_id, "group_id")
+    except InvalidOktaIdError as e:
+        logger.error(f"Invalid group_id: {e}")
+        return {"error": f"Error: {e}"}
 
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
@@ -313,6 +332,12 @@ async def list_group_users(
     """
     logger.info(f"Listing users in group: {group_id}")
     logger.debug(f"fetch_all: {fetch_all}, after: '{after}', limit: {limit}")
+
+    try:
+        validate_okta_id(group_id, "group_id")
+    except InvalidOktaIdError as e:
+        logger.error(f"Invalid group_id: {e}")
+        return {"error": f"Error: {e}"}
 
     # Validate limit parameter range
     if limit is not None:
@@ -372,6 +397,12 @@ async def list_group_apps(group_id: str, ctx: Context = None) -> list:
     """
     logger.info(f"Listing applications assigned to group: {group_id}")
 
+    try:
+        validate_okta_id(group_id, "group_id")
+    except InvalidOktaIdError as e:
+        logger.error(f"Invalid group_id: {e}")
+        return {"error": f"Error: {e}"}
+
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
     try:
@@ -408,6 +439,13 @@ async def add_user_to_group(group_id: str, user_id: str, ctx: Context = None) ->
     """
     logger.info(f"Adding user {user_id} to group {group_id}")
 
+    try:
+        validate_okta_id(group_id, "group_id")
+        validate_okta_id(user_id, "user_id")
+    except InvalidOktaIdError as e:
+        logger.error(f"Invalid ID: {e}")
+        return {"error": f"Error: {e}"}
+
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
     try:
@@ -441,6 +479,13 @@ async def remove_user_from_group(group_id: str, user_id: str, ctx: Context = Non
         List containing the result of the removal operation.
     """
     logger.info(f"Removing user {user_id} from group {group_id}")
+
+    try:
+        validate_okta_id(group_id, "group_id")
+        validate_okta_id(user_id, "user_id")
+    except InvalidOktaIdError as e:
+        logger.error(f"Invalid ID: {e}")
+        return {"error": f"Error: {e}"}
 
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
