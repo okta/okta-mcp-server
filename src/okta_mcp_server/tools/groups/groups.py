@@ -13,6 +13,7 @@ from mcp.server.fastmcp import Context
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fallback
+from okta_mcp_server.utils.messages import DELETE_GROUP
 from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, paginate_all_results
 
 
@@ -201,7 +202,7 @@ async def delete_group(group_id: str, ctx: Context = None) -> list:
 
     outcome = await elicit_or_fallback(
         ctx,
-        message=f"Are you sure you want to delete group {group_id}? This action cannot be undone.",
+        message=DELETE_GROUP.format(group_id=group_id),
         schema=DeleteConfirmation,
         fallback_payload=fallback_payload,
     )
