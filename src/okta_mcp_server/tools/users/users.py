@@ -13,6 +13,7 @@ from mcp.server.fastmcp import Context
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConfirmation, elicit_or_fallback
+from okta_mcp_server.utils.messages import DEACTIVATE_USER, DELETE_USER
 from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, paginate_all_results
 
 
@@ -271,7 +272,7 @@ async def deactivate_user(user_id: str, ctx: Context = None) -> list:
 
     outcome = await elicit_or_fallback(
         ctx,
-        message=f"Are you sure you want to deactivate user {user_id}? The user will lose access to all applications.",
+        message=DEACTIVATE_USER.format(user_id=user_id),
         schema=DeactivateConfirmation,
         auto_confirm_on_fallback=True,
     )
@@ -316,7 +317,7 @@ async def delete_deactivated_user(user_id: str, ctx: Context = None) -> list:
 
     outcome = await elicit_or_fallback(
         ctx,
-        message=f"Are you sure you want to permanently delete user {user_id}? This action cannot be undone.",
+        message=DELETE_USER.format(user_id=user_id),
         schema=DeleteConfirmation,
         auto_confirm_on_fallback=True,
     )

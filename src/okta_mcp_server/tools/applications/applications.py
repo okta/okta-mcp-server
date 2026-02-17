@@ -12,7 +12,8 @@ from mcp.server.fastmcp import Context
 
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
-from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fallback
+from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConfirmation, elicit_or_fallback
+from okta_mcp_server.utils.messages import DEACTIVATE_APPLICATION, DELETE_APPLICATION
 
 
 @mcp.tool()
@@ -219,7 +220,7 @@ async def delete_application(ctx: Context, app_id: str) -> list:
 
     outcome = await elicit_or_fallback(
         ctx,
-        message=f"Are you sure you want to delete application {app_id}? This action cannot be undone.",
+        message=DELETE_APPLICATION.format(app_id=app_id),
         schema=DeleteConfirmation,
         fallback_payload=fallback_payload,
     )
@@ -336,7 +337,18 @@ async def deactivate_application(ctx: Context, app_id: str) -> list:
     Returns:
         List containing the result of the deactivation operation.
     """
-    logger.info(f"Deactivating application: {app_id}")
+    logger.info(f"Deactivation requested for application: {app_id}")
+
+    outcome = await elicit_or_fallback(
+        ctx,
+        message=DEACTIVATE_APPLICATION.format(app_id=app_id),
+        schema=DeactivateConfirmation,
+        auto_confirm_on_fallback=True,
+    )
+
+    if not outcome.confirmed:
+        logger.info(f"Application deactivation cancelled for {app_id}")
+        return [{"message": "Application deactivation cancelled by user."}]
 
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 

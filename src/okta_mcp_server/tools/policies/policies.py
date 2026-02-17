@@ -12,7 +12,13 @@ from mcp.server.fastmcp import Context
 
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
-from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fallback
+from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConfirmation, elicit_or_fallback
+from okta_mcp_server.utils.messages import (
+    DEACTIVATE_POLICY,
+    DEACTIVATE_POLICY_RULE,
+    DELETE_POLICY,
+    DELETE_POLICY_RULE,
+)
 
 
 @mcp.tool()
@@ -191,7 +197,7 @@ async def delete_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
 
     outcome = await elicit_or_fallback(
         ctx,
-        message=f"Are you sure you want to delete policy {policy_id}? This action cannot be undone.",
+        message=DELETE_POLICY.format(policy_id=policy_id),
         schema=DeleteConfirmation,
         auto_confirm_on_fallback=True,
     )
@@ -248,16 +254,31 @@ async def activate_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
 async def deactivate_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
     """Deactivate a policy.
 
+    The user will be asked for confirmation before the deactivation proceeds.
+
     Parameters:
         policy_id (str, required): The ID of the policy to deactivate.
 
     Returns:
         Dict with success status.
     """
+    logger.info(f"Deactivation requested for policy {policy_id}")
+
+    outcome = await elicit_or_fallback(
+        ctx,
+        message=DEACTIVATE_POLICY.format(policy_id=policy_id),
+        schema=DeactivateConfirmation,
+        auto_confirm_on_fallback=True,
+    )
+
+    if not outcome.confirmed:
+        logger.info(f"Policy deactivation cancelled for {policy_id}")
+        return {"message": "Policy deactivation cancelled by user."}
+
     manager = ctx.request_context.lifespan_context.okta_auth_manager
-    okta_client = await get_okta_client(manager)
 
     try:
+        okta_client = await get_okta_client(manager)
         _, err = await okta_client.deactivate_policy(policy_id)
 
         if err:
@@ -419,7 +440,7 @@ async def delete_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Dict
 
     outcome = await elicit_or_fallback(
         ctx,
-        message=f"Are you sure you want to delete rule {rule_id} from policy {policy_id}? This action cannot be undone.",
+        message=DELETE_POLICY_RULE.format(rule_id=rule_id, policy_id=policy_id),
         schema=DeleteConfirmation,
         auto_confirm_on_fallback=True,
     )
@@ -484,10 +505,23 @@ async def deactivate_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> 
     Returns:
         Dict with success status.
     """
+    logger.info(f"Deactivation requested for policy rule {rule_id} in policy {policy_id}")
+
+    outcome = await elicit_or_fallback(
+        ctx,
+        message=DEACTIVATE_POLICY_RULE.format(rule_id=rule_id, policy_id=policy_id),
+        schema=DeactivateConfirmation,
+        auto_confirm_on_fallback=True,
+    )
+
+    if not outcome.confirmed:
+        logger.info(f"Policy rule deactivation cancelled for {rule_id}")
+        return {"message": "Policy rule deactivation cancelled by user."}
+
     manager = ctx.request_context.lifespan_context.okta_auth_manager
-    okta_client = await get_okta_client(manager)
 
     try:
+        okta_client = await get_okta_client(manager)
         _, err = await okta_client.deactivate_policy_rule(policy_id, rule_id)
 
         if err:
