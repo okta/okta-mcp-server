@@ -208,9 +208,12 @@ wheels = [
 
 [[package]]
 name = "flatdict"
-version = "4.0.1"
+version = "4.1.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/3e/0d/424de6e5612f1399ff69bf86500d6a62ff0a4843979701ae97f120c7f1fe/flatdict-4.0.1.tar.gz", hash = "sha256:cd32f08fd31ed21eb09ebc76f06b6bd12046a24f77beb1fd0281917e47f26742", size = 8341, upload-time = "2020-02-13T19:16:14.3Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1f/ba/e0461697020839f60741e493fc42b20a4cd3f91594ed3228f65ae9a50aee/flatdict-4.1.0.tar.gz", hash = "sha256:63bcd906a0859d91d0aace44b327178706c7fcf85a88c7ccf0825628376ad66b", size = 33930, upload-time = "2026-02-15T19:00:27.175Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/12/b5/6b6c496304047982b67d984ed2f77c183f73d69f7dbbc0cd2928252cc6b4/flatdict-4.1.0-py3-none-any.whl", hash = "sha256:24c3ff816733e472f91071031bd286c3826ecf2d646d5020af49fe10b20a5677", size = 7248, upload-time = "2026-02-15T19:00:26.131Z" },
+]
 
 [[package]]
 name = "frozenlist"
@@ -533,6 +536,7 @@ name = "okta-mcp-server"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "flatdict" },
     { name = "keyring" },
     { name = "keyrings-alt" },
     { name = "loguru" },
@@ -545,6 +549,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "flatdict", specifier = ">=4.1.0" },
     { name = "keyring", specifier = ">=25.6.0" },
     { name = "keyrings-alt", specifier = ">=5.0.0" },
     { name = "loguru", specifier = ">=0.7.3" },
