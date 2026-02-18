@@ -1,5 +1,5 @@
 # The Okta software accompanied by this notice is provided pursuant to the following terms:
-# Copyright © 2025-Present, Okta, Inc.
+# Copyright © 2026-Present, Okta, Inc.
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0.
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -18,7 +18,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
+from mcp.server.elicitation import AcceptedElicitation, CancelledElicitation, DeclinedElicitation
 from mcp.server.fastmcp import Context
+from mcp.shared.exceptions import McpError
+from mcp.types import METHOD_NOT_FOUND
 from pydantic import BaseModel, Field
 
 
@@ -146,17 +149,36 @@ async def elicit_or_fallback(
     try:
         result = await ctx.elicit(message=message, schema=schema)
 
-        if result.action == "accept" and result.data:
+        if isinstance(result, AcceptedElicitation) and result.data:
             confirmed = getattr(result.data, "confirm", False)
             logger.info(f"Elicitation accepted — confirm={confirmed}")
             return ElicitationOutcome(confirmed=confirmed, used_elicitation=True)
-        elif result.action == "decline":
+        elif isinstance(result, DeclinedElicitation):
             logger.info("Elicitation declined by user")
             return ElicitationOutcome(confirmed=False, used_elicitation=True)
+        elif isinstance(result, CancelledElicitation):
+            logger.info("Elicitation cancelled by user")
+            return ElicitationOutcome(confirmed=False, used_elicitation=True)
         else:
-            logger.info(f"Elicitation cancelled (action={result.action})")
+            logger.warning(f"Elicitation returned unexpected result: {result}")
             return ElicitationOutcome(confirmed=False, used_elicitation=True)
 
+    except McpError as exc:
+        if exc.error.code == METHOD_NOT_FOUND:
+            logger.info("Elicitation not supported by client (METHOD_NOT_FOUND)")
+        else:
+            logger.warning(f"MCP error during elicitation: {exc}")
+        if auto_confirm_on_fallback:
+            logger.info("Auto-confirming after MCP error (pre-elicitation behaviour)")
+            return ElicitationOutcome(confirmed=True, used_elicitation=False)
+        return ElicitationOutcome(
+            confirmed=False,
+            used_elicitation=False,
+            fallback_response=fallback_payload or {
+                "confirmation_required": True,
+                "message": message,
+            },
+        )
     except Exception as exc:
         logger.warning(f"Elicitation failed ({type(exc).__name__}: {exc}) — using fallback")
         if auto_confirm_on_fallback:

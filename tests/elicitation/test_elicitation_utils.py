@@ -1,5 +1,5 @@
 # The Okta software accompanied by this notice is provided pursuant to the following terms:
-# Copyright © 2025-Present, Okta, Inc.
+# Copyright © 2026-Present, Okta, Inc.
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0.
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -191,3 +191,48 @@ class TestElicitOrFallback:
         assert outcome.used_elicitation is False
         assert outcome.fallback_response is not None
         assert outcome.fallback_response["confirmation_required"] is True
+
+    # -- McpError handling tests --
+
+    @pytest.mark.asyncio
+    async def test_mcp_error_method_not_found_fallback(self, ctx_elicit_mcp_error_method_not_found):
+        """McpError with METHOD_NOT_FOUND falls back gracefully."""
+        outcome = await elicit_or_fallback(
+            ctx_elicit_mcp_error_method_not_found, "Delete?", DeleteConfirmation
+        )
+        assert outcome.confirmed is False
+        assert outcome.used_elicitation is False
+        assert outcome.fallback_response is not None
+        assert outcome.fallback_response["confirmation_required"] is True
+
+    @pytest.mark.asyncio
+    async def test_mcp_error_method_not_found_auto_confirm(self, ctx_elicit_mcp_error_method_not_found):
+        """McpError with METHOD_NOT_FOUND auto-confirms when configured."""
+        outcome = await elicit_or_fallback(
+            ctx_elicit_mcp_error_method_not_found, "Delete?", DeleteConfirmation,
+            auto_confirm_on_fallback=True,
+        )
+        assert outcome.confirmed is True
+        assert outcome.used_elicitation is False
+        assert outcome.fallback_response is None
+
+    @pytest.mark.asyncio
+    async def test_mcp_error_other_code_fallback(self, ctx_elicit_mcp_error_other):
+        """McpError with non-METHOD_NOT_FOUND code falls back gracefully."""
+        outcome = await elicit_or_fallback(
+            ctx_elicit_mcp_error_other, "Delete?", DeleteConfirmation
+        )
+        assert outcome.confirmed is False
+        assert outcome.used_elicitation is False
+        assert outcome.fallback_response is not None
+
+    @pytest.mark.asyncio
+    async def test_mcp_error_other_code_auto_confirm(self, ctx_elicit_mcp_error_other):
+        """McpError with non-METHOD_NOT_FOUND code auto-confirms when configured."""
+        outcome = await elicit_or_fallback(
+            ctx_elicit_mcp_error_other, "Delete?", DeleteConfirmation,
+            auto_confirm_on_fallback=True,
+        )
+        assert outcome.confirmed is True
+        assert outcome.used_elicitation is False
+        assert outcome.fallback_response is None

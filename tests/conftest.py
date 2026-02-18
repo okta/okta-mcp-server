@@ -1,5 +1,5 @@
 # The Okta software accompanied by this notice is provided pursuant to the following terms:
-# Copyright © 2025-Present, Okta, Inc.
+# Copyright © 2026-Present, Okta, Inc.
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0.
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -14,6 +14,9 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from mcp.server.elicitation import AcceptedElicitation, CancelledElicitation, DeclinedElicitation
+from mcp.shared.exceptions import McpError
+from mcp.types import ErrorData, METHOD_NOT_FOUND
 
 from okta_mcp_server.utils.elicitation import (
     DeleteConfirmation,
@@ -51,27 +54,18 @@ class FakeLifespanContext:
 # ---------------------------------------------------------------------------
 
 def _make_accepted_result(confirm: bool):
-    """Simulate an ``AcceptedElicitation`` with a ``confirm`` field."""
+    """Return an ``AcceptedElicitation`` with a ``confirm`` field."""
     data = MagicMock()
     data.confirm = confirm
-    result = MagicMock()
-    result.action = "accept"
-    result.data = data
-    return result
+    return AcceptedElicitation.model_construct(action="accept", data=data)
 
 
 def _make_declined_result():
-    result = MagicMock()
-    result.action = "decline"
-    result.data = None
-    return result
+    return DeclinedElicitation()
 
 
 def _make_cancelled_result():
-    result = MagicMock()
-    result.action = "cancel"
-    result.data = None
-    return result
+    return CancelledElicitation()
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +155,28 @@ def ctx_elicit_exception():
     return _build_ctx(
         elicitation_supported=True,
         elicit_side_effect=Exception("elicitation not implemented"),
+    )
+
+
+@pytest.fixture()
+def ctx_elicit_mcp_error_method_not_found():
+    """Context where ctx.elicit() raises McpError with METHOD_NOT_FOUND."""
+    return _build_ctx(
+        elicitation_supported=True,
+        elicit_side_effect=McpError(
+            error=ErrorData(code=METHOD_NOT_FOUND, message="Method not found"),
+        ),
+    )
+
+
+@pytest.fixture()
+def ctx_elicit_mcp_error_other():
+    """Context where ctx.elicit() raises McpError with a non-METHOD_NOT_FOUND code."""
+    return _build_ctx(
+        elicitation_supported=True,
+        elicit_side_effect=McpError(
+            error=ErrorData(code=-32600, message="Invalid request"),
+        ),
     )
 
 
