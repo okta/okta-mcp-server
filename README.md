@@ -479,7 +479,7 @@ The Okta MCP Server provides the following tools for LLMs to interact with your 
 | `update_application`          | Update an existing application                    | - `Update the callback URLs for our web app` <br> - `Change the logo for the Salesforce application` <br> - `Modify the SAML settings for our HR system`      |
 | `delete_application`          | Delete an application (prompts for confirmation)  | - `Delete the old legacy application` <br> - `Remove the unused test application` <br> - `Clean up deprecated integrations`                                   |
 | `activate_application`        | Activate an application                           | - `Activate the new HR application` <br> - `Enable the Salesforce integration` <br> - `Turn on the mobile app for users`                                      |
-| `deactivate_application`      | Deactivate an application                         | - `Deactivate the legacy CRM application` <br> - `Temporarily disable the mobile app` <br> - `Turn off access to the test environment`                        |
+| `deactivate_application`      | Deactivate an application (prompts for confirmation) | - `Deactivate the legacy CRM application` <br> - `Temporarily disable the mobile app` <br> - `Turn off access to the test environment`                        |
 
 ### Policies
 
@@ -491,14 +491,14 @@ The Okta MCP Server provides the following tools for LLMs to interact with your 
 | `update_policy`             | Update an existing policy                      | - `Update the password complexity requirements` <br> - `Modify the MFA policy for executives` <br> - `Change the session timeout for contractors`             |
 | `delete_policy`             | Delete a policy (prompts for confirmation)     | - `Delete the old password policy` <br> - `Remove the deprecated MFA policy` <br> - `Clean up unused security policies`                                       |
 | `activate_policy`           | Activate a policy                              | - `Activate the new password policy` <br> - `Enable the MFA requirements` <br> - `Turn on the contractor sign-on policy`                                      |
-| `deactivate_policy`         | Deactivate a policy                            | - `Deactivate the old security policy` <br> - `Temporarily disable MFA for testing` <br> - `Turn off the strict password requirements`                        |
+| `deactivate_policy`         | Deactivate a policy (prompts for confirmation) | - `Deactivate the old security policy` <br> - `Temporarily disable MFA for testing` <br> - `Turn off the strict password requirements`                        |
 | `list_policy_rules`         | List all rules for a specific policy          | - `Show me all rules for the password policy` <br> - `What MFA rules are configured?` <br> - `List the exceptions in our sign-on policy`                      |
 | `get_policy_rule`           | Get detailed information about a policy rule  | - `Show me the details of the contractor MFA rule` <br> - `What are the conditions for the VPN access rule?` <br> - `Display the emergency access rule`       |
 | `create_policy_rule`        | Create a new rule for a policy                 | - `Add an exception rule for executives` <br> - `Create a rule for contractor access` <br> - `Set up emergency access rules for IT admins`                    |
 | `update_policy_rule`        | Update an existing policy rule                 | - `Update the location restrictions for remote workers` <br> - `Modify the device trust requirements` <br> - `Change the risk-based authentication settings`  |
 | `delete_policy_rule`        | Delete a rule from a policy (prompts for confirmation) | - `Delete the old contractor exception` <br> - `Remove the deprecated VPN rule` <br> - `Clean up unused policy exceptions`                                    |
 | `activate_policy_rule`      | Activate a policy rule                         | - `Activate the new emergency access rule` <br> - `Enable the contractor restrictions` <br> - `Turn on the location-based access rule`                        |
-| `deactivate_policy_rule`    | Deactivate a policy rule                       | - `Deactivate the old emergency rule` <br> - `Temporarily disable location restrictions` <br> - `Turn off the device trust requirements for testing`          |
+| `deactivate_policy_rule`    | Deactivate a policy rule (prompts for confirmation) | - `Deactivate the old emergency rule` <br> - `Temporarily disable location restrictions` <br> - `Turn off the device trust requirements for testing`          |
 
 ### Logs
 

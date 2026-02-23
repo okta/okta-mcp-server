@@ -81,8 +81,8 @@ def supports_elicitation(ctx: Context) -> bool:
         session = ctx.request_context.session
         if session.client_params and session.client_params.capabilities:
             return session.client_params.capabilities.elicitation is not None
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug(f"supports_elicitation: exception encountered: {exc}")
     return False
 
 
