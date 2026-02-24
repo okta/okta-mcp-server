@@ -5,6 +5,7 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
 
+import asyncio
 from typing import Optional
 
 from loguru import logger
@@ -12,7 +13,118 @@ from mcp.server.fastmcp import Context
 
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
-from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, paginate_all_results
+from okta_mcp_server.utils.pagination import (
+    build_query_params,
+    create_paginated_response,
+    extract_after_cursor,
+    paginate_all_results,
+)
+
+
+async def paginate_system_logs(
+    client, initial_response, initial_logs, initial_params, limit, max_pages=50, delay=0.1
+):
+    """Special pagination handler for System Logs API.
+
+    The System Logs API has unique behavior where response.has_next() may return False
+    even when more results exist (especially with since/until filters). This function
+    handles pagination more robustly by:
+    1. Checking if we received a full page (count == limit)
+    2. Extracting the cursor from response metadata
+    3. Manually making subsequent API calls until no more data
+
+    Args:
+        client: Okta client instance
+        initial_response: First API response object
+        initial_logs: First page of log entries
+        initial_params: Query parameters dict used for initial request
+        limit: Page size limit
+        max_pages: Maximum pages to fetch (safety limit)
+        delay: Delay between requests in seconds
+
+    Returns:
+        Tuple of (all_logs, pagination_info dict)
+    """
+    all_logs = list(initial_logs) if initial_logs else []
+    pages_fetched = 1
+    response = initial_response
+
+    pagination_info = {
+        "pages_fetched": 1,
+        "total_items": len(all_logs),
+        "stopped_early": False,
+        "stop_reason": None,
+    }
+
+    # Continue paginating while we have a cursor or got a full page
+    while pages_fetched < max_pages:
+        # Try to extract cursor from response
+        cursor = extract_after_cursor(response)
+
+        # Determine if there might be more data
+        got_full_page = limit and len(initial_logs if pages_fetched == 1 else []) == limit
+        has_cursor = cursor is not None
+        sdk_says_has_more = response and hasattr(response, "has_next") and response.has_next()
+
+        # If no indicators of more data, stop
+        if not (has_cursor or got_full_page or sdk_says_has_more):
+            logger.debug("No more pagination indicators, stopping")
+            break
+
+        # If we don't have a cursor but got a full page, log warning and stop
+        # (we can't continue without a cursor)
+        if not has_cursor:
+            if got_full_page:
+                logger.warning(
+                    f"Got full page of {limit} results but no cursor available. "
+                    "Cannot continue pagination. Consider using smaller time ranges."
+                )
+                pagination_info["stopped_early"] = True
+                pagination_info["stop_reason"] = "No cursor available despite full page"
+            break
+
+        # Add delay between requests
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+        # Build params for next page
+        next_params = dict(initial_params)
+        next_params["after"] = cursor
+
+        try:
+            logger.debug(f"Fetching page {pages_fetched + 1} with cursor: {cursor[:20]}...")
+            next_logs, next_response, next_err = await client.get_logs(next_params)
+
+            if next_err:
+                logger.warning(f"Error fetching page {pages_fetched + 1}: {next_err}")
+                pagination_info["stopped_early"] = True
+                pagination_info["stop_reason"] = f"API error: {next_err}"
+                break
+
+            if not next_logs or len(next_logs) == 0:
+                logger.debug("No more logs returned, stopping pagination")
+                break
+
+            all_logs.extend(next_logs)
+            pages_fetched += 1
+            response = next_response
+            logger.info(f"Fetched page {pages_fetched}, total logs: {len(all_logs)}")
+
+        except Exception as e:
+            logger.error(f"Exception during pagination on page {pages_fetched + 1}: {e}")
+            pagination_info["stopped_early"] = True
+            pagination_info["stop_reason"] = f"Exception: {e}"
+            break
+
+    if pages_fetched >= max_pages:
+        pagination_info["stopped_early"] = True
+        pagination_info["stop_reason"] = f"Reached maximum page limit ({max_pages})"
+        logger.warning(f"Stopped pagination at {max_pages} pages limit")
+
+    pagination_info["pages_fetched"] = pages_fetched
+    pagination_info["total_items"] = len(all_logs)
+
+    return all_logs, pagination_info
 
 
 @mcp.tool()
@@ -92,9 +204,13 @@ async def get_logs(
             logger.debug(f"First log entry timestamp: {logs[0].published if hasattr(logs[0], 'published') else 'N/A'}")
             logger.debug(f"Log types found: {set(log.eventType for log in logs[:10] if hasattr(log, 'eventType'))}")
 
-        if fetch_all and response and hasattr(response, "has_next") and response.has_next():
+        # Handle fetch_all with special System Logs pagination
+        if fetch_all:
             logger.info(f"fetch_all=True, auto-paginating from initial {log_count} log entries")
-            all_logs, pagination_info = await paginate_all_results(response, logs)
+            # Use custom pagination handler that works around SDK limitations with System Logs
+            all_logs, pagination_info = await paginate_system_logs(
+                client, response, logs, query_params, limit or 100  # Default to 100 if limit not specified
+            )
 
             logger.info(
                 f"Successfully retrieved {len(all_logs)} log entries across {pagination_info['pages_fetched']} pages"

@@ -131,6 +131,11 @@ def create_paginated_response(
         result["has_more"] = response.has_next() if hasattr(response, "has_next") else False
         result["next_cursor"] = extract_after_cursor(response)
 
+        # If we have a cursor but has_next() returned False, trust the cursor
+        if result["next_cursor"] and not result["has_more"]:
+            logger.debug("Found next_cursor even though has_next() returned False, setting has_more=True")
+            result["has_more"] = True
+
     # Add detailed pagination info if available
     if pagination_info:
         result["pagination_info"] = pagination_info
