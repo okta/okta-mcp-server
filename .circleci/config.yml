@@ -18,6 +18,11 @@ jobs:
       - run:
           name: Prepare Requirements
           command: uv pip compile pyproject.toml -o requirements.txt
+      - run:
+          name: Run Tests
+          command: uv run pytest tests/ -v --junitxml=test-results/results.xml
+      - store_test_results:
+          path: test-results
       - persist_to_workspace:
           root: .
           paths:

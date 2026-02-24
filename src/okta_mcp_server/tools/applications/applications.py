@@ -12,6 +12,8 @@ from mcp.server.fastmcp import Context
 
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
+from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConfirmation, elicit_or_fallback
+from okta_mcp_server.utils.messages import DEACTIVATE_APPLICATION, DELETE_APPLICATION
 
 
 @mcp.tool()
@@ -194,31 +196,70 @@ async def update_application(ctx: Context, app_id: str, app_config: Dict[str, An
 async def delete_application(ctx: Context, app_id: str) -> list:
     """Delete an application by ID from the Okta organization.
 
-    This tool deletes an application by its ID from the Okta organization, but requires confirmation.
-
-    IMPORTANT: After calling this function, you MUST STOP and wait for the human user to type 'DELETE'
-    as confirmation. DO NOT automatically call confirm_delete_application afterward.
+    This tool deletes an application by its ID from the Okta organization.
+    The user will be asked for confirmation before the deletion proceeds.
 
     Parameters:
         app_id (str, required): The ID of the application to delete
 
     Returns:
-        List containing the result of the deletion operation or a confirmation request.
+        List containing the result of the deletion operation.
     """
-    logger.warning(f"Deletion requested for application {app_id}, awaiting confirmation")
+    logger.warning(f"Deletion requested for application {app_id}")
 
-    return [
-        {
-            "confirmation_required": True,
-            "message": f"To confirm deletion of application {app_id}, please type 'DELETE'",
-            "app_id": app_id,
-        }
-    ]
+    fallback_payload = {
+        "confirmation_required": True,
+        "message": (
+            f"To confirm deletion of application {app_id}, please call the "
+            f"'confirm_delete_application' tool with app_id='{app_id}' and "
+            f"confirmation='DELETE'."
+        ),
+        "app_id": app_id,
+        "tool_to_use": "confirm_delete_application",
+    }
+
+    outcome = await elicit_or_fallback(
+        ctx,
+        message=DELETE_APPLICATION.format(app_id=app_id),
+        schema=DeleteConfirmation,
+        fallback_payload=fallback_payload,
+    )
+
+    if not outcome.used_elicitation:
+        logger.info(f"Elicitation unavailable for application {app_id} — returning fallback confirmation prompt")
+        return [outcome.fallback_response]
+
+    if not outcome.confirmed:
+        logger.info(f"Application deletion cancelled for {app_id}")
+        return [{"message": "Application deletion cancelled by user."}]
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        logger.debug(f"Calling Okta API to delete application {app_id}")
+
+        _, err = await client.delete_application(app_id)
+
+        if err:
+            logger.error(f"Okta API error while deleting application {app_id}: {err}")
+            return [{"error": f"Error: {err}"}]
+
+        logger.info(f"Successfully deleted application: {app_id}")
+        return [{"message": f"Application {app_id} deleted successfully"}]
+    except Exception as e:
+        logger.error(f"Exception while deleting application {app_id}: {type(e).__name__}: {e}")
+        return [{"error": f"Exception: {e}"}]
 
 
 @mcp.tool()
 async def confirm_delete_application(ctx: Context, app_id: str, confirmation: str) -> list:
     """Confirm and execute application deletion after receiving confirmation.
+
+    .. deprecated::
+        This tool exists for backward compatibility with clients that do not
+        support MCP elicitation.  New clients should rely on the built-in
+        elicitation prompt in ``delete_application`` instead.
 
     This function MUST ONLY be called after the human user has explicitly typed 'DELETE' as confirmation.
     NEVER call this function automatically after delete_application.
@@ -230,7 +271,7 @@ async def confirm_delete_application(ctx: Context, app_id: str, confirmation: st
     Returns:
         List containing the result of the deletion operation.
     """
-    logger.info(f"Processing deletion confirmation for application {app_id}")
+    logger.info(f"Processing deletion confirmation for application {app_id} (deprecated flow)")
 
     if confirmation != "DELETE":
         logger.warning(f"Application deletion cancelled for {app_id} - incorrect confirmation")
@@ -296,7 +337,18 @@ async def deactivate_application(ctx: Context, app_id: str) -> list:
     Returns:
         List containing the result of the deactivation operation.
     """
-    logger.info(f"Deactivating application: {app_id}")
+    logger.info(f"Deactivation requested for application: {app_id}")
+
+    outcome = await elicit_or_fallback(
+        ctx,
+        message=DEACTIVATE_APPLICATION.format(app_id=app_id),
+        schema=DeactivateConfirmation,
+        auto_confirm_on_fallback=True,
+    )
+
+    if not outcome.confirmed:
+        logger.info(f"Application deactivation cancelled for {app_id}")
+        return [{"message": "Application deactivation cancelled by user."}]
 
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
