@@ -13,7 +13,7 @@ from mcp.server.fastmcp import Context
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, paginate_all_results
-from okta_mcp_server.utils.validation import InvalidOktaIdError, validate_okta_id
+from okta_mcp_server.utils.validation import validate_ids
 
 
 @mcp.tool()
@@ -152,6 +152,7 @@ async def get_user_profile_attributes(ctx: Context = None) -> list:
 
 
 @mcp.tool()
+@validate_ids("user_id")
 async def get_user(user_id: str, ctx: Context = None) -> list:
     """Get a user by ID from the Okta organization
 
@@ -164,12 +165,6 @@ async def get_user(user_id: str, ctx: Context = None) -> list:
         List containing the user details.
     """
     logger.info(f"Getting user with ID: {user_id}")
-
-    try:
-        validate_okta_id(user_id, "user_id")
-    except InvalidOktaIdError as e:
-        logger.error(f"Invalid user_id: {e}")
-        return [f"Error: {e}"]
 
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
@@ -225,6 +220,7 @@ async def create_user(profile: dict, ctx: Context = None) -> list:
 
 
 @mcp.tool()
+@validate_ids("user_id")
 async def update_user(user_id: str, profile: dict, ctx: Context = None) -> list:
     """Update a user in the Okta organization.
 
@@ -238,12 +234,6 @@ async def update_user(user_id: str, profile: dict, ctx: Context = None) -> list:
         List containing the updated user details.
     """
     logger.info(f"Updating user with ID: {user_id}")
-
-    try:
-        validate_okta_id(user_id, "user_id")
-    except InvalidOktaIdError as e:
-        logger.error(f"Invalid user_id: {e}")
-        return [f"Error: {e}"]
 
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
@@ -266,6 +256,7 @@ async def update_user(user_id: str, profile: dict, ctx: Context = None) -> list:
 
 
 @mcp.tool()
+@validate_ids("user_id")
 async def deactivate_user(user_id: str, ctx: Context = None) -> list:
     """Deactivates a user from the Okta organization.
 
@@ -279,12 +270,6 @@ async def deactivate_user(user_id: str, ctx: Context = None) -> list:
         List containing the result of the deactivation operation.
     """
     logger.info(f"Deactivating user with ID: {user_id}")
-
-    try:
-        validate_okta_id(user_id, "user_id")
-    except InvalidOktaIdError as e:
-        logger.error(f"Invalid user_id: {e}")
-        return [f"Error: {e}"]
 
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
@@ -306,6 +291,7 @@ async def deactivate_user(user_id: str, ctx: Context = None) -> list:
 
 
 @mcp.tool()
+@validate_ids("user_id")
 async def delete_deactivated_user(user_id: str, ctx: Context = None) -> list:
     """Delete a user from the Okta organization who has already been deactivated or deprovisioned.
 
@@ -318,12 +304,6 @@ async def delete_deactivated_user(user_id: str, ctx: Context = None) -> list:
         List containing the result of the deletion operation.
     """
     logger.info(f"Deleting deactivated user with ID: {user_id}")
-
-    try:
-        validate_okta_id(user_id, "user_id")
-    except InvalidOktaIdError as e:
-        logger.error(f"Invalid user_id: {e}")
-        return [f"Error: {e}"]
 
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 

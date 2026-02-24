@@ -12,7 +12,7 @@ from mcp.server.fastmcp import Context
 
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
-from okta_mcp_server.utils.validation import InvalidOktaIdError, validate_okta_id
+from okta_mcp_server.utils.validation import validate_ids
 
 
 @mcp.tool()
@@ -86,6 +86,7 @@ async def list_policies(
 
 
 @mcp.tool()
+@validate_ids("policy_id", error_return_type="dict")
 async def get_policy(ctx: Context, policy_id: str) -> Optional[Dict[str, Any]]:
     """Retrieve a specific policy by ID.
 
@@ -95,12 +96,6 @@ async def get_policy(ctx: Context, policy_id: str) -> Optional[Dict[str, Any]]:
     Returns:
         Dict containing the policy details.
     """
-    try:
-        validate_okta_id(policy_id, "policy_id")
-    except InvalidOktaIdError as e:
-        logger.error(f"Invalid policy_id: {e}")
-        return {"error": str(e)}
-
     manager = ctx.request_context.lifespan_context.okta_auth_manager
     okta_client = await get_okta_client(manager)
 
@@ -154,6 +149,7 @@ async def create_policy(ctx: Context, policy_data: Dict[str, Any]) -> Optional[D
 
 
 @mcp.tool()
+@validate_ids("policy_id", error_return_type="dict")
 async def update_policy(ctx: Context, policy_id: str, policy_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Update an existing policy.
 
@@ -164,12 +160,6 @@ async def update_policy(ctx: Context, policy_id: str, policy_data: Dict[str, Any
     Returns:
         Dict containing the updated policy details.
     """
-    try:
-        validate_okta_id(policy_id, "policy_id")
-    except InvalidOktaIdError as e:
-        logger.error(f"Invalid policy_id: {e}")
-        return {"error": str(e)}
-
     manager = ctx.request_context.lifespan_context.okta_auth_manager
     okta_client = await get_okta_client(manager)
 
@@ -188,6 +178,7 @@ async def update_policy(ctx: Context, policy_id: str, policy_data: Dict[str, Any
 
 
 @mcp.tool()
+@validate_ids("policy_id", error_return_type="dict")
 async def delete_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
     """Delete a policy.
 
@@ -197,12 +188,6 @@ async def delete_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
     Returns:
         Dict with success status.
     """
-    try:
-        validate_okta_id(policy_id, "policy_id")
-    except InvalidOktaIdError as e:
-        logger.error(f"Invalid policy_id: {e}")
-        return {"error": str(e)}
-
     manager = ctx.request_context.lifespan_context.okta_auth_manager
     okta_client = await get_okta_client(manager)
 
@@ -221,6 +206,7 @@ async def delete_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
+@validate_ids("policy_id", error_return_type="dict")
 async def activate_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
     """Activate a policy.
 
@@ -230,12 +216,6 @@ async def activate_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
     Returns:
         Dict with success status.
     """
-    try:
-        validate_okta_id(policy_id, "policy_id")
-    except InvalidOktaIdError as e:
-        logger.error(f"Invalid policy_id: {e}")
-        return {"error": str(e)}
-
     manager = ctx.request_context.lifespan_context.okta_auth_manager
     okta_client = await get_okta_client(manager)
 
@@ -254,6 +234,7 @@ async def activate_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
+@validate_ids("policy_id", error_return_type="dict")
 async def deactivate_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
     """Deactivate a policy.
 
@@ -263,12 +244,6 @@ async def deactivate_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
     Returns:
         Dict with success status.
     """
-    try:
-        validate_okta_id(policy_id, "policy_id")
-    except InvalidOktaIdError as e:
-        logger.error(f"Invalid policy_id: {e}")
-        return {"error": str(e)}
-
     manager = ctx.request_context.lifespan_context.okta_auth_manager
     okta_client = await get_okta_client(manager)
 
@@ -287,6 +262,7 @@ async def deactivate_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
+@validate_ids("policy_id", error_return_type="dict")
 async def list_policy_rules(ctx: Context, policy_id: str) -> Dict[str, Any]:
     """List all rules for a specific policy.
 
@@ -300,12 +276,6 @@ async def list_policy_rules(ctx: Context, policy_id: str) -> Dict[str, Any]:
             - next_page_token (Optional[str]): Token for next page
             - error (str): Error message if the operation fails
     """
-    try:
-        validate_okta_id(policy_id, "policy_id")
-    except InvalidOktaIdError as e:
-        logger.error(f"Invalid policy_id: {e}")
-        return {"error": str(e)}
-
     manager = ctx.request_context.lifespan_context.okta_auth_manager
     okta_client = await get_okta_client(manager)
 
@@ -332,6 +302,7 @@ async def list_policy_rules(ctx: Context, policy_id: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
+@validate_ids("policy_id", "rule_id", error_return_type="dict")
 async def get_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Optional[Dict[str, Any]]:
     """Retrieve a specific policy rule.
 
@@ -342,13 +313,6 @@ async def get_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Optiona
     Returns:
         Dict containing the policy rule details.
     """
-    try:
-        validate_okta_id(policy_id, "policy_id")
-        validate_okta_id(rule_id, "rule_id")
-    except InvalidOktaIdError as e:
-        logger.error(f"Invalid ID: {e}")
-        return {"error": str(e)}
-
     manager = ctx.request_context.lifespan_context.okta_auth_manager
     okta_client = await get_okta_client(manager)
 
@@ -367,6 +331,7 @@ async def get_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Optiona
 
 
 @mcp.tool()
+@validate_ids("policy_id", error_return_type="dict")
 async def create_policy_rule(ctx: Context, policy_id: str, rule_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Create a new rule for a policy.
 
@@ -382,12 +347,6 @@ async def create_policy_rule(ctx: Context, policy_id: str, rule_data: Dict[str, 
     Returns:
         Dict containing the created rule details.
     """
-    try:
-        validate_okta_id(policy_id, "policy_id")
-    except InvalidOktaIdError as e:
-        logger.error(f"Invalid policy_id: {e}")
-        return {"error": str(e)}
-
     manager = ctx.request_context.lifespan_context.okta_auth_manager
     okta_client = await get_okta_client(manager)
 
@@ -406,6 +365,7 @@ async def create_policy_rule(ctx: Context, policy_id: str, rule_data: Dict[str, 
 
 
 @mcp.tool()
+@validate_ids("policy_id", "rule_id", error_return_type="dict")
 async def update_policy_rule(
     ctx: Context, policy_id: str, rule_id: str, rule_data: Dict[str, Any]
 ) -> Optional[Dict[str, Any]]:
@@ -419,13 +379,6 @@ async def update_policy_rule(
     Returns:
         Dict containing the updated rule details.
     """
-    try:
-        validate_okta_id(policy_id, "policy_id")
-        validate_okta_id(rule_id, "rule_id")
-    except InvalidOktaIdError as e:
-        logger.error(f"Invalid ID: {e}")
-        return {"error": str(e)}
-
     manager = ctx.request_context.lifespan_context.okta_auth_manager
     okta_client = await get_okta_client(manager)
 
@@ -444,6 +397,7 @@ async def update_policy_rule(
 
 
 @mcp.tool()
+@validate_ids("policy_id", "rule_id", error_return_type="dict")
 async def delete_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Dict[str, Any]:
     """Delete a policy rule.
 
@@ -454,13 +408,6 @@ async def delete_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Dict
     Returns:
         Dict with success status.
     """
-    try:
-        validate_okta_id(policy_id, "policy_id")
-        validate_okta_id(rule_id, "rule_id")
-    except InvalidOktaIdError as e:
-        logger.error(f"Invalid ID: {e}")
-        return {"error": str(e)}
-
     manager = ctx.request_context.lifespan_context.okta_auth_manager
     okta_client = await get_okta_client(manager)
 
@@ -479,6 +426,7 @@ async def delete_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Dict
 
 
 @mcp.tool()
+@validate_ids("policy_id", "rule_id", error_return_type="dict")
 async def activate_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Dict[str, Any]:
     """Activate a policy rule.
 
@@ -489,13 +437,6 @@ async def activate_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Di
     Returns:
         Dict with success status.
     """
-    try:
-        validate_okta_id(policy_id, "policy_id")
-        validate_okta_id(rule_id, "rule_id")
-    except InvalidOktaIdError as e:
-        logger.error(f"Invalid ID: {e}")
-        return {"error": str(e)}
-
     manager = ctx.request_context.lifespan_context.okta_auth_manager
     okta_client = await get_okta_client(manager)
 
@@ -514,6 +455,7 @@ async def activate_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Di
 
 
 @mcp.tool()
+@validate_ids("policy_id", "rule_id", error_return_type="dict")
 async def deactivate_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Dict[str, Any]:
     """Deactivate a policy rule.
 
@@ -524,13 +466,6 @@ async def deactivate_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> 
     Returns:
         Dict with success status.
     """
-    try:
-        validate_okta_id(policy_id, "policy_id")
-        validate_okta_id(rule_id, "rule_id")
-    except InvalidOktaIdError as e:
-        logger.error(f"Invalid ID: {e}")
-        return {"error": str(e)}
-
     manager = ctx.request_context.lifespan_context.okta_auth_manager
     okta_client = await get_okta_client(manager)
 

@@ -13,7 +13,7 @@ from mcp.server.fastmcp import Context
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, paginate_all_results
-from okta_mcp_server.utils.validation import InvalidOktaIdError, validate_okta_id
+from okta_mcp_server.utils.validation import validate_ids
 
 
 @mcp.tool()
@@ -104,6 +104,7 @@ async def list_groups(
 
 
 @mcp.tool()
+@validate_ids("group_id")
 async def get_group(group_id: str, ctx: Context = None) -> list:
     """Get a group by ID from the Okta organization
 
@@ -117,12 +118,6 @@ async def get_group(group_id: str, ctx: Context = None) -> list:
     """
     logger.info(f"Getting group with ID: {group_id}")
 
-    try:
-        validate_okta_id(group_id, "group_id")
-    except InvalidOktaIdError as e:
-        logger.error(f"Invalid group_id: {e}")
-        return {"error": f"Error: {e}"}
-
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
     try:
@@ -133,7 +128,7 @@ async def get_group(group_id: str, ctx: Context = None) -> list:
 
         if err:
             logger.error(f"Okta API error while getting group {group_id}: {err}")
-            return {"error": f"Error: {err}"}
+            return [f"Error: {err}"]
 
         logger.info(f"Successfully retrieved group: {group_id}")
         return [group]
@@ -180,6 +175,7 @@ async def create_group(profile: dict, ctx: Context = None) -> list:
 
 
 @mcp.tool()
+@validate_ids("group_id")
 def delete_group(group_id: str, ctx: Context = None) -> list:
     """Delete a group by ID from the Okta organization.
 
@@ -210,6 +206,7 @@ def delete_group(group_id: str, ctx: Context = None) -> list:
 
 
 @mcp.tool()
+@validate_ids("group_id")
 async def confirm_delete_group(group_id: str, confirmation: str, ctx: Context = None) -> list:
     """Confirm and execute group deletion after receiving confirmation.
 
@@ -225,16 +222,10 @@ async def confirm_delete_group(group_id: str, confirmation: str, ctx: Context = 
     """
     logger.info(f"Processing deletion confirmation for group {group_id}")
 
-    try:
-        validate_okta_id(group_id, "group_id")
-    except InvalidOktaIdError as e:
-        logger.error(f"Invalid group_id: {e}")
-        return [{"error": f"Error: {e}"}]
-
     # Step 3: Check confirmation and delete if correct
     if confirmation != "DELETE":
         logger.warning(f"Group deletion cancelled for {group_id} - incorrect confirmation")
-        return [{"error": "Deletion cancelled. Confirmation 'DELETE' was not provided correctly."}]
+        return [f"Error: Deletion cancelled. Confirmation 'DELETE' was not provided correctly."]
 
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
@@ -246,16 +237,17 @@ async def confirm_delete_group(group_id: str, confirmation: str, ctx: Context = 
 
         if err:
             logger.error(f"Okta API error while deleting group {group_id}: {err}")
-            return [{"error": f"Error: {err}"}]
+            return [f"Error: {err}"]
 
         logger.info(f"Successfully deleted group: {group_id}")
-        return [{"message": f"Group {group_id} deleted successfully"}]
+        return [f"Group {group_id} deleted successfully"]
     except Exception as e:
         logger.error(f"Exception while deleting group {group_id}: {type(e).__name__}: {e}")
-        return [{"error": f"Exception: {e}"}]
+        return [f"Exception: {e}"]
 
 
 @mcp.tool()
+@validate_ids("group_id")
 async def update_group(group_id: str, profile: dict, ctx: Context = None) -> list:
     """Update a group by ID in the Okta organization.
 
@@ -271,12 +263,6 @@ async def update_group(group_id: str, profile: dict, ctx: Context = None) -> lis
     logger.info(f"Updating group with ID: {group_id}")
     logger.debug(f"Updated fields: {list(profile.keys())}")
 
-    try:
-        validate_okta_id(group_id, "group_id")
-    except InvalidOktaIdError as e:
-        logger.error(f"Invalid group_id: {e}")
-        return {"error": f"Error: {e}"}
-
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
     try:
@@ -288,7 +274,7 @@ async def update_group(group_id: str, profile: dict, ctx: Context = None) -> lis
 
         if err:
             logger.error(f"Okta API error while updating group {group_id}: {err}")
-            return {"error": f"Error: {err}"}
+            return [f"Error: {err}"]
 
         logger.info(f"Successfully updated group: {group_id}")
         return [group]
@@ -298,6 +284,7 @@ async def update_group(group_id: str, profile: dict, ctx: Context = None) -> lis
 
 
 @mcp.tool()
+@validate_ids("group_id", error_return_type="dict")
 async def list_group_users(
     group_id: str,
     ctx: Context = None,
@@ -332,12 +319,6 @@ async def list_group_users(
     """
     logger.info(f"Listing users in group: {group_id}")
     logger.debug(f"fetch_all: {fetch_all}, after: '{after}', limit: {limit}")
-
-    try:
-        validate_okta_id(group_id, "group_id")
-    except InvalidOktaIdError as e:
-        logger.error(f"Invalid group_id: {e}")
-        return {"error": f"Error: {e}"}
 
     # Validate limit parameter range
     if limit is not None:
@@ -384,6 +365,7 @@ async def list_group_users(
 
 
 @mcp.tool()
+@validate_ids("group_id")
 async def list_group_apps(group_id: str, ctx: Context = None) -> list:
     """List all applications in a group by ID from the Okta organization.
 
@@ -397,12 +379,6 @@ async def list_group_apps(group_id: str, ctx: Context = None) -> list:
     """
     logger.info(f"Listing applications assigned to group: {group_id}")
 
-    try:
-        validate_okta_id(group_id, "group_id")
-    except InvalidOktaIdError as e:
-        logger.error(f"Invalid group_id: {e}")
-        return {"error": f"Error: {e}"}
-
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
     try:
@@ -413,7 +389,7 @@ async def list_group_apps(group_id: str, ctx: Context = None) -> list:
 
         if err:
             logger.error(f"Okta API error while listing applications for group {group_id}: {err}")
-            return {"error": f"Error: {err}"}
+            return [f"Error: {err}"]
 
         app_count = len(apps) if apps else 0
         logger.info(f"Successfully retrieved {app_count} applications for group {group_id}")
@@ -425,6 +401,7 @@ async def list_group_apps(group_id: str, ctx: Context = None) -> list:
 
 
 @mcp.tool()
+@validate_ids("group_id", "user_id")
 async def add_user_to_group(group_id: str, user_id: str, ctx: Context = None) -> list:
     """Add a user to a group by ID in the Okta organization.
 
@@ -439,13 +416,6 @@ async def add_user_to_group(group_id: str, user_id: str, ctx: Context = None) ->
     """
     logger.info(f"Adding user {user_id} to group {group_id}")
 
-    try:
-        validate_okta_id(group_id, "group_id")
-        validate_okta_id(user_id, "user_id")
-    except InvalidOktaIdError as e:
-        logger.error(f"Invalid ID: {e}")
-        return {"error": f"Error: {e}"}
-
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
     try:
@@ -456,16 +426,17 @@ async def add_user_to_group(group_id: str, user_id: str, ctx: Context = None) ->
 
         if err:
             logger.error(f"Okta API error while adding user {user_id} to group {group_id}: {err}")
-            return {"error": f"Error: {err}"}
+            return [f"Error: {err}"]
 
         logger.info(f"Successfully added user {user_id} to group {group_id}")
-        return [{"message": "User added to group successfully"}]
+        return [f"User {user_id} added to group {group_id} successfully"]
     except Exception as e:
         logger.error(f"Exception while adding user {user_id} to group {group_id}: {type(e).__name__}: {e}")
         return [f"Exception: {e}"]
 
 
 @mcp.tool()
+@validate_ids("group_id", "user_id")
 async def remove_user_from_group(group_id: str, user_id: str, ctx: Context = None) -> list:
     """Remove a user from a group by ID in the Okta organization.
 
@@ -480,13 +451,6 @@ async def remove_user_from_group(group_id: str, user_id: str, ctx: Context = Non
     """
     logger.info(f"Removing user {user_id} from group {group_id}")
 
-    try:
-        validate_okta_id(group_id, "group_id")
-        validate_okta_id(user_id, "user_id")
-    except InvalidOktaIdError as e:
-        logger.error(f"Invalid ID: {e}")
-        return {"error": f"Error: {e}"}
-
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
     try:
@@ -497,10 +461,10 @@ async def remove_user_from_group(group_id: str, user_id: str, ctx: Context = Non
 
         if err:
             logger.error(f"Okta API error while removing user {user_id} from group {group_id}: {err}")
-            return {"error": f"Error: {err}"}
+            return [f"Error: {err}"]
 
         logger.info(f"Successfully removed user {user_id} from group {group_id}")
-        return [{"message": "User removed from group successfully"}]
+        return [f"User {user_id} removed from group {group_id} successfully"]
     except Exception as e:
         logger.error(f"Exception while removing user {user_id} from group {group_id}: {type(e).__name__}: {e}")
         return [f"Exception: {e}"]
