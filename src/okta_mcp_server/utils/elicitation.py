@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from loguru import logger
-from mcp.server.elicitation import AcceptedElicitation, CancelledElicitation, DeclinedElicitation
+from mcp.server.elicitation import AcceptedElicitation, DeclinedElicitation
 from mcp.server.fastmcp import Context
 from mcp.shared.exceptions import McpError
 from mcp.types import METHOD_NOT_FOUND
@@ -33,7 +33,7 @@ class DeleteConfirmation(BaseModel):
     """Schema presented to the user when a deletion is requested."""
 
     confirm: bool = Field(
-        default=False,
+        ...,
         description="Set to true to confirm the deletion. This action cannot be undone.",
     )
 
@@ -42,7 +42,7 @@ class DeactivateConfirmation(BaseModel):
     """Schema presented to the user when a deactivation is requested."""
 
     confirm: bool = Field(
-        default=False,
+        ...,
         description="Set to true to confirm the deactivation.",
     )
 
@@ -155,9 +155,6 @@ async def elicit_or_fallback(
             return ElicitationOutcome(confirmed=confirmed, used_elicitation=True)
         elif isinstance(result, DeclinedElicitation):
             logger.info("Elicitation declined by user")
-            return ElicitationOutcome(confirmed=False, used_elicitation=True)
-        elif isinstance(result, CancelledElicitation):
-            logger.info("Elicitation cancelled by user")
             return ElicitationOutcome(confirmed=False, used_elicitation=True)
         else:
             logger.warning(f"Elicitation returned unexpected result: {result}")

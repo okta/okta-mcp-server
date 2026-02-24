@@ -25,10 +25,6 @@ from okta_mcp_server.utils.elicitation import (
 # ---- Schema tests ---------------------------------------------------------
 
 class TestDeleteConfirmationSchema:
-    def test_default_is_false(self):
-        obj = DeleteConfirmation()
-        assert obj.confirm is False
-
     def test_explicit_true(self):
         obj = DeleteConfirmation(confirm=True)
         assert obj.confirm is True
@@ -47,10 +43,6 @@ class TestDeleteConfirmationSchema:
 
 
 class TestDeactivateConfirmationSchema:
-    def test_default_is_false(self):
-        obj = DeactivateConfirmation()
-        assert obj.confirm is False
-
     def test_explicit_true(self):
         obj = DeactivateConfirmation(confirm=True)
         assert obj.confirm is True
