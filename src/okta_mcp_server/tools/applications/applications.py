@@ -124,6 +124,38 @@ async def get_application(ctx: Context, app_id: str, expand: Optional[str] = Non
 
 
 @mcp.tool()
+async def get_app_user(ctx: Context, app_id: str, user_id: str) -> Any:
+    """Get a user assignment for an application by app ID and user ID.
+
+    Parameters:
+        app_id (str, required): The ID of the application
+        user_id (str, required): The ID of the user
+
+    Returns:
+        Dictionary containing the app user profile and assignment details.
+    """
+    logger.info(f"Getting app user: app_id={app_id}, user_id={user_id}")
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        logger.debug(f"Calling Okta API to get app user {user_id} in app {app_id}")
+
+        app_user, _, err = await client.get_application_user(app_id, user_id)
+
+        if err:
+            logger.error(f"Okta API error while getting app user {user_id} in app {app_id}: {err}")
+            return {"error": str(err)}
+
+        logger.info(f"Successfully retrieved app user: {user_id} in app {app_id}")
+        return app_user
+    except Exception as e:
+        logger.error(f"Exception while getting app user {user_id} in app {app_id}: {type(e).__name__}: {e}")
+        return {"error": str(e)}
+
+
+@mcp.tool()
 async def create_application(ctx: Context, app_config: Dict[str, Any], activate: bool = True) -> Any:
     """Create a new application in the Okta organization.
 
