@@ -453,6 +453,7 @@ The Okta MCP Server provides the following tools for LLMs to interact with your 
 | `update_user`                   | Update an existing user's profile information           | - `Update John Doe's department to Engineering` <br> - `Change the phone number for user jane.smith@company.com` <br> - `Update the manager for this user`    |
 | `deactivate_user`               | Deactivate a user (prompts for confirmation)            | - `Deactivate the user john.doe@company.com` <br> - `Disable access for former employee Jane Smith` <br> - `Suspend the contractor account temporarily`       |
 | `delete_deactivated_user`       | Permanently delete a deactivated user (prompts for confirmation) | - `Delete the deactivated user john.doe@company.com` <br> - `Remove former employee Jane Smith permanently` <br> - `Clean up old contractor accounts`         |
+| `unlock_user`                   | Unlock a user account with LOCKED_OUT status            | - `Unlock the account for john.doe@company.com` <br> - `Unlock user 00u1234567890 so they can sign in again` <br> - `Restore access for locked-out user`      |
 | `get_user_profile_attributes`   | Retrieve all supported user profile attributes          | - `What user profile fields are available?` <br> - `Show me all the custom attributes we can set` <br> - `List the standard Okta user attributes`             |
 
 ### Groups
