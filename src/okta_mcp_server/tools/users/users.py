@@ -259,6 +259,42 @@ async def update_user(user_id: str, profile: dict, ctx: Context = None) -> list:
 
 @mcp.tool()
 @validate_ids("user_id")
+async def unlock_user(user_id: str, ctx: Context = None) -> list:
+    """Unlock a user account that has a LOCKED_OUT status in the Okta organization.
+
+    This tool unlocks a user whose account has been locked due to exceeding
+    the failed login attempt threshold. The user is returned to ACTIVE status
+    and can sign in with their existing password.
+
+    Parameters:
+        user_id (str, required): The ID of the locked-out user to unlock.
+
+    Returns:
+        List containing the result of the unlock operation.
+    """
+    logger.info(f"Unlock requested for user: {user_id}")
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        logger.debug(f"Calling Okta API to unlock user {user_id}")
+
+        _, err = await client.unlock_user(user_id)
+
+        if err:
+            logger.error(f"Okta API error while unlocking user {user_id}: {err}")
+            return [f"Error: {err}"]
+
+        logger.info(f"Successfully unlocked user: {user_id}")
+        return [f"User {user_id} unlocked successfully."]
+    except Exception as e:
+        logger.error(f"Exception while unlocking user {user_id}: {type(e).__name__}: {e}")
+        return [f"Exception: {e}"]
+
+
+@mcp.tool()
+@validate_ids("user_id")
 async def deactivate_user(user_id: str, ctx: Context = None) -> list:
     """Deactivates a user from the Okta organization.
 
