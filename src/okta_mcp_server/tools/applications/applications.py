@@ -14,6 +14,7 @@ from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DEACTIVATE_APPLICATION, DELETE_APPLICATION
+from okta_mcp_server.utils.validation import validate_ids
 
 
 @mcp.tool()
@@ -90,6 +91,7 @@ async def list_applications(
 
 
 @mcp.tool()
+@validate_ids("app_id", error_return_type="dict")
 async def get_application(ctx: Context, app_id: str, expand: Optional[str] = None) -> Any:
     """Get an application by ID from the Okta organization.
 
@@ -161,6 +163,7 @@ async def create_application(ctx: Context, app_config: Dict[str, Any], activate:
 
 
 @mcp.tool()
+@validate_ids("app_id", error_return_type="dict")
 async def update_application(ctx: Context, app_id: str, app_config: Dict[str, Any]) -> Any:
     """Update an application by ID in the Okta organization.
 
@@ -193,6 +196,7 @@ async def update_application(ctx: Context, app_id: str, app_config: Dict[str, An
 
 
 @mcp.tool()
+@validate_ids("app_id")
 async def delete_application(ctx: Context, app_id: str) -> list:
     """Delete an application by ID from the Okta organization.
 
@@ -253,6 +257,7 @@ async def delete_application(ctx: Context, app_id: str) -> list:
 
 
 @mcp.tool()
+@validate_ids("app_id")
 async def confirm_delete_application(ctx: Context, app_id: str, confirmation: str) -> list:
     """Confirm and execute application deletion after receiving confirmation.
 
@@ -297,6 +302,7 @@ async def confirm_delete_application(ctx: Context, app_id: str, confirmation: st
 
 
 @mcp.tool()
+@validate_ids("app_id")
 async def activate_application(ctx: Context, app_id: str) -> list:
     """Activate an application in the Okta organization.
 
@@ -328,6 +334,7 @@ async def activate_application(ctx: Context, app_id: str) -> list:
 
 
 @mcp.tool()
+@validate_ids("app_id")
 async def deactivate_application(ctx: Context, app_id: str) -> list:
     """Deactivate an application in the Okta organization.
 
