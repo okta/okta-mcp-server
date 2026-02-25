@@ -261,7 +261,7 @@ async def confirm_delete_group(group_id: str, confirmation: str, ctx: Context = 
 
     if confirmation != "DELETE":
         logger.warning(f"Group deletion cancelled for {group_id} - incorrect confirmation")
-        return [f"Error: Deletion cancelled. Confirmation 'DELETE' was not provided correctly."]
+        return [{"error": "Deletion cancelled. Confirmation 'DELETE' was not provided correctly."}]
 
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
@@ -273,13 +273,13 @@ async def confirm_delete_group(group_id: str, confirmation: str, ctx: Context = 
 
         if err:
             logger.error(f"Okta API error while deleting group {group_id}: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
 
         logger.info(f"Successfully deleted group: {group_id}")
-        return [f"Group {group_id} deleted successfully"]
+        return [{"message": f"Group {group_id} deleted successfully"}]
     except Exception as e:
         logger.error(f"Exception while deleting group {group_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"error": str(e)}]
 
 
 @mcp.tool()
