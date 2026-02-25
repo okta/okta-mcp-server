@@ -23,6 +23,7 @@ This server is an [Model Context Protocol](https://modelcontextprotocol.io/intro
 
 * **LLM-Driven Okta Management:** Allows your LLM agents to perform administrative tasks within your Okta environment based on natural language instructions.
 * **Secure Authentication:** Supports both Device Authorization Grant for interactive use and Private Key JWT for secure, automated server-to-server communication.
+* **Interactive Confirmation via Elicitation:** Destructive operations (deletes, deactivations) prompt the user for confirmation through the [MCP Elicitation API](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation) before proceeding, with automatic fallback for clients that do not yet support the feature.
 * **Integration with Okta Admin Management APIs:** Leverages the official Okta APIs to ensure secure and reliable interaction with your Okta org.
 * **Extensible Architecture:** Designed to be easily extended with new functionalities and support for additional Okta API endpoints.
 * **Comprehensive Tool Support:** Full CRUD operations for users, groups, applications, policies, and more.
@@ -450,8 +451,8 @@ The Okta MCP Server provides the following tools for LLMs to interact with your 
 | `get_user`                      | Get detailed information about a specific user          | - `Show me details for user john.doe@company.com` <br> - `Get information about user ID 00u1234567890` <br> - `What groups is Jane Smith a member of?`        |
 | `create_user`                   | Create a new user in your Okta organization             | - `Create a new user named John Doe with email john.doe@company.com` <br> - `Add a new employee to the Sales department` <br> - `Set up a contractor account` |
 | `update_user`                   | Update an existing user's profile information           | - `Update John Doe's department to Engineering` <br> - `Change the phone number for user jane.smith@company.com` <br> - `Update the manager for this user`    |
-| `deactivate_user`               | Deactivate a user, making them inactive                 | - `Deactivate the user john.doe@company.com` <br> - `Disable access for former employee Jane Smith` <br> - `Suspend the contractor account temporarily`       |
-| `delete_deactivated_user`       | Permanently delete a deactivated user                   | - `Delete the deactivated user john.doe@company.com` <br> - `Remove former employee Jane Smith permanently` <br> - `Clean up old contractor accounts`         |
+| `deactivate_user`               | Deactivate a user (prompts for confirmation)            | - `Deactivate the user john.doe@company.com` <br> - `Disable access for former employee Jane Smith` <br> - `Suspend the contractor account temporarily`       |
+| `delete_deactivated_user`       | Permanently delete a deactivated user (prompts for confirmation) | - `Delete the deactivated user john.doe@company.com` <br> - `Remove former employee Jane Smith permanently` <br> - `Clean up old contractor accounts`         |
 | `get_user_profile_attributes`   | Retrieve all supported user profile attributes          | - `What user profile fields are available?` <br> - `Show me all the custom attributes we can set` <br> - `List the standard Okta user attributes`             |
 
 ### Groups
@@ -462,7 +463,7 @@ The Okta MCP Server provides the following tools for LLMs to interact with your 
 | `get_group`             | Get detailed information about a specific group  | - `Show me details for the Engineering group` <br> - `How many members are in the Administrators group?` <br> - `What applications are assigned to Sales?`    |
 | `create_group`          | Create a new group                                | - `Create a new group called DevOps Team` <br> - `Set up a security group for the Finance department` <br> - `Add a group for temporary contractors`          |
 | `update_group`          | Update an existing group's information            | - `Update the description for the Engineering group` <br> - `Change the name of the Sales group to Revenue Team` <br> - `Modify the Finance group settings`   |
-| `delete_group`          | Delete a group (requires confirmation)            | - `Delete the old Marketing group` <br> - `Remove the temporary project group` <br> - `Clean up unused security groups`                                       |
+| `delete_group`          | Delete a group (prompts for confirmation)         | - `Delete the old Marketing group` <br> - `Remove the temporary project group` <br> - `Clean up unused security groups`                                       |
 | `list_group_users`      | List all users who are members of a group        | - `Who are the members of the Engineering group?` <br> - `Show me all administrators` <br> - `List users in the Finance department`                           |
 | `list_group_apps`       | List all applications assigned to a group        | - `What applications does the Engineering group have access to?` <br> - `Show apps assigned to Sales team` <br> - `List all applications for Administrators`  |
 | `add_user_to_group`     | Add a user to a group                             | - `Add john.doe@company.com to the Engineering group` <br> - `Give Jane Smith access to the Finance applications` <br> - `Add the new hire to the Sales team` |
@@ -476,9 +477,9 @@ The Okta MCP Server provides the following tools for LLMs to interact with your 
 | `get_application`             | Get detailed information about a specific app    | - `Show me details for the Salesforce application` <br> - `What are the callback URLs for our mobile app?` <br> - `Get the client ID for our web application` |
 | `create_application`          | Create a new application                          | - `Create a new SAML application for our HR system` <br> - `Set up a new API service application` <br> - `Add a mobile app integration`                       |
 | `update_application`          | Update an existing application                    | - `Update the callback URLs for our web app` <br> - `Change the logo for the Salesforce application` <br> - `Modify the SAML settings for our HR system`      |
-| `delete_application`          | Delete an application (requires confirmation)     | - `Delete the old legacy application` <br> - `Remove the unused test application` <br> - `Clean up deprecated integrations`                                   |
+| `delete_application`          | Delete an application (prompts for confirmation)  | - `Delete the old legacy application` <br> - `Remove the unused test application` <br> - `Clean up deprecated integrations`                                   |
 | `activate_application`        | Activate an application                           | - `Activate the new HR application` <br> - `Enable the Salesforce integration` <br> - `Turn on the mobile app for users`                                      |
-| `deactivate_application`      | Deactivate an application                         | - `Deactivate the legacy CRM application` <br> - `Temporarily disable the mobile app` <br> - `Turn off access to the test environment`                        |
+| `deactivate_application`      | Deactivate an application (prompts for confirmation) | - `Deactivate the legacy CRM application` <br> - `Temporarily disable the mobile app` <br> - `Turn off access to the test environment`                        |
 
 ### Policies
 
@@ -488,22 +489,29 @@ The Okta MCP Server provides the following tools for LLMs to interact with your 
 | `get_policy`                | Get detailed information about a policy       | - `Show me the details of our password policy` <br> - `What are the MFA requirements?` <br> - `Display the sign-on policy for contractors`                    |
 | `create_policy`             | Create a new policy                            | - `Create a new password policy for contractors` <br> - `Set up MFA requirements for high-risk applications` <br> - `Add a sign-on policy for remote workers` |
 | `update_policy`             | Update an existing policy                      | - `Update the password complexity requirements` <br> - `Modify the MFA policy for executives` <br> - `Change the session timeout for contractors`             |
-| `delete_policy`             | Delete a policy                                | - `Delete the old password policy` <br> - `Remove the deprecated MFA policy` <br> - `Clean up unused security policies`                                       |
+| `delete_policy`             | Delete a policy (prompts for confirmation)     | - `Delete the old password policy` <br> - `Remove the deprecated MFA policy` <br> - `Clean up unused security policies`                                       |
 | `activate_policy`           | Activate a policy                              | - `Activate the new password policy` <br> - `Enable the MFA requirements` <br> - `Turn on the contractor sign-on policy`                                      |
-| `deactivate_policy`         | Deactivate a policy                            | - `Deactivate the old security policy` <br> - `Temporarily disable MFA for testing` <br> - `Turn off the strict password requirements`                        |
+| `deactivate_policy`         | Deactivate a policy (prompts for confirmation) | - `Deactivate the old security policy` <br> - `Temporarily disable MFA for testing` <br> - `Turn off the strict password requirements`                        |
 | `list_policy_rules`         | List all rules for a specific policy          | - `Show me all rules for the password policy` <br> - `What MFA rules are configured?` <br> - `List the exceptions in our sign-on policy`                      |
 | `get_policy_rule`           | Get detailed information about a policy rule  | - `Show me the details of the contractor MFA rule` <br> - `What are the conditions for the VPN access rule?` <br> - `Display the emergency access rule`       |
 | `create_policy_rule`        | Create a new rule for a policy                 | - `Add an exception rule for executives` <br> - `Create a rule for contractor access` <br> - `Set up emergency access rules for IT admins`                    |
 | `update_policy_rule`        | Update an existing policy rule                 | - `Update the location restrictions for remote workers` <br> - `Modify the device trust requirements` <br> - `Change the risk-based authentication settings`  |
-| `delete_policy_rule`        | Delete a rule from a policy                    | - `Delete the old contractor exception` <br> - `Remove the deprecated VPN rule` <br> - `Clean up unused policy exceptions`                                    |
+| `delete_policy_rule`        | Delete a rule from a policy (prompts for confirmation) | - `Delete the old contractor exception` <br> - `Remove the deprecated VPN rule` <br> - `Clean up unused policy exceptions`                                    |
 | `activate_policy_rule`      | Activate a policy rule                         | - `Activate the new emergency access rule` <br> - `Enable the contractor restrictions` <br> - `Turn on the location-based access rule`                        |
-| `deactivate_policy_rule`    | Deactivate a policy rule                       | - `Deactivate the old emergency rule` <br> - `Temporarily disable location restrictions` <br> - `Turn off the device trust requirements for testing`          |
+| `deactivate_policy_rule`    | Deactivate a policy rule (prompts for confirmation) | - `Deactivate the old emergency rule` <br> - `Temporarily disable location restrictions` <br> - `Turn off the device trust requirements for testing`          |
 
 ### Logs
 
 | Tool        | Description                              | Usage Examples                                                                                                                                             |
 | ----------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `get_logs`  | Retrieve system logs from your Okta org | - `Show me recent login attempts` <br> - `Find failed logins from the past 24 hours` <br> - `Get authentication logs for user john.doe@company.com`     |
+
+### Confirmation for Destructive Operations
+
+All destructive operations (deleting groups, applications, policies, policy rules and deactivating/deleting users) use the **[MCP Elicitation API](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation)** to prompt the user for explicit confirmation before proceeding.
+
+- **Clients that support elicitation** (e.g., Claude Desktop with MCP SDK ≥ 1.26): The user sees a confirmation dialog directly in the chat UI. They can accept, decline, or cancel.
+- **Clients that do not yet support elicitation**: The tool returns a JSON payload describing the pending action so the LLM can relay the confirmation request to the user. The deprecated `confirm_delete_group` / `confirm_delete_application` tools remain available as a fallback for these clients.
 
 ## 🔐 Authentication
 
