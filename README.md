@@ -500,6 +500,13 @@ The Okta MCP Server provides the following tools for LLMs to interact with your 
 | `activate_policy_rule`      | Activate a policy rule                         | - `Activate the new emergency access rule` <br> - `Enable the contractor restrictions` <br> - `Turn on the location-based access rule`                        |
 | `deactivate_policy_rule`    | Deactivate a policy rule (prompts for confirmation) | - `Deactivate the old emergency rule` <br> - `Temporarily disable location restrictions` <br> - `Turn off the device trust requirements for testing`          |
 
+### Profile Mappings
+
+| Tool                      | Description                                          | Usage Examples                                                                                                                                                |
+| ------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_profile_mappings`   | List profile mappings with optional source/target filter | - `Show me the profile mappings for the Salesforce application` <br> - `What mappings target the Okta user profile?` <br> - `List all mappings where this app is the source` |
+| `get_profile_mapping`     | Get a specific profile mapping with property expressions | - `Show me the attribute mapping details for this mapping` <br> - `What expression is used to map the department field?` <br> - `How is the email attribute transformed between the app and Okta?` |
+
 ### Logs
 
 | Tool        | Description                              | Usage Examples                                                                                                                                             |
