@@ -15,12 +15,42 @@ from loguru import logger
 def extract_after_cursor(response) -> Optional[str]:
     """Extract the 'after' cursor from the next page URL in Okta API response.
 
+    Supports both Okta SDK v2 (OktaAPIResponse with has_next/_next) and
+    v3 (ApiResponse with headers containing a Link header).
+
     Args:
-        response: OktaAPIResponse object
+        response: OktaAPIResponse (v2) or ApiResponse (v3) object
 
     Returns:
         str: The 'after' cursor value, or None if no next page
     """
+    import re
+
+    # --- Okta SDK v3: ApiResponse with Link header ---
+    if response and hasattr(response, "headers") and response.headers:
+        link_header = ""
+        try:
+            link_header = response.headers.get("Link", "") or response.headers.get("link", "")
+        except Exception:
+            for key in response.headers:
+                if key.lower() == "link":
+                    link_header = response.headers[key]
+                    break
+
+        if link_header and 'rel="next"' in link_header:
+            match = re.search(r'<([^>]+)>;\s*rel="next"', link_header)
+            if match:
+                next_url = match.group(1)
+                try:
+                    parsed = urlparse(next_url)
+                    qp = parse_qs(parsed.query)
+                    cursor = qp.get("after", [None])[0]
+                    if cursor:
+                        return cursor
+                except Exception as e:
+                    logger.warning(f"Failed to parse Link header cursor: {e}")
+
+    # --- Okta SDK v2: OktaAPIResponse with has_next()/_next ---
     if not response or not hasattr(response, "has_next") or not response.has_next():
         return None
 
@@ -28,8 +58,8 @@ def extract_after_cursor(response) -> Optional[str]:
         # response._next contains URL like: "/api/v1/users?after=00u1abc123def456"
         if hasattr(response, "_next") and response._next:
             parsed = urlparse(response._next)
-            query_params = parse_qs(parsed.query)
-            return query_params.get("after", [None])[0]
+            qp = parse_qs(parsed.query)
+            return qp.get("after", [None])[0]
     except Exception as e:
         logger.warning(f"Failed to extract after cursor: {e}")
 
@@ -128,8 +158,10 @@ def create_paginated_response(
 
     # Add pagination info if not fetch_all
     if not fetch_all_used and response:
-        result["has_more"] = response.has_next() if hasattr(response, "has_next") else False
-        result["next_cursor"] = extract_after_cursor(response)
+        next_cursor = extract_after_cursor(response)
+        has_more_v2 = response.has_next() if hasattr(response, "has_next") else False
+        result["has_more"] = has_more_v2 or bool(next_cursor)
+        result["next_cursor"] = next_cursor
 
     # Add detailed pagination info if available
     if pagination_info:
@@ -170,11 +202,11 @@ def build_query_params(
     if after:
         query_params["after"] = after
     if limit:
-        query_params["limit"] = str(limit)
+        query_params["limit"] = limit
 
     # Add any additional parameters
     for key, value in kwargs.items():
         if value is not None and value != "":
-            query_params[key] = str(value)
+            query_params[key] = value
 
     return query_params

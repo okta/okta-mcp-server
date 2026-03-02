@@ -70,10 +70,10 @@ async def list_applications(
         if expand:
             query_params["expand"] = expand
         if include_non_deleted is not None:
-            query_params["includeNonDeleted"] = include_non_deleted
+            query_params["include_non_deleted"] = include_non_deleted
 
         logger.debug("Calling Okta API to list applications")
-        apps, _, err = await client.list_applications(query_params)
+        apps, _, err = await client.list_applications(**query_params)
 
         if err:
             logger.error(f"Okta API error while listing applications: {err}")
@@ -114,7 +114,7 @@ async def get_application(ctx: Context, app_id: str, expand: Optional[str] = Non
         if expand:
             query_params["expand"] = expand
 
-        app, _, err = await client.get_application(app_id, query_params)
+        app, _, err = await client.get_application(app_id, **query_params)
 
         if err:
             logger.error(f"Okta API error while getting application {app_id}: {err}")
@@ -146,10 +146,8 @@ async def create_application(ctx: Context, app_config: Dict[str, Any], activate:
     try:
         client = await get_okta_client(manager)
 
-        query_params = {"activate": activate}
-
         logger.debug("Calling Okta API to create application")
-        app, _, err = await client.create_application(app_config, query_params)
+        app, _, err = await client.create_application(app_config, activate)
 
         if err:
             logger.error(f"Okta API error while creating application: {err}")
@@ -182,7 +180,7 @@ async def update_application(ctx: Context, app_id: str, app_config: Dict[str, An
         client = await get_okta_client(manager)
 
         logger.debug(f"Calling Okta API to update application {app_id}")
-        app, _, err = await client.update_application(app_id, app_config)
+        app, _, err = await client.replace_application(app_id, app_config)
 
         if err:
             logger.error(f"Okta API error while updating application {app_id}: {err}")
@@ -243,7 +241,7 @@ async def delete_application(ctx: Context, app_id: str) -> list:
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to delete application {app_id}")
 
-        _, err = await client.delete_application(app_id)
+        _, _, err = await client.delete_application(app_id)
 
         if err:
             logger.error(f"Okta API error while deleting application {app_id}: {err}")
@@ -288,7 +286,7 @@ async def confirm_delete_application(ctx: Context, app_id: str, confirmation: st
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to delete application {app_id}")
 
-        _, err = await client.delete_application(app_id)
+        _, _, err = await client.delete_application(app_id)
 
         if err:
             logger.error(f"Okta API error while deleting application {app_id}: {err}")
@@ -320,7 +318,7 @@ async def activate_application(ctx: Context, app_id: str) -> list:
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to activate application {app_id}")
 
-        _, err = await client.activate_application(app_id)
+        _, _, err = await client.activate_application(app_id)
 
         if err:
             logger.error(f"Okta API error while activating application {app_id}: {err}")
@@ -363,7 +361,7 @@ async def deactivate_application(ctx: Context, app_id: str) -> list:
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to deactivate application {app_id}")
 
-        _, err = await client.deactivate_application(app_id)
+        _, _, err = await client.deactivate_application(app_id)
 
         if err:
             logger.error(f"Okta API error while deactivating application {app_id}: {err}")
