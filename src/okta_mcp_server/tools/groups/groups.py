@@ -167,9 +167,9 @@ async def create_group(profile: dict, ctx: Context = None) -> list:
             logger.error(f"Okta API error while creating group: {err}")
             return {"error": f"Error: {err}"}
 
-        logger.info(
-            f"Successfully created group: {group.id} ({group.profile.name if hasattr(group, 'profile') else 'N/A'})"
-        )
+        profile_instance = getattr(group.profile, "actual_instance", None) if hasattr(group, "profile") else None
+        group_name = getattr(profile_instance, "name", "N/A") if profile_instance is not None else "N/A"
+        logger.info(f"Successfully created group: {group.id} ({group_name})")
         return [group]
     except Exception as e:
         logger.error(f"Exception while creating group: {type(e).__name__}: {e}")
