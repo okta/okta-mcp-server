@@ -219,7 +219,8 @@ async def delete_device_assurance_policy(
 
     try:
         okta_client = await get_okta_client(manager)
-        _, _, err = await okta_client.delete_device_assurance_policy(device_assurance_id)
+        result = await okta_client.delete_device_assurance_policy(device_assurance_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Error deleting device assurance policy {device_assurance_id}: {err}")

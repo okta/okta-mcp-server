@@ -224,7 +224,8 @@ async def delete_group(group_id: str, ctx: Context = None) -> list:
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to delete group {group_id}")
 
-        _, _, err = await client.delete_group(group_id)
+        result = await client.delete_group(group_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Okta API error while deleting group {group_id}: {err}")
@@ -269,7 +270,8 @@ async def confirm_delete_group(group_id: str, confirmation: str, ctx: Context = 
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to delete group {group_id}")
 
-        _, _, err = await client.delete_group(group_id)
+        result = await client.delete_group(group_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Okta API error while deleting group {group_id}: {err}")
@@ -458,7 +460,8 @@ async def add_user_to_group(group_id: str, user_id: str, ctx: Context = None) ->
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to add user {user_id} to group {group_id}")
 
-        _, _, err = await client.assign_user_to_group(group_id, user_id)
+        result = await client.assign_user_to_group(group_id, user_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Okta API error while adding user {user_id} to group {group_id}: {err}")
@@ -493,7 +496,8 @@ async def remove_user_from_group(group_id: str, user_id: str, ctx: Context = Non
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to remove user {user_id} from group {group_id}")
 
-        _, _, err = await client.unassign_user_from_group(group_id, user_id)
+        result = await client.unassign_user_from_group(group_id, user_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Okta API error while removing user {user_id} from group {group_id}: {err}")

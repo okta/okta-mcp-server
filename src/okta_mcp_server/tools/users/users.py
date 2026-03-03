@@ -299,7 +299,8 @@ async def deactivate_user(user_id: str, ctx: Context = None) -> list:
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to deactivate user {user_id}")
 
-        _, _, err = await client.deactivate_user(user_id)
+        result = await client.deactivate_user(user_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Okta API error while deactivating user {user_id}: {err}")
@@ -345,7 +346,8 @@ async def delete_deactivated_user(user_id: str, ctx: Context = None) -> list:
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to delete user {user_id}")
 
-        _, _, err = await client.delete_user(user_id)
+        result = await client.delete_user(user_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Okta API error while deleting user {user_id}: {err}")

@@ -217,7 +217,8 @@ async def delete_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
 
     try:
         okta_client = await get_okta_client(manager)
-        _, _, err = await okta_client.delete_policy(policy_id)
+        result = await okta_client.delete_policy(policy_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Error deleting policy {policy_id}: {err}")
@@ -245,7 +246,8 @@ async def activate_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
     okta_client = await get_okta_client(manager)
 
     try:
-        _, _, err = await okta_client.activate_policy(policy_id)
+        result = await okta_client.activate_policy(policy_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Error activating policy {policy_id}: {err}")
@@ -288,7 +290,8 @@ async def deactivate_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
 
     try:
         okta_client = await get_okta_client(manager)
-        _, _, err = await okta_client.deactivate_policy(policy_id)
+        result = await okta_client.deactivate_policy(policy_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Error deactivating policy {policy_id}: {err}")
@@ -468,7 +471,8 @@ async def delete_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Dict
 
     try:
         okta_client = await get_okta_client(manager)
-        _, _, err = await okta_client.delete_policy_rule(policy_id, rule_id)
+        result = await okta_client.delete_policy_rule(policy_id, rule_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Error deleting policy rule: {err}")
@@ -497,7 +501,8 @@ async def activate_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Di
     okta_client = await get_okta_client(manager)
 
     try:
-        _, _, err = await okta_client.activate_policy_rule(policy_id, rule_id)
+        result = await okta_client.activate_policy_rule(policy_id, rule_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Error activating policy rule: {err}")
@@ -539,7 +544,8 @@ async def deactivate_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> 
 
     try:
         okta_client = await get_okta_client(manager)
-        _, _, err = await okta_client.deactivate_policy_rule(policy_id, rule_id)
+        result = await okta_client.deactivate_policy_rule(policy_id, rule_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Error deactivating policy rule: {err}")
