@@ -7,10 +7,39 @@
 
 from typing import Any, Dict, Optional
 
+import okta.models as okta_models
 from loguru import logger
 from mcp.server.fastmcp import Context
 
 from okta_mcp_server.server import mcp
+
+# Mapping of signOnMode -> Okta SDK model class for proper serialization
+_SIGN_ON_MODE_MODEL_MAP: Dict[str, Any] = {
+    "BOOKMARK": okta_models.BookmarkApplication,
+    "AUTO_LOGIN": okta_models.AutoLoginApplication,
+    "BASIC_AUTH": okta_models.BasicAuthApplication,
+    "BROWSER_PLUGIN": okta_models.BrowserPluginApplication,
+    "OPENID_CONNECT": okta_models.OpenIdConnectApplication,
+    "SAML_1_1": okta_models.Saml11Application,
+    "SAML_2_0": okta_models.SamlApplication,
+    "SECURE_PASSWORD_STORE": okta_models.SecurePasswordStoreApplication,
+    "WS_FEDERATION": okta_models.WsFederationApplication,
+}
+
+
+def _build_application_model(app_config: Dict[str, Any]) -> Any:
+    """Convert a plain dict to the appropriate Okta SDK Application model.
+
+    The SDK v3 requires typed model objects, not plain dicts. Without this,
+    subclass-specific fields like `name`, `settings`, and `visibility` are
+    silently dropped by the base Application model, causing API validation errors.
+    """
+    sign_on_mode = app_config.get("signOnMode") or app_config.get("sign_on_mode", "")
+    model_cls = _SIGN_ON_MODE_MODEL_MAP.get(str(sign_on_mode).upper(), okta_models.Application)
+    logger.debug(f"Using model class '{model_cls.__name__}' for signOnMode '{sign_on_mode}'")
+    return model_cls(**app_config)
+
+
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DEACTIVATE_APPLICATION, DELETE_APPLICATION
@@ -146,8 +175,9 @@ async def create_application(ctx: Context, app_config: Dict[str, Any], activate:
     try:
         client = await get_okta_client(manager)
 
+        application_model = _build_application_model(app_config)
         logger.debug("Calling Okta API to create application")
-        app, _, err = await client.create_application(app_config, activate)
+        app, _, err = await client.create_application(application_model, activate)
 
         if err:
             logger.error(f"Okta API error while creating application: {err}")
@@ -179,8 +209,9 @@ async def update_application(ctx: Context, app_id: str, app_config: Dict[str, An
     try:
         client = await get_okta_client(manager)
 
+        application_model = _build_application_model(app_config)
         logger.debug(f"Calling Okta API to update application {app_id}")
-        app, _, err = await client.replace_application(app_id, app_config)
+        app, _, err = await client.replace_application(app_id, application_model)
 
         if err:
             logger.error(f"Okta API error while updating application {app_id}: {err}")
@@ -241,7 +272,8 @@ async def delete_application(ctx: Context, app_id: str) -> list:
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to delete application {app_id}")
 
-        _, _, err = await client.delete_application(app_id)
+        result = await client.delete_application(app_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Okta API error while deleting application {app_id}: {err}")
@@ -286,7 +318,8 @@ async def confirm_delete_application(ctx: Context, app_id: str, confirmation: st
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to delete application {app_id}")
 
-        _, _, err = await client.delete_application(app_id)
+        result = await client.delete_application(app_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Okta API error while deleting application {app_id}: {err}")
@@ -318,7 +351,8 @@ async def activate_application(ctx: Context, app_id: str) -> list:
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to activate application {app_id}")
 
-        _, _, err = await client.activate_application(app_id)
+        result = await client.activate_application(app_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Okta API error while activating application {app_id}: {err}")
@@ -361,7 +395,8 @@ async def deactivate_application(ctx: Context, app_id: str) -> list:
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to deactivate application {app_id}")
 
-        _, _, err = await client.deactivate_application(app_id)
+        result = await client.deactivate_application(app_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Okta API error while deactivating application {app_id}: {err}")
