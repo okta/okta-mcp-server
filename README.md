@@ -26,7 +26,7 @@ This server is an [Model Context Protocol](https://modelcontextprotocol.io/intro
 * **Interactive Confirmation via Elicitation:** Destructive operations (deletes, deactivations) prompt the user for confirmation through the [MCP Elicitation API](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation) before proceeding, with automatic fallback for clients that do not yet support the feature.
 * **Integration with Okta Admin Management APIs:** Leverages the official Okta APIs to ensure secure and reliable interaction with your Okta org.
 * **Extensible Architecture:** Designed to be easily extended with new functionalities and support for additional Okta API endpoints.
-* **Comprehensive Tool Support:** Full CRUD operations for users, groups, applications, policies, and more.
+* **Comprehensive Tool Support:** Full CRUD operations for users, groups, applications, policies, device assurance policies, and more.
 
 This MCP server utilizes [Okta's Python SDK](https://github.com/okta/okta-sdk-python) to communicate with the Okta APIs, ensuring a robust and well-supported integration.
 
@@ -500,6 +500,16 @@ The Okta MCP Server provides the following tools for LLMs to interact with your 
 | `activate_policy_rule`      | Activate a policy rule                         | - `Activate the new emergency access rule` <br> - `Enable the contractor restrictions` <br> - `Turn on the location-based access rule`                        |
 | `deactivate_policy_rule`    | Deactivate a policy rule (prompts for confirmation) | - `Deactivate the old emergency rule` <br> - `Temporarily disable location restrictions` <br> - `Turn off the device trust requirements for testing`          |
 
+### Device Assurance Policies
+
+| Tool                                  | Description                                                    | Usage Examples                                                                                                                                                                                   |
+| ------------------------------------- | -------------------------------------------------------------- |--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `list_device_assurance_policies`      | List all Device Assurance Policies in your Okta organization  | - `Show me all device assurance policies` <br> - `Which platforms have device compliance policies?` <br> - `Find policies that block jailbroken devices`                                          |
+| `get_device_assurance_policy`         | Get details of a specific Device Assurance Policy             | - `Show me the iOS device assurance policy` <br> - `What OS version does our MacOS policy require?` <br> - `Is jailbreak detection enabled in our Android policy?`                               |
+| `create_device_assurance_policy`      | Create a new Device Assurance Policy                          | - `Create a MacOS policy requiring OS 14.2 and disk encryption` <br> - `Set up an iOS policy that blocks jailbroken devices` <br> - `Add a Windows compliance policy requiring BitLocker`        |
+| `replace_device_assurance_policy`     | Fully replace an existing Device Assurance Policy             | - `Update the MacOS policy to require OS 14.5` <br> - `Enable secure hardware requirement for our Windows policy` <br> - `Change the minimum OS version for our iOS policy`                      |
+| `delete_device_assurance_policy`      | Delete a Device Assurance Policy (prompts for confirmation)   | - `Delete the old Windows compliance policy` <br> - `Remove the deprecated Android policy` <br> - `Clean up unused device assurance policies`                                                    |
+
 ### Logs
 
 | Tool        | Description                              | Usage Examples                                                                                                                                             |
@@ -508,7 +518,7 @@ The Okta MCP Server provides the following tools for LLMs to interact with your 
 
 ### Confirmation for Destructive Operations
 
-All destructive operations (deleting groups, applications, policies, policy rules and deactivating/deleting users) use the **[MCP Elicitation API](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation)** to prompt the user for explicit confirmation before proceeding.
+All destructive operations (deleting groups, applications, policies, policy rules, device assurance policies, and deactivating/deleting users) use the **[MCP Elicitation API](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation)** to prompt the user for explicit confirmation before proceeding.
 
 - **Clients that support elicitation** (e.g., Claude Desktop with MCP SDK ≥ 1.26): The user sees a confirmation dialog directly in the chat UI. They can accept, decline, or cancel.
 - **Clients that do not yet support elicitation**: The tool returns a JSON payload describing the pending action so the LLM can relay the confirmation request to the user. The deprecated `confirm_delete_group` / `confirm_delete_application` tools remain available as a fallback for these clients.
