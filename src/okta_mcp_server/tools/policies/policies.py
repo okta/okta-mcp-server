@@ -10,6 +10,8 @@ from typing import Any, Dict, Optional
 from loguru import logger
 from mcp.server.fastmcp import Context
 
+from okta.models.policy_rule import PolicyRule
+
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConfirmation, elicit_or_fallback
@@ -395,7 +397,8 @@ async def create_policy_rule(ctx: Context, policy_id: str, rule_data: Dict[str, 
     okta_client = await get_okta_client(manager)
 
     try:
-        rule, _, err = await okta_client.create_policy_rule(policy_id, rule_data)
+        policy_rule = PolicyRule.from_dict(rule_data)
+        rule, _, err = await okta_client.create_policy_rule(policy_id, policy_rule)
 
         if err:
             logger.error(f"Error creating policy rule: {err}")
@@ -427,7 +430,8 @@ async def update_policy_rule(
     okta_client = await get_okta_client(manager)
 
     try:
-        rule, _, err = await okta_client.replace_policy_rule(policy_id, rule_id, rule_data)
+        policy_rule = PolicyRule.from_dict(rule_data)
+        rule, _, err = await okta_client.replace_policy_rule(policy_id, rule_id, policy_rule)
 
         if err:
             logger.error(f"Error updating policy rule: {err}")
