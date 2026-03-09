@@ -128,7 +128,7 @@ class TestExtractAfterCursorV2:
 
 
 # ---------------------------------------------------------------------------
-# paginate_all_results — SDK v3 path (fetch_page_fn provided)
+# paginate_all_results — SDK v3 path (next_page_fn provided)
 # ---------------------------------------------------------------------------
 
 class TestPaginateAllResultsV3:
@@ -141,7 +141,7 @@ class TestPaginateAllResultsV3:
         all_items, info = await paginate_all_results(
             initial_response,
             initial_items,
-            fetch_page_fn=AsyncMock(),  # should never be called
+            next_page_fn=AsyncMock(),  # should never be called
         )
 
         assert all_items == initial_items
@@ -159,15 +159,15 @@ class TestPaginateAllResultsV3:
         resp1 = _make_v3_response(after_cursor="cursor_for_page2")
         resp2 = _make_v3_response(after_cursor=None)
 
-        fetch_page_fn = AsyncMock(return_value=(page2_items, resp2, None))
+        next_page_fn = AsyncMock(return_value=(page2_items, resp2, None))
 
         all_items, info = await paginate_all_results(
             resp1,
             page1_items,
-            fetch_page_fn=fetch_page_fn,
+            next_page_fn=next_page_fn,
         )
 
-        fetch_page_fn.assert_awaited_once_with("cursor_for_page2")
+        next_page_fn.assert_awaited_once_with("cursor_for_page2")
         assert all_items == page1_items + page2_items
         assert info["pages_fetched"] == 2
         assert info["total_items"] == 8
@@ -183,12 +183,12 @@ class TestPaginateAllResultsV3:
         resp2 = _make_v3_response(after_cursor="c3")
         resp3 = _make_v3_response(after_cursor=None)
 
-        fetch_page_fn = AsyncMock(side_effect=[
+        next_page_fn = AsyncMock(side_effect=[
             (page2, resp2, None),
             (page3, resp3, None),
         ])
 
-        all_items, info = await paginate_all_results(resp1, page1, fetch_page_fn=fetch_page_fn)
+        all_items, info = await paginate_all_results(resp1, page1, next_page_fn=next_page_fn)
 
         assert len(all_items) == 8
         assert info["pages_fetched"] == 3
@@ -201,13 +201,13 @@ class TestPaginateAllResultsV3:
         resp_with_cursor = _make_v3_response(after_cursor="always_more")
         page_items = _make_items(5)
 
-        fetch_page_fn = AsyncMock(return_value=(page_items, resp_with_cursor, None))
+        next_page_fn = AsyncMock(return_value=(page_items, resp_with_cursor, None))
 
         all_items, info = await paginate_all_results(
             resp_with_cursor,
             page_items,
             max_pages=3,
-            fetch_page_fn=fetch_page_fn,
+            next_page_fn=next_page_fn,
         )
 
         assert info["pages_fetched"] == 3
@@ -221,12 +221,12 @@ class TestPaginateAllResultsV3:
         page1_items = _make_items(5, "p1")
         resp1 = _make_v3_response(after_cursor="c2")
 
-        fetch_page_fn = AsyncMock(return_value=(None, MagicMock(), "Okta API error"))
+        next_page_fn = AsyncMock(return_value=(None, MagicMock(), "Okta API error"))
 
         all_items, info = await paginate_all_results(
             resp1,
             page1_items,
-            fetch_page_fn=fetch_page_fn,
+            next_page_fn=next_page_fn,
         )
 
         assert all_items == page1_items  # only first page
@@ -239,12 +239,12 @@ class TestPaginateAllResultsV3:
         page1_items = _make_items(4, "p1")
         resp1 = _make_v3_response(after_cursor="c2")
 
-        fetch_page_fn = AsyncMock(side_effect=RuntimeError("network failure"))
+        next_page_fn = AsyncMock(side_effect=RuntimeError("network failure"))
 
         all_items, info = await paginate_all_results(
             resp1,
             page1_items,
-            fetch_page_fn=fetch_page_fn,
+            next_page_fn=next_page_fn,
         )
 
         assert all_items == page1_items
@@ -258,12 +258,12 @@ class TestPaginateAllResultsV3:
         resp1 = _make_v3_response(after_cursor="c2")
         resp2 = _make_v3_response(after_cursor="c3")  # has cursor but empty items
 
-        fetch_page_fn = AsyncMock(return_value=([], resp2, None))
+        next_page_fn = AsyncMock(return_value=([], resp2, None))
 
         all_items, info = await paginate_all_results(
             resp1,
             page1_items,
-            fetch_page_fn=fetch_page_fn,
+            next_page_fn=next_page_fn,
         )
 
         assert all_items == page1_items
@@ -277,12 +277,12 @@ class TestPaginateAllResultsV3:
         page2_items = _make_items(3, "p2")
         resp2 = _make_v3_response(after_cursor=None)
 
-        fetch_page_fn = AsyncMock(return_value=(page2_items, resp2, None))
+        next_page_fn = AsyncMock(return_value=(page2_items, resp2, None))
 
         all_items, info = await paginate_all_results(
             resp1,
             [],
-            fetch_page_fn=fetch_page_fn,
+            next_page_fn=next_page_fn,
         )
 
         assert all_items == page2_items
@@ -290,7 +290,7 @@ class TestPaginateAllResultsV3:
 
 
 # ---------------------------------------------------------------------------
-# paginate_all_results — SDK v2 fallback path (no fetch_page_fn)
+# paginate_all_results — SDK v2 fallback path (no next_page_fn)
 # ---------------------------------------------------------------------------
 
 class TestPaginateAllResultsV2Fallback:
