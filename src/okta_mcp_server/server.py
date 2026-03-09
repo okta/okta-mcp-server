@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 
 from loguru import logger
-from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp import Context, FastMCP
 
 from okta_mcp_server.utils.auth.auth_manager import OktaAuthManager
 
@@ -163,7 +163,7 @@ def list_available_toolsets() -> dict:
 
 
 @mcp.tool()
-def load_toolset(toolset_name: str) -> dict:
+async def load_toolset(toolset_name: str, ctx: Context) -> dict:
     """
     Load an Okta toolset by name to make its tools available for use.
 
@@ -197,9 +197,18 @@ def load_toolset(toolset_name: str) -> dict:
         _loaded_toolsets.add(toolset_name)
         logger.info(f"[Strategy 3] Dynamically loaded toolset '{toolset_name}' ({entry['tool_count']} tools)")
 
+        # Notify the MCP client that the tool list has changed so it re-fetches
+        # the full list. The LLM will then see the newly registered tools
+        # immediately and can use them in this same conversation turn.
+        await ctx.session.send_tool_list_changed()
+
         return {
             "success": True,
-            "message": f"Toolset '{toolset_name}' loaded successfully. Its tools are now available.",
+            "message": (
+                f"Toolset '{toolset_name}' loaded. "
+                f"The tool list has been refreshed — you now have access to its "
+                f"{entry['tool_count']} tools and can call them directly."
+            ),
             "toolset": toolset_name,
             "tool_count": entry["tool_count"],
             "description": entry["description"],
