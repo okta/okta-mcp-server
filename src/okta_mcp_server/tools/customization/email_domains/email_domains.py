@@ -172,6 +172,23 @@ async def create_email_domain(
 
     try:
         client = await get_okta_client(manager)
+
+        # Check for an existing email domain with the same name before creating.
+        existing_list, _, list_err = await client.list_email_domains()
+        if not list_err and existing_list:
+            for existing in existing_list:
+                if getattr(existing, "domain", None) == domain:
+                    existing_id = getattr(existing, "id", "unknown")
+                    logger.warning(
+                        f"Email domain '{domain}' already exists (id: {existing_id})"
+                    )
+                    return {
+                        "error": (
+                            f"An email domain '{domain}' already exists (id: {existing_id!r}). "
+                            "Use list_email_domains() to find it or choose a different domain."
+                        )
+                    }
+
         req = EmailDomain(
             brand_id=brand_id,
             domain=domain,
@@ -436,6 +453,22 @@ async def verify_email_domain(
 
     try:
         client = await get_okta_client(manager)
+
+        # AC1: Check the current validation status before calling verify.
+        # If already VERIFIED there is nothing to do — return a clear message
+        # instead of re-running the verify flow.
+        current, _, fetch_err = await client.get_email_domain(email_domain_id)
+        if not fetch_err and current:
+            current_status = (getattr(current, "validation_status", None) or "").upper()
+            if current_status == "VERIFIED":
+                logger.info(
+                    f"Email domain {email_domain_id!r} is already verified."
+                )
+                return {
+                    "validationStatus": current_status,
+                    "message": "Email domain is already verified. No further action needed.",
+                }
+
         result, _, err = await client.verify_email_domain(email_domain_id)
 
         if err:

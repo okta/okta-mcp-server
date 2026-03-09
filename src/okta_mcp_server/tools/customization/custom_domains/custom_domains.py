@@ -161,6 +161,24 @@ async def create_custom_domain(
 
     try:
         client = await get_okta_client(manager)
+
+        # Check for an existing domain with the same FQDN before creating.
+        existing_list, _, list_err = await client.list_custom_domains()
+        if not list_err and existing_list:
+            existing_domains = getattr(existing_list, "domains", None) or []
+            for existing in existing_domains:
+                if getattr(existing, "domain", None) == domain:
+                    existing_id = getattr(existing, "id", "unknown")
+                    logger.warning(
+                        f"Custom domain '{domain}' already exists (id: {existing_id})"
+                    )
+                    return {
+                        "error": (
+                            f"A custom domain '{domain}' already exists (id: {existing_id!r}). "
+                            "Use list_custom_domains() to find it or choose a different domain."
+                        )
+                    }
+
         req = DomainRequest(
             domain=domain,
             certificate_source_type=DomainCertificateSourceType(upper_cst),
@@ -344,7 +362,7 @@ async def upsert_custom_domain_certificate(
     domain_id: str,
     certificate: str,
     certificate_chain: str,
-    private_key: str,
+    private_key_file_path: str,
 ) -> Dict[str, Any]:
     """Upload or renew the TLS certificate for a MANUAL custom domain.
 
@@ -364,9 +382,11 @@ async def upsert_custom_domain_certificate(
             May include intermediate CA certificates concatenated after the
             leaf certificate, or may be identical to ``certificate`` for
             self-signed/root-signed certs.
-        private_key (str, required): PEM-encoded RSA private key.
-            Must start with ``-----BEGIN PRIVATE KEY-----`` or
-            ``-----BEGIN RSA PRIVATE KEY-----``.
+        private_key_file_path (str, required): Absolute path to the PEM-encoded
+            RSA private key file on the server (e.g. ``"/etc/ssl/private/domain.key"``).
+            The key is read from disk and never exposed in the conversation.
+            The file must contain a key starting with
+            ``-----BEGIN PRIVATE KEY-----`` or ``-----BEGIN RSA PRIVATE KEY-----``.
 
     Returns:
         Dict with ``success: True`` on success (204 No Content from Okta),
@@ -374,6 +394,18 @@ async def upsert_custom_domain_certificate(
     """
     logger.info(f"Upserting certificate for custom domain: {domain_id}")
     manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    # Read the private key from a local file path so the raw PEM key
+    # value is never passed through the LLM conversation.
+    import os
+    if not os.path.isfile(private_key_file_path):
+        return {"error": f"Private key file not found: {private_key_file_path!r}"}
+    try:
+        with open(private_key_file_path, "r") as _fh:
+            private_key = _fh.read()
+    except OSError as _read_err:
+        logger.error(f"Failed to read private key file {private_key_file_path!r}: {_read_err}")
+        return {"error": f"Could not read private key file: {_read_err}"}
 
     try:
         client = await get_okta_client(manager)
@@ -441,6 +473,24 @@ async def verify_custom_domain(
 
     try:
         client = await get_okta_client(manager)
+
+        # Check the current validation status before calling verify.
+        # If the domain is already verified there is nothing to do - return a
+        # clear status message instead of re-running the verify flow and
+        # confusing the caller with DNS record output.
+        current, _, fetch_err = await client.get_custom_domain(domain_id)
+        if not fetch_err and current:
+            current_status = (getattr(current, "validation_status", None) or "").upper()
+            if current_status in ("VERIFIED", "COMPLETED"):
+                logger.info(
+                    f"Custom domain {domain_id!r} is already verified "
+                    f"(validationStatus={current_status!r})"
+                )
+                return {
+                    "validationStatus": current_status,
+                    "message": "Domain is already verified. No further action needed.",
+                }
+
         verified, _, err = await client.verify_domain(domain_id)
 
         if err:

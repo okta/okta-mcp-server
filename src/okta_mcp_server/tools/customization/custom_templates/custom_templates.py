@@ -274,6 +274,25 @@ async def create_email_customization(
 
     try:
         client = await get_okta_client(manager)
+
+        # Check if a customization for this language already exists before creating.
+        existing, _, list_err = await client.list_email_customizations(brand_id, template_name)
+        if not list_err and existing:
+            for ex in existing:
+                if getattr(ex, "language", None) == language:
+                    ex_id = getattr(ex, "id", "unknown")
+                    logger.warning(
+                        f"A '{language}' customization already exists for template "
+                        f"'{template_name}' on brand {brand_id!r} (id: {ex_id})"
+                    )
+                    return {
+                        "error": (
+                            f"A '{language}' customization already exists for template "
+                            f"'{template_name}' (id: {ex_id!r}). "
+                            "Use replace_email_customization() to update it."
+                        )
+                    }
+
         instance = EmailCustomization(
             language=language,
             subject=subject,

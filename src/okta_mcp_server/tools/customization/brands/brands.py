@@ -240,6 +240,22 @@ async def create_brand(
     try:
         client = await get_okta_client(manager)
 
+        # Check for an existing brand with the same name before creating.
+        existing_brands, _, list_err = await client.list_brands()
+        if not list_err and existing_brands:
+            for existing in existing_brands:
+                if getattr(existing, "name", None) == name:
+                    existing_id = getattr(existing, "id", "unknown")
+                    logger.warning(
+                        f"Brand with name '{name}' already exists (id: {existing_id})"
+                    )
+                    return {
+                        "error": (
+                            f"A brand named '{name}' already exists (id: {existing_id!r}). "
+                            "Use list_brands() to find it or choose a different name."
+                        )
+                    }
+
         create_request = CreateBrandRequest(name=name)
         brand, _, err = await client.create_brand(create_request)
 
