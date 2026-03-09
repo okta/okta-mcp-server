@@ -67,15 +67,30 @@ def extract_after_cursor(response) -> Optional[str]:
 
 
 async def paginate_all_results(
-    initial_response, initial_items: List, max_pages: int = 50, delay_between_requests: float = 0.1
+    initial_response,
+    initial_items: List,
+    max_pages: int = 500,
+    delay_between_requests: float = 0.1,
+    next_page_fn=None,
+    on_page=None,
 ) -> Tuple[List, Dict[str, Any]]:
     """Auto-paginate through all pages of results.
 
+    Supports both Okta SDK v2 (OktaAPIResponse with has_next/next()) and SDK v3
+    (ApiResponse with Link header cursor).  For SDK v3, a ``next_page_fn`` callable
+    must be supplied; it will be called as ``next_page_fn(after_cursor)`` and must
+    return a ``(items, response, err)`` tuple matching the SDK v3 convention.
+
     Args:
-        initial_response: The first OktaAPIResponse object
+        initial_response: The first OktaAPIResponse (v2) or ApiResponse (v3) object
         initial_items: The first page of items
         max_pages: Maximum number of pages to fetch (safety limit)
         delay_between_requests: Delay in seconds between requests
+        next_page_fn: Async callable for SDK v3 pagination:
+            ``async (after: str) -> (items, response, err)``
+        on_page: Optional async callable invoked after each page is fetched.
+            Signature: ``async (pages_fetched: int, total_items: int) -> None``
+            Use this to emit progress notifications to the caller.
 
     Returns:
         Tuple of (all_items, pagination_info)
@@ -86,47 +101,100 @@ async def paginate_all_results(
 
     pagination_info = {"pages_fetched": 1, "total_items": len(all_items), "stopped_early": False, "stop_reason": None}
 
-    if not response or not hasattr(response, "has_next"):
+    if not response:
         return all_items, pagination_info
 
-    try:
-        while response.has_next() and pages_fetched < max_pages:
-            # Add delay to be respectful to the API
-            if delay_between_requests > 0:
-                await asyncio.sleep(delay_between_requests)
+    # --- SDK v2: response.has_next() / response.next() ---
+    if hasattr(response, "has_next"):
+        try:
+            while response.has_next() and pages_fetched < max_pages:
+                if delay_between_requests > 0:
+                    await asyncio.sleep(delay_between_requests)
 
-            try:
-                next_items, next_err = await response.next()
+                try:
+                    next_items, next_err = await response.next()
 
-                if next_err:
-                    logger.warning(f"Error fetching page {pages_fetched + 1}: {next_err}")
+                    if next_err:
+                        logger.warning(f"Error fetching page {pages_fetched + 1}: {next_err}")
+                        pagination_info["stopped_early"] = True
+                        pagination_info["stop_reason"] = f"API error: {next_err}"
+                        break
+
+                    if next_items:
+                        all_items.extend(next_items)
+                        pages_fetched += 1
+                        logger.debug(f"Fetched page {pages_fetched}, total items: {len(all_items)}")
+                        if on_page:
+                            try:
+                                await on_page(pages_fetched, len(all_items))
+                            except Exception:
+                                pass
+                    else:
+                        break
+
+                except Exception as e:
+                    logger.error(f"Exception during pagination on page {pages_fetched + 1}: {e}")
                     pagination_info["stopped_early"] = True
-                    pagination_info["stop_reason"] = f"API error: {next_err}"
+                    pagination_info["stop_reason"] = f"Exception: {e}"
                     break
 
-                if next_items:
-                    all_items.extend(next_items)
-                    pages_fetched += 1
-                    logger.debug(f"Fetched page {pages_fetched}, total items: {len(all_items)}")
-                else:
-                    # No more items, break
-                    break
-
-            except Exception as e:
-                logger.error(f"Exception during pagination on page {pages_fetched + 1}: {e}")
+            if pages_fetched >= max_pages and response.has_next():
                 pagination_info["stopped_early"] = True
-                pagination_info["stop_reason"] = f"Exception: {e}"
-                break
+                pagination_info["stop_reason"] = f"Reached maximum page limit ({max_pages})"
+                logger.warning(f"Stopped pagination at {max_pages} pages limit")
 
-        if pages_fetched >= max_pages and response.has_next():
+        except Exception as e:
+            logger.error(f"Unexpected error during pagination: {e}")
             pagination_info["stopped_early"] = True
-            pagination_info["stop_reason"] = f"Reached maximum page limit ({max_pages})"
-            logger.warning(f"Stopped pagination at {max_pages} pages limit")
+            pagination_info["stop_reason"] = f"Unexpected error: {e}"
 
-    except Exception as e:
-        logger.error(f"Unexpected error during pagination: {e}")
-        pagination_info["stopped_early"] = True
-        pagination_info["stop_reason"] = f"Unexpected error: {e}"
+    # --- SDK v3: Link header cursor + caller-supplied next_page_fn ---
+    elif next_page_fn is not None:
+        cursor = extract_after_cursor(response)
+        try:
+            while cursor and pages_fetched < max_pages:
+                if delay_between_requests > 0:
+                    await asyncio.sleep(delay_between_requests)
+
+                try:
+                    next_items, next_response, next_err = await next_page_fn(cursor)
+
+                    if next_err:
+                        logger.warning(f"Error fetching page {pages_fetched + 1}: {next_err}")
+                        pagination_info["stopped_early"] = True
+                        pagination_info["stop_reason"] = f"API error: {next_err}"
+                        break
+
+                    if next_items:
+                        all_items.extend(next_items)
+                        pages_fetched += 1
+                        logger.debug(f"Fetched page {pages_fetched}, total items: {len(all_items)}")
+                        if on_page:
+                            try:
+                                await on_page(pages_fetched, len(all_items))
+                            except Exception:
+                                pass
+                    else:
+                        break
+
+                    response = next_response
+                    cursor = extract_after_cursor(next_response) if next_response else None
+
+                except Exception as e:
+                    logger.error(f"Exception during pagination on page {pages_fetched + 1}: {e}")
+                    pagination_info["stopped_early"] = True
+                    pagination_info["stop_reason"] = f"Exception: {e}"
+                    break
+
+            if cursor and pages_fetched >= max_pages:
+                pagination_info["stopped_early"] = True
+                pagination_info["stop_reason"] = f"Reached maximum page limit ({max_pages})"
+                logger.warning(f"Stopped pagination at {max_pages} pages limit")
+
+        except Exception as e:
+            logger.error(f"Unexpected error during SDK v3 pagination: {e}")
+            pagination_info["stopped_early"] = True
+            pagination_info["stop_reason"] = f"Unexpected error: {e}"
 
     pagination_info["pages_fetched"] = pages_fetched
     pagination_info["total_items"] = len(all_items)

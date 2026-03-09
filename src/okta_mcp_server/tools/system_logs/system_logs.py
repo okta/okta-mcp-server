@@ -12,7 +12,24 @@ from mcp.server.fastmcp import Context
 
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
-from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, paginate_all_results
+from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
+
+# Workaround for SDK v3.1.0 bug: when Behavior Detection is enabled the Okta API returns
+# `userBehaviors` as List[dict], but LogSecurityContext expects List[StrictStr], which
+# causes a ValidationError that crashes every get_logs call on sign-on/DENY events.
+# Fix: relax the annotation to Optional[List[Any]] and force a Pydantic schema rebuild.
+try:
+    import typing as _typing
+    from okta.models.log_security_context import LogSecurityContext as _LogSecurityContext
+
+    _patched_type = _typing.Optional[_typing.List[_typing.Any]]
+    _LogSecurityContext.__annotations__["user_behaviors"] = _patched_type
+    if "user_behaviors" in _LogSecurityContext.model_fields:
+        _LogSecurityContext.model_fields["user_behaviors"].annotation = _patched_type
+    _LogSecurityContext.model_rebuild(force=True)
+    logger.debug("Applied userBehaviors type workaround for LogSecurityContext (SDK v3.1.0 bug)")
+except Exception as _patch_err:
+    logger.warning(f"Could not apply userBehaviors workaround: {_patch_err}")
 
 
 @mcp.tool()
@@ -37,6 +54,17 @@ async def get_logs(
         since (str, optional): Filter logs since this timestamp (ISO 8601 format).
         until (str, optional): Filter logs until this timestamp (ISO 8601 format).
         filter (str, optional): Filter expression for log events.
+            Use outcome.result to filter by event outcome. Valid values are:
+            - "SUCCESS"   – successful operations (e.g. logins, password changes)
+            - "FAILURE"   – failed operations (e.g. wrong password, locked account)
+            - "DENY"      – access blocked by a sign-on policy rule (use this for policy-blocked logins)
+            - "ALLOW"     – access explicitly allowed by a sign-on policy rule
+            - "CHALLENGE" – MFA or step-up challenge triggered
+            - "UNKNOWN"   – outcome could not be determined
+            IMPORTANT: To find login failures AND policy-blocked sign-ons, query BOTH:
+              filter='outcome.result eq "FAILURE"' and filter='outcome.result eq "DENY"'
+            Example: filter='outcome.result eq "DENY"' for sign-on policy denials
+            Example: filter='outcome.result eq "FAILURE"' for authentication failures (wrong password etc.)
         q (str, optional): Query string to search log events.
 
     Examples:
@@ -45,6 +73,8 @@ async def get_logs(
         - Next page: get_logs(after="cursor_value")
         - All pages: get_logs(fetch_all=True)
         - Time range: get_logs(since="2024-01-01T00:00:00.000Z", until="2024-01-02T00:00:00.000Z")
+        - Policy-blocked logins: get_logs(filter='outcome.result eq "DENY"')
+        - Authentication failures: get_logs(filter='outcome.result eq "FAILURE"')
 
     Returns:
         Dict containing:
@@ -92,9 +122,21 @@ async def get_logs(
             logger.debug(f"First log entry timestamp: {logs[0].published if hasattr(logs[0], 'published') else 'N/A'}")
             logger.debug(f"Log types found: {set(log.eventType for log in logs[:10] if hasattr(log, 'eventType'))}")
 
-        if fetch_all and response and hasattr(response, "has_next") and response.has_next():
+        _has_more = (hasattr(response, "has_next") and response.has_next()) or bool(extract_after_cursor(response))
+        if fetch_all and response and _has_more:
             logger.info(f"fetch_all=True, auto-paginating from initial {log_count} log entries")
-            all_logs, pagination_info = await paginate_all_results(response, logs)
+
+            async def _next_page(cursor):
+                p = dict(query_params)
+                p["after"] = cursor
+                return await client.list_log_events(**p)
+
+            async def _on_page(pages, total):
+                await ctx.info(f"Fetching logs... {total} fetched so far ({pages} pages)")
+
+            all_logs, pagination_info = await paginate_all_results(
+                response, logs, next_page_fn=_next_page, on_page=_on_page
+            )
 
             logger.info(
                 f"Successfully retrieved {len(all_logs)} log entries across {pagination_info['pages_fetched']} pages"

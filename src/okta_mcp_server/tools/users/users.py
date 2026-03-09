@@ -5,6 +5,8 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
 
+import csv
+import os
 from typing import Optional
 
 from loguru import logger
@@ -17,7 +19,7 @@ from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DEACTIVATE_USER, DELETE_USER
-from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, paginate_all_results
+from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
 from okta_mcp_server.utils.validation import validate_ids
 
 
@@ -42,8 +44,13 @@ async def list_users(
         filter (str, optional): A filter string to filter users by Okta profile attributes.
         q (str, optional): A query string to search users by Okta profile attributes.
         fetch_all (bool, optional): If True, automatically fetch all pages of results. Default: False.
+            NOTE: fetch_all is capped at 200 pages (40,000 users at Okta's default of 200/page).
+            If the org has more users than the cap, the result will be partial. Always check
+            pagination_info.stopped_early in the response — if True, the count is incomplete
+            and you MUST tell the user "at least N users were found; the result may be incomplete".
+            Never report a partial fetch_all count as the exact total.
         after (str, optional): Pagination cursor for fetching results after this point.
-        limit (int, optional): Maximum number of users to return per page (min 20, max 100).
+        limit (int, optional): Maximum number of users to return per page (min 20, max 200).
         The search, filter, and q are performed on user profile attributes.
 
     Examples:
@@ -75,9 +82,9 @@ async def list_users(
         if limit < 20:
             logger.warning(f"Limit {limit} is below minimum (20), setting to 20")
             limit = 20
-        elif limit > 100:
-            logger.warning(f"Limit {limit} exceeds maximum (100), setting to 100")
-            limit = 100
+        elif limit > 200:
+            logger.warning(f"Limit {limit} exceeds maximum (200), setting to 200")
+            limit = 200
 
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
@@ -99,9 +106,22 @@ async def list_users(
         # Convert users to the expected format
         user_items = [(user.profile, user.id) for user in users]
 
-        if fetch_all and response and hasattr(response, "has_next") and response.has_next():
+        _has_more = (hasattr(response, "has_next") and response.has_next()) or bool(extract_after_cursor(response))
+        if fetch_all and response and _has_more:
             logger.info(f"fetch_all=True, auto-paginating from initial {len(users)} users")
-            all_users, pagination_info = await paginate_all_results(response, users)
+
+            async def _next_page(cursor):
+                p = dict(query_params)
+                p["after"] = cursor
+                return await client.list_users(**p)
+
+            async def _on_page(pages, total):
+                logger.info(f"[list_users] Page {pages} fetched — {total} users total so far")
+                await ctx.info(f"Fetching users... {total} fetched so far ({pages} pages)")
+
+            all_users, pagination_info = await paginate_all_results(
+                response, users, next_page_fn=_next_page, on_page=_on_page
+            )
             all_user_items = [(user.profile, user.id) for user in all_users]
 
             logger.info(
@@ -358,3 +378,124 @@ async def delete_deactivated_user(user_id: str, ctx: Context = None) -> list:
     except Exception as e:
         logger.error(f"Exception while deleting user {user_id}: {type(e).__name__}: {e}")
         return [f"Exception: {e}"]
+
+
+@mcp.tool()
+async def export_users_csv(
+    ctx: Context,
+    output_path: str = "/tmp/okta_users_export.csv",
+    search: str = "",
+    filter: Optional[str] = None,
+    q: Optional[str] = None,
+) -> dict:
+    """Fetch all users from the Okta organization and save them to a CSV file on disk.
+
+    Uses the same pagination logic as list_users (fetch_all=True) but writes results
+    directly to a CSV file instead of returning them, avoiding response size limits.
+
+    Parameters:
+        output_path (str): Absolute path where the CSV file will be written.
+            Defaults to /tmp/okta_users_export.csv.
+        search (str, optional): Search expression for filtering users.
+        filter (str, optional): Filter string for users.
+        q (str, optional): Query string for users.
+
+    Returns:
+        Dict containing:
+        - output_path: Path to the written CSV file
+        - total_users: Total number of users written
+        - pages_fetched: Number of pages fetched
+        - stopped_early: Whether pagination hit the page cap
+        - stop_reason: Reason pagination stopped (if stopped_early)
+    """
+    logger.info(f"export_users_csv: starting export to {output_path}")
+
+    CSV_FIELDS = [
+        "id", "status", "login", "email", "firstName", "lastName",
+        "displayName", "mobilePhone", "primaryPhone", "department",
+        "title", "organization", "userType", "employeeNumber",
+        "costCenter", "division", "manager",
+    ]
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        query_params = build_query_params(search=search, filter=filter, q=q, limit=200)
+
+        logger.debug("Calling Okta API — first page")
+        users, response, err = await client.list_users(**query_params)
+
+        if err:
+            logger.error(f"Okta API error: {err}")
+            return {"error": str(err)}
+
+        if not users:
+            logger.info("No users found")
+            return {"output_path": output_path, "total_users": 0, "pages_fetched": 1}
+
+        _has_more = (hasattr(response, "has_next") and response.has_next()) or bool(extract_after_cursor(response))
+
+        all_users = list(users)
+        pagination_info = {"pages_fetched": 1, "total_items": len(all_users), "stopped_early": False, "stop_reason": None}
+
+        if _has_more:
+            async def _next_page(cursor):
+                p = dict(query_params)
+                p["after"] = cursor
+                return await client.list_users(**p)
+
+            async def _on_page(pages, total):
+                logger.info(f"[export_users_csv] Page {pages} fetched — {total} users so far")
+                await ctx.info(f"Exporting users... {total} written so far ({pages} pages)")
+
+            all_users, pagination_info = await paginate_all_results(
+                response, users, next_page_fn=_next_page, on_page=_on_page
+            )
+
+        # Write CSV
+        os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
+        with open(output_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=CSV_FIELDS, extrasaction="ignore")
+            writer.writeheader()
+            for user in all_users:
+                profile = user.profile
+                def pget(attr):
+                    if hasattr(profile, attr):
+                        return getattr(profile, attr) or ""
+                    return ""
+                writer.writerow({
+                    "id": getattr(user, "id", ""),
+                    "status": getattr(user, "status", ""),
+                    "login": pget("login"),
+                    "email": pget("email"),
+                    "firstName": pget("firstName"),
+                    "lastName": pget("lastName"),
+                    "displayName": pget("displayName"),
+                    "mobilePhone": pget("mobilePhone"),
+                    "primaryPhone": pget("primaryPhone"),
+                    "department": pget("department"),
+                    "title": pget("title"),
+                    "organization": pget("organization"),
+                    "userType": pget("userType"),
+                    "employeeNumber": pget("employeeNumber"),
+                    "costCenter": pget("costCenter"),
+                    "division": pget("division"),
+                    "manager": pget("manager"),
+                })
+
+        total = len(all_users)
+        logger.info(f"export_users_csv: wrote {total} users to {output_path}")
+        await ctx.info(f"Export complete! {total} users written to {output_path}")
+
+        return {
+            "output_path": output_path,
+            "total_users": total,
+            "pages_fetched": pagination_info["pages_fetched"],
+            "stopped_early": pagination_info["stopped_early"],
+            "stop_reason": pagination_info.get("stop_reason"),
+        }
+
+    except Exception as e:
+        logger.error(f"Exception in export_users_csv: {type(e).__name__}: {e}")
+        return {"error": str(e)}
