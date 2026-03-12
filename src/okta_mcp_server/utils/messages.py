@@ -73,3 +73,12 @@ DEACTIVATE_POLICY_RULE = (
     "Are you sure you want to deactivate rule {rule_id} "
     "in policy {policy_id}?"
 )
+
+# ---------------------------------------------------------------------------
+# Device Assurance
+# ---------------------------------------------------------------------------
+
+DELETE_DEVICE_ASSURANCE_POLICY = (
+    "Are you sure you want to delete device assurance policy {policy_id}? "
+    "This action cannot be undone."
+)

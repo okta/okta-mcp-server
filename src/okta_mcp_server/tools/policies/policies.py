@@ -10,9 +10,13 @@ from typing import Any, Dict, Optional
 from loguru import logger
 from mcp.server.fastmcp import Context
 
+import okta.models as okta_models
+from okta.models.policy_rule import PolicyRule
+
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConfirmation, elicit_or_fallback
+from okta_mcp_server.utils.pagination import extract_after_cursor
 from okta_mcp_server.utils.messages import (
     DEACTIVATE_POLICY,
     DEACTIVATE_POLICY_RULE,
@@ -20,6 +24,36 @@ from okta_mcp_server.utils.messages import (
     DELETE_POLICY_RULE,
 )
 from okta_mcp_server.utils.validation import validate_ids
+
+
+# Mapping from Okta policy rule type → typed SDK model class.
+# The base PolicyRule model silently drops type-specific fields like `actions` and
+# `conditions`, causing 400 API errors ("Expecting an action but none were found").
+# Each typed subclass preserves those fields.
+_POLICY_RULE_MODEL_MAP: Dict[str, Any] = {
+    "SIGN_ON": okta_models.OktaSignOnPolicyRule,
+    "PASSWORD": okta_models.PasswordPolicyRule,
+    "ACCESS_POLICY": okta_models.AccessPolicyRule,
+    "PROFILE_ENROLLMENT": okta_models.ProfileEnrollmentPolicyRule,
+    "MFA_ENROLL": okta_models.AuthenticatorEnrollmentPolicyRule,
+    "IDP_DISCOVERY": okta_models.IdpDiscoveryPolicyRule,
+    "DEVICE_SIGNAL_COLLECTION": okta_models.DeviceSignalCollectionPolicyRule,
+    "ENTITY_RISK": okta_models.EntityRiskPolicyRule,
+    "POST_AUTH_SESSION": okta_models.PostAuthSessionPolicyRule,
+}
+
+
+def _build_policy_rule_model(rule_data: Dict[str, Any]) -> Any:
+    """Convert a plain dict to the appropriate typed Okta SDK PolicyRule model.
+
+    The base PolicyRule model lacks type-specific fields such as `actions` and
+    `conditions`. Without this mapping those fields are silently dropped, causing
+    Okta API 400 errors like "Expecting an action but none were found".
+    """
+    rule_type = str(rule_data.get("type", "")).upper()
+    model_cls = _POLICY_RULE_MODEL_MAP.get(rule_type, PolicyRule)
+    logger.debug(f"Using model class '{model_cls.__name__}' for rule type '{rule_type}'")
+    return model_cls.from_dict(rule_data)
 
 
 @mcp.tool()
@@ -70,9 +104,11 @@ async def list_policies(
             params["q"] = q
         if after:
             params["after"] = after
+        if "limit" in params and params["limit"] is not None:
+            params["limit"] = str(params["limit"])
 
         logger.debug("Calling Okta API to list policies")
-        policies, _, err = await okta_client.list_policies(params)
+        policies, _, err = await okta_client.list_policies(**params)
 
         if err:
             logger.error(f"Error listing policies: {err}")
@@ -84,7 +120,7 @@ async def list_policies(
 
         logger.info(f"Successfully retrieved {len(policies)} policies")
         return {
-            "policies": [policy.as_dict() for policy in policies],
+            "policies": [policy.to_dict() for policy in policies],
         }
 
     except Exception as e:
@@ -113,7 +149,7 @@ async def get_policy(ctx: Context, policy_id: str) -> Optional[Dict[str, Any]]:
             logger.error(f"Error getting policy {policy_id}: {err}")
             return {"error": str(err)}
 
-        return policy.as_dict() if policy else None
+        return policy.to_dict() if policy else None
 
     except Exception as e:
         logger.error(f"Exception getting policy: {e}")
@@ -148,7 +184,7 @@ async def create_policy(ctx: Context, policy_data: Dict[str, Any]) -> Optional[D
             logger.error(f"Error creating policy: {err}")
             return {"error": str(err)}
 
-        return policy.as_dict() if policy else None
+        return policy.to_dict() if policy else None
 
     except Exception as e:
         logger.error(f"Exception creating policy: {e}")
@@ -171,13 +207,13 @@ async def update_policy(ctx: Context, policy_id: str, policy_data: Dict[str, Any
     okta_client = await get_okta_client(manager)
 
     try:
-        policy, _, err = await okta_client.update_policy(policy_id, policy_data)
+        policy, _, err = await okta_client.replace_policy(policy_id, policy_data)
 
         if err:
             logger.error(f"Error updating policy {policy_id}: {err}")
             return {"error": str(err)}
 
-        return policy.as_dict() if policy else None
+        return policy.to_dict() if policy else None
 
     except Exception as e:
         logger.error(f"Exception updating policy: {e}")
@@ -214,7 +250,8 @@ async def delete_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
 
     try:
         okta_client = await get_okta_client(manager)
-        _, err = await okta_client.delete_policy(policy_id)
+        result = await okta_client.delete_policy(policy_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Error deleting policy {policy_id}: {err}")
@@ -242,7 +279,8 @@ async def activate_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
     okta_client = await get_okta_client(manager)
 
     try:
-        _, err = await okta_client.activate_policy(policy_id)
+        result = await okta_client.activate_policy(policy_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Error activating policy {policy_id}: {err}")
@@ -285,7 +323,8 @@ async def deactivate_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
 
     try:
         okta_client = await get_okta_client(manager)
-        _, err = await okta_client.deactivate_policy(policy_id)
+        result = await okta_client.deactivate_policy(policy_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Error deactivating policy {policy_id}: {err}")
@@ -327,10 +366,11 @@ async def list_policy_rules(ctx: Context, policy_id: str) -> Dict[str, Any]:
             logger.info("No policy rules found")
             return {"rules": []}
 
+        next_cursor = extract_after_cursor(resp)
         return {
-            "rules": [rule.as_dict() for rule in rules],
-            "has_next": resp.has_next() if resp else False,
-            "next_page_token": resp.get_next_page_token() if resp and resp.has_next() else None,
+            "rules": [rule.to_dict() for rule in rules],
+            "has_next": bool(next_cursor),
+            "next_page_token": next_cursor,
         }
 
     except Exception as e:
@@ -360,7 +400,7 @@ async def get_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Optiona
             logger.error(f"Error getting policy rule: {err}")
             return {"error": str(err)}
 
-        return rule.as_dict() if rule else None
+        return rule.to_dict() if rule else None
 
     except Exception as e:
         logger.error(f"Exception getting policy rule: {e}")
@@ -388,13 +428,14 @@ async def create_policy_rule(ctx: Context, policy_id: str, rule_data: Dict[str, 
     okta_client = await get_okta_client(manager)
 
     try:
-        rule, _, err = await okta_client.create_policy_rule(policy_id, rule_data)
+        policy_rule = _build_policy_rule_model(rule_data)
+        rule, _, err = await okta_client.create_policy_rule(policy_id, policy_rule)
 
         if err:
             logger.error(f"Error creating policy rule: {err}")
             return {"error": str(err)}
 
-        return rule.as_dict() if rule else None
+        return rule.to_dict() if rule else None
 
     except Exception as e:
         logger.error(f"Exception creating policy rule: {e}")
@@ -420,13 +461,14 @@ async def update_policy_rule(
     okta_client = await get_okta_client(manager)
 
     try:
-        rule, _, err = await okta_client.update_policy_rule(policy_id, rule_id, rule_data)
+        policy_rule = _build_policy_rule_model(rule_data)
+        rule, _, err = await okta_client.replace_policy_rule(policy_id, rule_id, policy_rule)
 
         if err:
             logger.error(f"Error updating policy rule: {err}")
             return {"error": str(err)}
 
-        return rule.as_dict() if rule else None
+        return rule.to_dict() if rule else None
 
     except Exception as e:
         logger.error(f"Exception updating policy rule: {e}")
@@ -464,7 +506,8 @@ async def delete_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Dict
 
     try:
         okta_client = await get_okta_client(manager)
-        _, err = await okta_client.delete_policy_rule(policy_id, rule_id)
+        result = await okta_client.delete_policy_rule(policy_id, rule_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Error deleting policy rule: {err}")
@@ -493,7 +536,8 @@ async def activate_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Di
     okta_client = await get_okta_client(manager)
 
     try:
-        _, err = await okta_client.activate_policy_rule(policy_id, rule_id)
+        result = await okta_client.activate_policy_rule(policy_id, rule_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Error activating policy rule: {err}")
@@ -535,7 +579,8 @@ async def deactivate_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> 
 
     try:
         okta_client = await get_okta_client(manager)
-        _, err = await okta_client.deactivate_policy_rule(policy_id, rule_id)
+        result = await okta_client.deactivate_policy_rule(policy_id, rule_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Error deactivating policy rule: {err}")

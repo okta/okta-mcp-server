@@ -7,13 +7,43 @@
 
 from typing import Any, Dict, Optional
 
+import okta.models as okta_models
 from loguru import logger
 from mcp.server.fastmcp import Context
 
 from okta_mcp_server.server import mcp
+
+# Mapping of signOnMode -> Okta SDK model class for proper serialization
+_SIGN_ON_MODE_MODEL_MAP: Dict[str, Any] = {
+    "BOOKMARK": okta_models.BookmarkApplication,
+    "AUTO_LOGIN": okta_models.AutoLoginApplication,
+    "BASIC_AUTH": okta_models.BasicAuthApplication,
+    "BROWSER_PLUGIN": okta_models.BrowserPluginApplication,
+    "OPENID_CONNECT": okta_models.OpenIdConnectApplication,
+    "SAML_1_1": okta_models.Saml11Application,
+    "SAML_2_0": okta_models.SamlApplication,
+    "SECURE_PASSWORD_STORE": okta_models.SecurePasswordStoreApplication,
+    "WS_FEDERATION": okta_models.WsFederationApplication,
+}
+
+
+def _build_application_model(app_config: Dict[str, Any]) -> Any:
+    """Convert a plain dict to the appropriate Okta SDK Application model.
+
+    The SDK v3 requires typed model objects, not plain dicts. Without this,
+    subclass-specific fields like `name`, `settings`, and `visibility` are
+    silently dropped by the base Application model, causing API validation errors.
+    """
+    sign_on_mode = app_config.get("signOnMode") or app_config.get("sign_on_mode", "")
+    model_cls = _SIGN_ON_MODE_MODEL_MAP.get(str(sign_on_mode).upper(), okta_models.Application)
+    logger.debug(f"Using model class '{model_cls.__name__}' for signOnMode '{sign_on_mode}'")
+    return model_cls(**app_config)
+
+
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DEACTIVATE_APPLICATION, DELETE_APPLICATION
+from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
 from okta_mcp_server.utils.validation import validate_ids
 
 
@@ -26,7 +56,8 @@ async def list_applications(
     filter: Optional[str] = None,
     expand: Optional[str] = None,
     include_non_deleted: Optional[bool] = None,
-) -> list:
+    fetch_all: bool = False,
+) -> dict:
     """List all applications from the Okta organization.
 
     Parameters:
@@ -37,12 +68,25 @@ async def list_applications(
         expand (str, optional): Expands the app user object to include the user's profile or expand the app group
         object to include the group's profile
         include_non_deleted (bool, optional): Include non-deleted applications in the results
+        fetch_all (bool, optional): If True, automatically fetch all pages of results. Default: False.
+
+    Examples:
+        For pagination:
+        - First call: list_applications()
+        - Next page: list_applications(after="cursor_value")
+        - All pages: list_applications(fetch_all=True)
 
     Returns:
-        List containing the applications from the Okta organization.
+        Dict containing:
+        - items: List of application objects
+        - total_fetched: Number of applications returned
+        - has_more: Boolean indicating if more results are available
+        - next_cursor: Cursor for the next page (if has_more is True)
+        - fetch_all_used: Boolean indicating if fetch_all was used
+        - pagination_info: Additional pagination metadata (when fetch_all=True)
     """
     logger.info("Listing applications from Okta organization")
-    logger.debug(f"Query parameters: q='{q}', filter='{filter}', limit={limit}")
+    logger.debug(f"Query parameters: q='{q}', filter='{filter}', limit={limit}, fetch_all={fetch_all}")
 
     # Validate limit parameter range
     if limit is not None:
@@ -57,37 +101,50 @@ async def list_applications(
 
     try:
         client = await get_okta_client(manager)
-        query_params = {}
-
-        if q:
-            query_params["q"] = q
-        if after:
-            query_params["after"] = after
-        if limit:
-            query_params["limit"] = limit
-        if filter:
-            query_params["filter"] = filter
-        if expand:
-            query_params["expand"] = expand
-        if include_non_deleted is not None:
-            query_params["includeNonDeleted"] = include_non_deleted
+        query_params = build_query_params(
+            q=q, after=after, limit=limit, filter=filter, expand=expand,
+            include_non_deleted=include_non_deleted,
+        )
 
         logger.debug("Calling Okta API to list applications")
-        apps, _, err = await client.list_applications(query_params)
+        apps, response, err = await client.list_applications(**query_params)
 
         if err:
             logger.error(f"Okta API error while listing applications: {err}")
-            return [f"Error: {err}"]
+            return {"error": str(err)}
 
         if not apps:
             logger.info("No applications found")
-            return []
+            return create_paginated_response([], response, fetch_all)
 
-        logger.info(f"Successfully retrieved {len(apps)} applications")
-        return [app for app in apps]
+        app_count = len(apps)
+        logger.debug(f"Retrieved {app_count} applications in first page")
+
+        _has_more = (hasattr(response, "has_next") and response.has_next()) or bool(extract_after_cursor(response))
+        if fetch_all and response and _has_more:
+            logger.info(f"fetch_all=True, auto-paginating from initial {app_count} applications")
+
+            async def _next_page(cursor):
+                p = dict(query_params)
+                p["after"] = cursor
+                return await client.list_applications(**p)
+
+            async def _on_page(pages, total):
+                await ctx.info(f"Fetching applications... {total} fetched so far ({pages} pages)")
+
+            all_apps, pagination_info = await paginate_all_results(
+                response, apps, next_page_fn=_next_page, on_page=_on_page
+            )
+            logger.info(
+                f"Successfully retrieved {len(all_apps)} applications across {pagination_info['pages_fetched']} pages"
+            )
+            return create_paginated_response(all_apps, response, fetch_all_used=True, pagination_info=pagination_info)
+        else:
+            logger.info(f"Successfully retrieved {app_count} applications")
+            return create_paginated_response(apps, response, fetch_all_used=fetch_all)
     except Exception as e:
         logger.error(f"Exception while listing applications: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return {"error": str(e)}
 
 
 @mcp.tool()
@@ -114,7 +171,7 @@ async def get_application(ctx: Context, app_id: str, expand: Optional[str] = Non
         if expand:
             query_params["expand"] = expand
 
-        app, _, err = await client.get_application(app_id, query_params)
+        app, _, err = await client.get_application(app_id, **query_params)
 
         if err:
             logger.error(f"Okta API error while getting application {app_id}: {err}")
@@ -146,10 +203,9 @@ async def create_application(ctx: Context, app_config: Dict[str, Any], activate:
     try:
         client = await get_okta_client(manager)
 
-        query_params = {"activate": activate}
-
+        application_model = _build_application_model(app_config)
         logger.debug("Calling Okta API to create application")
-        app, _, err = await client.create_application(app_config, query_params)
+        app, _, err = await client.create_application(application_model, activate)
 
         if err:
             logger.error(f"Okta API error while creating application: {err}")
@@ -181,8 +237,9 @@ async def update_application(ctx: Context, app_id: str, app_config: Dict[str, An
     try:
         client = await get_okta_client(manager)
 
+        application_model = _build_application_model(app_config)
         logger.debug(f"Calling Okta API to update application {app_id}")
-        app, _, err = await client.update_application(app_id, app_config)
+        app, _, err = await client.replace_application(app_id, application_model)
 
         if err:
             logger.error(f"Okta API error while updating application {app_id}: {err}")
@@ -243,7 +300,8 @@ async def delete_application(ctx: Context, app_id: str) -> list:
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to delete application {app_id}")
 
-        _, err = await client.delete_application(app_id)
+        result = await client.delete_application(app_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Okta API error while deleting application {app_id}: {err}")
@@ -288,7 +346,8 @@ async def confirm_delete_application(ctx: Context, app_id: str, confirmation: st
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to delete application {app_id}")
 
-        _, err = await client.delete_application(app_id)
+        result = await client.delete_application(app_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Okta API error while deleting application {app_id}: {err}")
@@ -320,7 +379,8 @@ async def activate_application(ctx: Context, app_id: str) -> list:
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to activate application {app_id}")
 
-        _, err = await client.activate_application(app_id)
+        result = await client.activate_application(app_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Okta API error while activating application {app_id}: {err}")
@@ -363,7 +423,8 @@ async def deactivate_application(ctx: Context, app_id: str) -> list:
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to deactivate application {app_id}")
 
-        _, err = await client.deactivate_application(app_id)
+        result = await client.deactivate_application(app_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Okta API error while deactivating application {app_id}: {err}")
