@@ -44,11 +44,14 @@ async def list_users(
         filter (str, optional): A filter string to filter users by Okta profile attributes.
         q (str, optional): A query string to search users by Okta profile attributes.
         fetch_all (bool, optional): If True, automatically fetch all pages of results. Default: False.
-            NOTE: fetch_all is capped at 200 pages (40,000 users at Okta's default of 200/page).
+            NOTE: fetch_all is capped at 200 pages (40,000 users at 200/page).
             If the org has more users than the cap, the result will be partial. Always check
             pagination_info.stopped_early in the response — if True, the count is incomplete
             and you MUST tell the user "at least N users were found; the result may be incomplete".
             Never report a partial fetch_all count as the exact total.
+            WARNING: For orgs with more than ~5,000 users, fetch_all=True returns a very large
+            response that may be slow or exceed response limits. For bulk exports or auditing,
+            use export_users_csv() instead — it writes directly to disk and avoids size limits.
         after (str, optional): Pagination cursor for fetching results after this point.
         limit (int, optional): Maximum number of users to return per page (min 20, max 200).
         The search, filter, and q are performed on user profile attributes.
@@ -78,19 +81,25 @@ async def list_users(
     )
 
     # Validate limit parameter range
+    limit_clamped = None
     if limit is not None:
         if limit < 20:
             logger.warning(f"Limit {limit} is below minimum (20), setting to 20")
+            limit_clamped = f"limit {limit} is below minimum (20); clamped to 20"
             limit = 20
         elif limit > 200:
             logger.warning(f"Limit {limit} exceeds maximum (200), setting to 200")
+            limit_clamped = f"limit {limit} exceeds maximum (200); clamped to 200"
             limit = 200
 
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
     try:
         client = await get_okta_client(manager)
-        query_params = build_query_params(search=search, filter=filter, q=q, after=after, limit=limit)
+        # When fetch_all=True, force limit=200 on every page to minimise API
+        # round-trips regardless of what the caller passed in as `limit`.
+        effective_limit = 200 if fetch_all else limit
+        query_params = build_query_params(search=search, filter=filter, q=q, after=after, limit=effective_limit)
 
         logger.debug("Calling Okta API to list users")
         users, response, err = await client.list_users(**query_params)
@@ -101,7 +110,10 @@ async def list_users(
 
         if not users:
             logger.info("No users found")
-            return create_paginated_response([], response, fetch_all_used=fetch_all)
+            result = create_paginated_response([], response, fetch_all_used=fetch_all)
+            if limit_clamped:
+                result["warning"] = limit_clamped
+            return result
 
         # Convert users to the expected format
         user_items = [(user.profile, user.id) for user in users]
@@ -111,28 +123,54 @@ async def list_users(
             logger.info(f"fetch_all=True, auto-paginating from initial {len(users)} users")
 
             async def _next_page(cursor):
-                p = dict(query_params)
+                # Always use max page size during fetch_all to minimise API
+                # round-trips, regardless of the caller-supplied limit.
+                p = {k: v for k, v in query_params.items() if k not in ["after", "limit"]}
                 p["after"] = cursor
+                p["limit"] = 200
                 return await client.list_users(**p)
 
             async def _on_page(pages, total):
                 logger.info(f"[list_users] Page {pages} fetched — {total} users total so far")
-                await ctx.info(f"Fetching users... {total} fetched so far ({pages} pages)")
+                if pages % 5 == 0:
+                    await ctx.info(f"Fetching users... {total} fetched so far ({pages} pages)")
 
             all_users, pagination_info = await paginate_all_results(
-                response, users, next_page_fn=_next_page, on_page=_on_page
+                response, users, next_page_fn=_next_page, on_page=_on_page, max_pages=200
             )
             all_user_items = [(user.profile, user.id) for user in all_users]
 
             logger.info(
                 f"Successfully retrieved {len(all_user_items)} users across {pagination_info['pages_fetched']} pages"
             )
-            return create_paginated_response(
+            result = create_paginated_response(
                 all_user_items, response, fetch_all_used=True, pagination_info=pagination_info
             )
+            if limit_clamped:
+                result["warning"] = limit_clamped
+            # When a manual `after` cursor was supplied AND fetch_all=True, total_fetched
+            # only counts users from that cursor onwards — not the full org total.
+            # Surface this so the LLM can communicate it accurately to the user.
+            if after:
+                result["pagination_note"] = (
+                    "fetch_all resumed from the provided 'after' cursor. "
+                    f"'total_fetched' ({result['total_fetched']}) counts only the users fetched "
+                    "from that cursor onwards, not the total org count."
+                )
+            if pagination_info.get("stopped_early"):
+                result["warning"] = (
+                    f"fetch_all stopped early after {pagination_info['pages_fetched']} pages "
+                    f"({result['total_fetched']} users). The org has more users. "
+                    f"Reason: {pagination_info.get('stop_reason')}. "
+                    "Use export_users_csv() for a complete export of large orgs."
+                )
+            return result
         else:
             logger.info(f"Successfully retrieved {len(user_items)} users")
-            return create_paginated_response(user_items, response, fetch_all_used=fetch_all)
+            result = create_paginated_response(user_items, response, fetch_all_used=fetch_all)
+            if limit_clamped:
+                result["warning"] = limit_clamped
+            return result
 
     except Exception as e:
         logger.error(f"Exception while listing users: {type(e).__name__}: {e}")
@@ -417,6 +455,27 @@ async def export_users_csv(
         "costCenter", "division", "manager",
     ]
 
+    # SDK v3 UserProfile stores attributes in snake_case (first_name, not firstName).
+    # Map CSV column names (camelCase) → SDK attribute names (snake_case).
+    _PROFILE_ATTR = {
+        "firstName": "first_name",
+        "lastName": "last_name",
+        "displayName": "display_name",
+        "mobilePhone": "mobile_phone",
+        "primaryPhone": "primary_phone",
+        "userType": "user_type",
+        "employeeNumber": "employee_number",
+        "costCenter": "cost_center",
+        # Already snake_case in SDK v3:
+        "login": "login",
+        "email": "email",
+        "department": "department",
+        "title": "title",
+        "organization": "organization",
+        "division": "division",
+        "manager": "manager",
+    }
+
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
     try:
@@ -441,13 +500,14 @@ async def export_users_csv(
 
         if _has_more:
             async def _next_page(cursor):
-                p = dict(query_params)
+                p = {k: v for k, v in query_params.items() if k != "after"}
                 p["after"] = cursor
                 return await client.list_users(**p)
 
             async def _on_page(pages, total):
                 logger.info(f"[export_users_csv] Page {pages} fetched — {total} users so far")
-                await ctx.info(f"Exporting users... {total} written so far ({pages} pages)")
+                if pages % 5 == 0:
+                    await ctx.info(f"Exporting users... {total} written so far ({pages} pages)")
 
             all_users, pagination_info = await paginate_all_results(
                 response, users, next_page_fn=_next_page, on_page=_on_page
@@ -460,10 +520,44 @@ async def export_users_csv(
             writer.writeheader()
             for user in all_users:
                 profile = user.profile
-                def pget(attr):
-                    if hasattr(profile, attr):
-                        return getattr(profile, attr) or ""
+
+                def pget(csv_col, _profile=profile):
+                    # Try all known attribute name variants for the given CSV column name.
+                    # Okta SDK v3 (Pydantic v2) stores fields in snake_case internally
+                    # (e.g. first_name, last_name), but some builds expose camelCase.
+                    # Try: mapped snake_case → original camelCase → dict lookup (for
+                    # dynamic/custom profiles) → empty string as last resort.
+                    sdk_attr = _PROFILE_ATTR.get(csv_col, csv_col)
+
+                    # 1. Pydantic snake_case attribute (SDK v3 primary)
+                    val = getattr(_profile, sdk_attr, None)
+                    if val is not None and val != "":
+                        return val
+
+                    # 2. CamelCase attribute (SDK v3 fallback / some builds)
+                    if sdk_attr != csv_col:
+                        val = getattr(_profile, csv_col, None)
+                        if val is not None and val != "":
+                            return val
+
+                    # 3. Dict-style access for dynamic/custom profile attributes
+                    if hasattr(_profile, "__dict__"):
+                        val = _profile.__dict__.get(sdk_attr) or _profile.__dict__.get(csv_col)
+                        if val is not None and val != "":
+                            return val
+
+                    # 4. model_fields / model_dump for Pydantic v2 models
+                    if hasattr(_profile, "model_dump"):
+                        try:
+                            dumped = _profile.model_dump(by_alias=True)
+                            val = dumped.get(csv_col) or dumped.get(sdk_attr)
+                            if val is not None and val != "":
+                                return val
+                        except Exception:
+                            pass
+
                     return ""
+
                 writer.writerow({
                     "id": getattr(user, "id", ""),
                     "status": getattr(user, "status", ""),
@@ -488,13 +582,27 @@ async def export_users_csv(
         logger.info(f"export_users_csv: wrote {total} users to {output_path}")
         await ctx.info(f"Export complete! {total} users written to {output_path}")
 
-        return {
+        # Count users with missing firstName/lastName so the LLM can surface a note.
+        missing_names = sum(
+            1 for u in all_users
+            if not (getattr(u.profile, "first_name", None) or getattr(u.profile, "firstName", None))
+            or not (getattr(u.profile, "last_name", None) or getattr(u.profile, "lastName", None))
+        )
+
+        result = {
             "output_path": output_path,
             "total_users": total,
             "pages_fetched": pagination_info["pages_fetched"],
             "stopped_early": pagination_info["stopped_early"],
             "stop_reason": pagination_info.get("stop_reason"),
         }
+        if missing_names > 0:
+            result["note"] = (
+                f"{missing_names} of {total} users have empty firstName or lastName in the CSV. "
+                "This means those users were created in Okta without a first/last name — "
+                "the data is not missing from the export, it is simply not set in Okta for those accounts."
+            )
+        return result
 
     except Exception as e:
         logger.error(f"Exception in export_users_csv: {type(e).__name__}: {e}")
