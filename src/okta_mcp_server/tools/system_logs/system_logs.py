@@ -250,7 +250,9 @@ async def get_logs(
                         "OAuth application and that the current session was authenticated with it."
                     )
                 }
-            return create_paginated_response([], response, fetch_all)
+            result = create_paginated_response([], response, fetch_all)
+            _add_failure_deny_reminder(result)
+            return result
 
         log_count = len(logs)
         logger.debug(f"Retrieved {log_count} system log entries in first page")
