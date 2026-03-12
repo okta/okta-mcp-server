@@ -44,14 +44,13 @@ async def list_users(
         filter (str, optional): A filter string to filter users by Okta profile attributes.
         q (str, optional): A query string to search users by Okta profile attributes.
         fetch_all (bool, optional): If True, automatically fetch all pages of results. Default: False.
-            NOTE: fetch_all is capped at 200 pages (40,000 users at 200/page).
+            NOTE: fetch_all is capped at 10 pages (2,000 users) to keep responses manageable.
             If the org has more users than the cap, the result will be partial. Always check
             pagination_info.stopped_early in the response — if True, the count is incomplete
             and you MUST tell the user "at least N users were found; the result may be incomplete".
             Never report a partial fetch_all count as the exact total.
-            WARNING: For orgs with more than ~5,000 users, fetch_all=True returns a very large
-            response that may be slow or exceed response limits. For bulk exports or auditing,
-            use export_users_csv() instead — it writes directly to disk and avoids size limits.
+            WARNING: For orgs with more than 2,000 users, use export_users_csv() instead —
+            it writes directly to disk and handles any org size without response size limits.
         after (str, optional): Pagination cursor for fetching results after this point.
         limit (int, optional): Maximum number of users to return per page (min 20, max 200).
         The search, filter, and q are performed on user profile attributes.
@@ -136,7 +135,7 @@ async def list_users(
                     await ctx.info(f"Fetching users... {total} fetched so far ({pages} pages)")
 
             all_users, pagination_info = await paginate_all_results(
-                response, users, next_page_fn=_next_page, on_page=_on_page, max_pages=200
+                response, users, next_page_fn=_next_page, on_page=_on_page, max_pages=10
             )
             all_user_items = [(user.profile, user.id) for user in all_users]
 

@@ -48,6 +48,13 @@ async def get_logs(
 
     This tool retrieves system logs from the Okta organization.
 
+    IMPORTANT — context isolation:
+        Each call is INDEPENDENT. Do NOT carry forward q, search, or filter values from
+        a previous query unless the user explicitly asks to apply the same filter again.
+        Example: if the user previously asked about user X and now asks "show me ALL failed
+        logins", do NOT add q=<user_X_email> to the new call — that would silently scope
+        results to user X only.
+
     IMPORTANT — fetch_all usage:
         By default (fetch_all=False) only the first page is returned (up to 100 entries).
         RULE: For ANY query about "all", "complete", "total", "how many", "list all",
@@ -181,7 +188,8 @@ async def get_logs(
             or "insufficient_scope" in err_str.lower()
             or "access_denied" in err_str.lower()
             or "okta.logs.read" in err_str.lower()
-            or "E0000005" in err_str  # Okta "Access denied" error code
+            or "E0000005" in err_str  # Okta "Invalid session" error code
+            or "E0000006" in err_str  # Okta "You do not have permission" error code
         )
         if is_403:
             return (
@@ -191,6 +199,24 @@ async def get_logs(
                 f"Okta error details: {err_or_exc}"
             )
         return None
+
+    def _add_failure_deny_reminder(result: dict) -> None:
+        """Mutate result in-place: add a reminder when only FAILURE or only DENY was queried."""
+        filter_upper = (filter or "").upper()
+        if "FAILURE" in filter_upper and "DENY" not in filter_upper:
+            result["reminder"] = (
+                "FAILURE results fetched. You MUST NOW make a second separate call: "
+                "get_logs(filter='outcome.result eq \"DENY\"', fetch_all=True, since=..., until=...) "
+                "— policy-blocked sign-ins are a completely separate outcome and will NOT appear "
+                "in FAILURE results. Skipping this call is a bug."
+            )
+        elif "DENY" in filter_upper and "FAILURE" not in filter_upper:
+            result["reminder"] = (
+                "DENY results fetched. You MUST NOW make a second separate call: "
+                "get_logs(filter='outcome.result eq \"FAILURE\"', fetch_all=True, since=..., until=...) "
+                "— authentication failures are a completely separate outcome and will NOT appear "
+                "in DENY results. Skipping this call is a bug."
+            )
 
     try:
         client = await get_okta_client(manager)
@@ -203,12 +229,27 @@ async def get_logs(
         if err:
             logger.error(f"Okta API error while retrieving system logs: {err}")
             scope_msg = _check_scope_error(err)
+            if not scope_msg and response and getattr(response, "status_code", None) in (401, 403):
+                scope_msg = (
+                    f"Authorization error (HTTP {response.status_code}): the OAuth client does not "
+                    "have the 'okta.logs.read' scope. Please ensure this scope is granted to your "
+                    "OAuth application and that the current session was authenticated with it. "
+                    f"Okta error details: {err}"
+                )
             if scope_msg:
                 return {"error": scope_msg}
             return {"error": f"Error: {err}"}
 
         if not logs:
             logger.info("No system logs found")
+            if response and getattr(response, "status_code", None) in (401, 403):
+                return {
+                    "error": (
+                        f"Authorization error (HTTP {response.status_code}): the OAuth client does not "
+                        "have the 'okta.logs.read' scope. Please ensure this scope is granted to your "
+                        "OAuth application and that the current session was authenticated with it."
+                    )
+                }
             return create_paginated_response([], response, fetch_all)
 
         log_count = len(logs)
@@ -238,10 +279,14 @@ async def get_logs(
             logger.info(
                 f"Successfully retrieved {len(all_logs)} log entries across {pagination_info['pages_fetched']} pages"
             )
-            return create_paginated_response(all_logs, response, fetch_all_used=True, pagination_info=pagination_info)
+            result = create_paginated_response(all_logs, response, fetch_all_used=True, pagination_info=pagination_info)
+            _add_failure_deny_reminder(result)
+            return result
         else:
             logger.info(f"Successfully retrieved {log_count} system log entries")
-            return create_paginated_response(logs, response, fetch_all_used=fetch_all)
+            result = create_paginated_response(logs, response, fetch_all_used=fetch_all)
+            _add_failure_deny_reminder(result)
+            return result
 
     except Exception as e:
         logger.error(f"Exception while retrieving system logs: {type(e).__name__}: {e}")
