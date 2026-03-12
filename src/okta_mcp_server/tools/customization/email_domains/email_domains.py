@@ -43,6 +43,18 @@ from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fall
 from okta_mcp_server.utils.messages import DELETE_EMAIL_DOMAIN
 from okta_mcp_server.utils.validation import validate_ids
 
+# ---------------------------------------------------------------------------
+# Patch EmailDomainDNSRecordType to accept case-insensitive values.
+# Okta's API returns lowercase record types (e.g. "cname") but the SDK enum
+# only defines uppercase members ("CNAME", "TXT").
+# ---------------------------------------------------------------------------
+from okta.models.email_domain_dns_record_type import EmailDomainDNSRecordType as _DNSRecordType  # noqa: E402
+
+for _member in list(_DNSRecordType):
+    _lower = _member.value.lower()
+    if _lower not in _DNSRecordType._value2member_map_:
+        _DNSRecordType._value2member_map_[_lower] = _member
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
