@@ -38,6 +38,15 @@ _PLATFORM_SECURITY_ATTRIBUTES: Dict[str, List[str]] = {
     "CHROMEOS": ["osVersion"],
 }
 
+# Maps each attribute to the ONLY platforms that support it.
+# Any other platform combination must be rejected before hitting the API.
+_PLATFORM_ONLY_ATTRIBUTES: Dict[str, List[str]] = {
+    "diskEncryptionType": ["MACOS", "WINDOWS"],
+    "secureHardwarePresent": ["MACOS", "WINDOWS"],
+    "jailbreak": ["ANDROID", "IOS"],
+    "screenLockType": ["ANDROID", "IOS", "MACOS", "WINDOWS"],
+}
+
 
 def _validate_os_version(policy_data: Dict[str, Any]) -> Optional[str]:
     """Validate and normalise osVersion.minimum format if present.
@@ -68,6 +77,33 @@ def _validate_os_version(policy_data: Dict[str, Any]) -> Optional[str]:
         logger.debug(f"Normalised OS version '{minimum}' → '{normalized}'")
         os_version["minimum"] = normalized
 
+    return None
+
+
+def _validate_platform_attributes(policy_data: Dict[str, Any]) -> Optional[str]:
+    """Validate that the requested attributes are supported by the given platform.
+
+    Returns an error message string if incompatible attributes are found, None if valid.
+    """
+    platform = (policy_data.get("platform") or "").upper()
+    if not platform:
+        return None
+
+    errors = []
+    for attr, supported_platforms in _PLATFORM_ONLY_ATTRIBUTES.items():
+        if policy_data.get(attr) is not None:
+            if platform not in supported_platforms:
+                errors.append(
+                    f"'{attr}' is not supported for {platform} — "
+                    f"only available on: {', '.join(supported_platforms)}."
+                )
+
+    if errors:
+        return (
+            f"Invalid policy configuration for platform {platform}: "
+            + " ".join(errors)
+            + " Remove the unsupported attribute(s) and try again."
+        )
     return None
 
 
@@ -173,9 +209,21 @@ async def list_device_assurance_policies(ctx: Context) -> Dict[str, Any]:
     block jailbroken/rooted devices, or identify policies whose platform
     requirements may be outdated.
 
+    IMPORTANT — always call fresh: Never reuse results from a previous call
+    to resolve a policy name to an ID. Always call this tool again to get
+    an up-to-date list, as policies may have been created or deleted since
+    the last call.
+
+    IMPORTANT — intermittent empty response: If this tool returns an empty
+    list but the user expects policies to exist, call it again — the API
+    occasionally returns an empty response on the first call after server
+    start. A retry will return the correct data.
+
     Returns:
         Dict containing:
             - policies (List[Dict]): List of device assurance policy objects.
+            - warning (str): Present if the API returned an unexpected empty
+              response; the caller should retry.
             - error (str): Error message if the operation fails.
     """
     logger.info("Listing device assurance policies")
@@ -190,15 +238,33 @@ async def list_device_assurance_policies(ctx: Context) -> Dict[str, Any]:
             logger.error(f"Error listing device assurance policies: {err}")
             return {"error": str(err)}
 
-        if not policies:
+        # The SDK occasionally returns None on the first call after server start
+        # (auth initialisation race). Distinguish None (transient — advise retry)
+        # from an empty list (genuinely no policies configured).
+        if policies is None:
+            logger.warning(
+                "SDK returned None for list_device_assurance_policies — "
+                "likely a transient auth initialisation issue."
+            )
+            return {
+                "policies": [],
+                "warning": (
+                    "The API returned an unexpected empty response. "
+                    "If you expect policies to exist, please call this tool again."
+                ),
+            }
+
+        policy_list = list(policies)
+
+        if not policy_list:
             logger.info("No device assurance policies found")
             return {"policies": []}
 
-        logger.info(f"Successfully retrieved {len(policies)} device assurance policy(ies)")
+        logger.info(f"Successfully retrieved {len(policy_list)} device assurance policy(ies)")
         return {
             "policies": [
                 _enrich_policy_with_attribute_status(policy.to_dict())
-                for policy in policies
+                for policy in policy_list
             ]
         }
 
@@ -218,6 +284,12 @@ async def get_device_assurance_policy(
     (ANDROID, IOS, MACOS, WINDOWS, CHROMEOS), minimum OS version, disk
     encryption requirements, biometric lock settings, jailbreak/root
     detection, and any other compliance checks configured in the policy.
+
+    IMPORTANT — name-to-ID resolution: This tool requires a policy ID, not a
+    name. If the user refers to a policy by name, you MUST call
+    list_device_assurance_policies() first to get a FRESH, current list before
+    resolving the name to an ID. Never use a policy ID obtained from a previous
+    list call — new policies may have been created in the UI since then.
 
     Parameters:
         device_assurance_id (str, required): The ID of the device assurance policy.
@@ -285,6 +357,10 @@ async def create_device_assurance_policy(
         version_error = _validate_os_version(policy_data)
         if version_error:
             return {"error": version_error}
+
+        platform_error = _validate_platform_attributes(policy_data)
+        if platform_error:
+            return {"error": platform_error}
 
         okta_client = await get_okta_client(manager)
         policy_model = DeviceAssurance.from_dict(policy_data)
@@ -357,6 +433,10 @@ async def replace_device_assurance_policy(
         version_error = _validate_os_version(policy_data)
         if version_error:
             return {"error": version_error}
+
+        platform_error = _validate_platform_attributes(policy_data)
+        if platform_error:
+            return {"error": platform_error}
 
         okta_client = await get_okta_client(manager)
 
