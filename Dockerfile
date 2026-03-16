@@ -32,6 +32,10 @@ ENV PATH="/app/.venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
 # Use file-based keyring backend for Docker (no system keyring available)
 ENV PYTHON_KEYRING_BACKEND=keyrings.alt.file.PlaintextKeyring
+# Use streamable HTTP transport in Docker
+ENV MCP_TRANSPORT=streamable-http
+
+EXPOSE 8000
 
 # Run the server using the console script entry point
 ENTRYPOINT ["okta-mcp-server"]
