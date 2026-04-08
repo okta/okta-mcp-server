@@ -45,15 +45,22 @@ class OktaAuthManager:
         self.scopes = f"{self.scopes} {os.environ.get('OKTA_SCOPES', '').strip()}"
 
         # Check for browserless auth configuration
-        self.private_key = os.environ.get("OKTA_PRIVATE_KEY")
+        private_key_value = os.environ.get("OKTA_PRIVATE_KEY")
         self.key_id = os.environ.get("OKTA_KEY_ID")
+
+        if private_key_value and os.path.isfile(private_key_value):
+            logger.info(f"Loading private key from file: {private_key_value}")
+            with open(private_key_value) as f:
+                self.private_key = f.read()
+        else:
+            self.private_key = private_key_value
+            # Process private key if it contains escaped newlines
+            if self.private_key and "\\n" in self.private_key:
+                self.private_key = self.private_key.replace("\\n", "\n")
 
         if self.private_key and self.key_id:
             self.use_browserless_auth = True
             logger.info("Browserless authentication is available and will be used")
-            # Process private key if it contains escaped newlines
-            if "\\n" in self.private_key:
-                self.private_key = self.private_key.replace("\\n", "\n")
         else:
             if self.private_key and not self.key_id:
                 logger.warning("Private key found but OKTA_KEY_ID is missing. Using device flow instead.")
