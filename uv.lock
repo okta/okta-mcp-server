@@ -596,7 +596,7 @@ wheels = [
 
 [[package]]
 name = "okta"
-version = "3.3.0"
+version = "3.4.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aenum" },
@@ -612,9 +612,9 @@ dependencies = [
     { name = "requests" },
     { name = "xmltodict" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/65/6f/e087075ff2102f1519f367d1e72acd74f3cd5a01b4bda9266bea6afeb2f8/okta-3.3.0.tar.gz", hash = "sha256:e8f0df81fba7d3eb356f3fbf36e11707b338e40d822aae08e5d2e3a6efb474f7", size = 2303154, upload-time = "2026-03-27T10:34:23.107Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d8/c8/562804ab31af3ffce89be36f50f898d88ff8b86a030d9908e2f82f52d012/okta-3.4.1.tar.gz", hash = "sha256:f36fe0d3d0980b413d5e83d1cc2c45bf0efcfe48fab0ecc6a276fc4cfbc99ad5", size = 2399204, upload-time = "2026-04-12T19:56:21.306Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/18/3f/05dcc6d57e3f49ec348a46b6a8e17a29c723991610b8373d2e579dbb7850/okta-3.3.0-py3-none-any.whl", hash = "sha256:2d3cee33fa33e58091b92c692c4123a6c984d2972b2c61c72721fc855662bd46", size = 3886783, upload-time = "2026-03-27T10:34:16.972Z" },
+    { url = "https://files.pythonhosted.org/packages/a0/bd/8d18569cf01814bcde3817ba2d42222f7b984b4efe622c94bcf9625973ee/okta-3.4.1-py3-none-any.whl", hash = "sha256:3ea2441516be23f30b4bad8b23e73bdf958604aa69eef8ca77898be25315e488", size = 3907643, upload-time = "2026-04-12T19:56:15.103Z" },
 ]
 
 [[package]]
@@ -645,7 +645,7 @@ requires-dist = [
     { name = "keyrings-alt", specifier = ">=5.0.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.26.0,<2.0.0" },
-    { name = "okta", specifier = "==3.3.0" },
+    { name = "okta", specifier = "==3.4.1" },
     { name = "requests", specifier = ">=2.32.4" },
     { name = "ruff", specifier = ">=0.11.13" },
 ]
