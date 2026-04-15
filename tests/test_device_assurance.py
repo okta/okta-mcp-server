@@ -17,9 +17,9 @@ from okta.exceptions.exceptions import ForbiddenException, UnauthorizedException
 from okta_mcp_server.tools.device_assurance.device_assurance import (
     _build_scope_error,
     _compute_policy_diff,
+    _detect_unverifiable_attributes,
     _enrich_policy_with_attribute_status,
     _get_implication,
-    _validate_os_version,
     _validate_platform_attributes,
     create_device_assurance_policy,
     get_device_assurance_policy,
@@ -69,6 +69,100 @@ def _make_forbidden_exception(status: int = 403) -> ForbiddenException:
 
 
 # ===========================================================================
+# Tool docstring contract tests (AC2 / AC3 guard rails)
+# ===========================================================================
+
+class TestToolDocstringContracts:
+    """Guard-rail tests that ensure critical LLM instruction text is present in
+    the tool docstrings / response bodies.  If these fail it means a refactor
+    accidentally removed text the LLM relies on to behave correctly."""
+
+    def test_list_tool_exposes_version_threshold_parameter(self):
+        """AC2: list_device_assurance_policies must declare a version_threshold
+        parameter so the validate_os_version_params decorator can intercept
+        incomplete versions before the tool body runs."""
+        import inspect
+        sig = inspect.signature(list_device_assurance_policies)
+        assert "version_threshold" in sig.parameters, (
+            "list_device_assurance_policies is missing the 'version_threshold' parameter "
+            "required for pre-call OS version validation"
+        )
+
+    def test_list_tool_version_threshold_defaults_to_none(self):
+        import inspect
+        sig = inspect.signature(list_device_assurance_policies)
+        default = sig.parameters["version_threshold"].default
+        assert default is None
+
+    def test_replace_docstring_mandatory_block_at_top(self):
+        """AC3: The MANDATORY RESPONSE FORMAT block must appear before the
+        'Platform-specific attribute support' section."""
+        doc = replace_device_assurance_policy.__doc__ or ""
+        mandatory_pos = doc.find("MANDATORY RESPONSE FORMAT")
+        platform_pos = doc.find("Platform-specific attribute support")
+        assert mandatory_pos != -1, "MANDATORY RESPONSE FORMAT block is missing from replace docstring"
+        assert mandatory_pos < platform_pos, (
+            "MANDATORY RESPONSE FORMAT block must come before the platform attributes section"
+        )
+
+    def test_replace_docstring_says_never_reply_done(self):
+        """AC3: The docstring must explicitly forbid a 'Done' response."""
+        doc = replace_device_assurance_policy.__doc__ or ""
+        assert "Done" in doc
+
+    # --- AC2: list tool must have the MANDATORY version-threshold block ---
+
+    def test_list_docstring_contains_mandatory_version_block(self):
+        """AC2: The list docstring must have a MANDATORY block calling out that
+        version_threshold MUST be passed — not filtered locally."""
+        doc = list_device_assurance_policies.__doc__ or ""
+        assert "MANDATORY" in doc, (
+            "list_device_assurance_policies docstring is missing the MANDATORY "
+            "version threshold block"
+        )
+
+    def test_list_docstring_prohibits_self_filtering(self):
+        """AC2: The docstring must explicitly tell the LLM never to filter locally."""
+        doc = list_device_assurance_policies.__doc__ or ""
+        assert "NEVER call this tool with no arguments" in doc, (
+            "list docstring must contain 'NEVER call this tool with no arguments' "
+            "to prevent the LLM from bypassing version_threshold validation"
+        )
+
+    def test_list_docstring_shows_wrong_and_right_call_examples(self):
+        """AC2: The docstring must include both a WRONG and RIGHT call example
+        so the LLM has a concrete pattern to follow."""
+        doc = list_device_assurance_policies.__doc__ or ""
+        assert "WRONG" in doc
+        assert "RIGHT" in doc
+
+    # --- AC2 / AC3: replace tool must forbid invented versions ---
+
+    def test_replace_docstring_says_never_invent_version(self):
+        """AC2/AC3: The replace docstring must tell the LLM never to complete or guess a version."""
+        doc = replace_device_assurance_policy.__doc__ or ""
+        assert "NEVER invent" in doc, (
+            "replace_device_assurance_policy docstring is missing the "
+            "'NEVER invent' instruction that prevents invented/normalized version numbers"
+        )
+        assert "NOT the same" in doc, (
+            "replace docstring must make clear that X.Y and X.Y.0 are different versions"
+        )
+        assert "user_stated_os_version" in doc, (
+            "replace docstring must mention user_stated_os_version as the required "
+            "channel for OS version changes"
+        )
+
+    def test_replace_docstring_instructs_to_ask_for_version(self):
+        """AC2: If the user hasn't confirmed an exact version, the LLM must ask."""
+        doc = replace_device_assurance_policy.__doc__ or ""
+        assert "STOP and ask" in doc, (
+            "replace docstring must tell the LLM to STOP and ask when no "
+            "explicit version has been confirmed"
+        )
+
+
+# ===========================================================================
 # _build_scope_error
 # ===========================================================================
 
@@ -105,87 +199,6 @@ class TestBuildScopeError:
         result = _build_scope_error("list")
         assert "error" in result
         assert isinstance(result["error"], str)
-
-
-# ===========================================================================
-# _validate_os_version
-# ===========================================================================
-
-class TestValidateOsVersion:
-    """Tests for the _validate_os_version helper."""
-
-    def test_returns_none_when_no_os_version_key(self):
-        assert _validate_os_version({}) is None
-
-    def test_returns_none_when_os_version_is_none(self):
-        assert _validate_os_version({"osVersion": None}) is None
-
-    def test_returns_none_when_minimum_is_absent(self):
-        assert _validate_os_version({"osVersion": {}}) is None
-
-    def test_returns_none_when_minimum_is_empty_string(self):
-        assert _validate_os_version({"osVersion": {"minimum": ""}}) is None
-
-    def test_valid_xyz_passes(self):
-        assert _validate_os_version({"osVersion": {"minimum": "14.2.1"}}) is None
-
-    def test_valid_xyzw_passes(self):
-        assert _validate_os_version({"osVersion": {"minimum": "14.2.1.0"}}) is None
-
-    def test_valid_xy_normalises_in_place_to_xyz(self):
-        data = {"osVersion": {"minimum": "14.2"}}
-        assert _validate_os_version(data) is None
-        assert data["osVersion"]["minimum"] == "14.2.0"
-
-    def test_single_component_returns_error_without_platform(self):
-        # No platform key — Android special-case must NOT apply
-        error = _validate_os_version({"osVersion": {"minimum": "14"}})
-        assert error is not None
-        assert "Invalid" in error
-        assert "14" in error
-
-    def test_single_component_returns_error_for_non_android_platform(self):
-        error = _validate_os_version({"platform": "MACOS", "osVersion": {"minimum": "14"}})
-        assert error is not None
-        assert "Invalid" in error
-
-    def test_android_single_component_is_accepted_as_is(self):
-        data = {"platform": "ANDROID", "osVersion": {"minimum": "12"}}
-        assert _validate_os_version(data) is None
-        # Android major-only versions must not be normalised — Okta API expects "12", not "12.0.0"
-        assert data["osVersion"]["minimum"] == "12"
-
-    def test_android_single_component_zero_is_accepted_as_is(self):
-        data = {"platform": "ANDROID", "osVersion": {"minimum": "9"}}
-        assert _validate_os_version(data) is None
-        assert data["osVersion"]["minimum"] == "9"
-
-    def test_alpha_component_returns_error(self):
-        error = _validate_os_version({"osVersion": {"minimum": "14.2.alpha"}})
-        assert error is not None
-
-    def test_version_with_leading_dot_returns_error(self):
-        error = _validate_os_version({"osVersion": {"minimum": ".14.2.1"}})
-        assert error is not None
-
-    def test_snake_case_os_version_key_accepted(self):
-        assert _validate_os_version({"os_version": {"minimum": "14.2.1"}}) is None
-
-    def test_snake_case_xy_normalises_in_place(self):
-        data = {"os_version": {"minimum": "17.0"}}
-        assert _validate_os_version(data) is None
-        assert data["os_version"]["minimum"] == "17.0.0"
-
-    def test_error_message_contains_valid_format_hint(self):
-        error = _validate_os_version({"osVersion": {"minimum": "abc"}})
-        assert error is not None
-        assert "X.Y" in error
-
-    def test_android_hint_in_error_message(self):
-        # The error message should hint that Android accepts single-component versions
-        error = _validate_os_version({"platform": "MACOS", "osVersion": {"minimum": "14"}})
-        assert error is not None
-        assert "Android" in error
 
 
 # ===========================================================================
@@ -382,12 +395,147 @@ class TestEnrichPolicyWithAttributeStatus:
         result = _enrich_policy_with_attribute_status(policy)
         assert result is policy
 
+    # --- AC1: Policy status field ---
+
+    def test_status_field_preserved_when_present(self):
+        policy = {**MACOS_POLICY_DICT.copy(), "status": "ACTIVE"}
+        result = _enrich_policy_with_attribute_status(policy)
+        assert result["status"] == "ACTIVE"
+
+    def test_inactive_status_is_preserved(self):
+        policy = {**MACOS_POLICY_DICT.copy(), "status": "INACTIVE"}
+        result = _enrich_policy_with_attribute_status(policy)
+        assert result["status"] == "INACTIVE"
+
+    def test_status_field_set_to_unknown_when_absent(self):
+        policy = {"id": "x", "name": "test", "platform": "MACOS"}
+        result = _enrich_policy_with_attribute_status(policy)
+        assert result["status"] == "UNKNOWN"
+
+    def test_no_platform_key_does_not_add_status(self):
+        """When there is no platform, the function returns early without touching status."""
+        policy = {"id": "x", "name": "test"}
+        result = _enrich_policy_with_attribute_status(policy)
+        assert "status" not in result
+        assert "securityAttributeStatus" not in result
+
+    # --- AC4: Partial failure / unverifiable attributes ---
+
+    def test_unverifiable_attrs_marked_as_unverifiable(self):
+        policy = {"id": "x", "name": "test", "platform": "MACOS", "osVersion": {"minimum": "14.0.0"}}
+        result = _enrich_policy_with_attribute_status(policy, unverifiable_attrs={"diskEncryptionType"})
+        assert result["securityAttributeStatus"]["diskEncryptionType"] == "unverifiable"
+
+    def test_unverifiable_attrs_do_not_affect_configured_attrs(self):
+        policy = {"id": "x", "name": "test", "platform": "MACOS", "osVersion": {"minimum": "14.0.0"}}
+        result = _enrich_policy_with_attribute_status(policy, unverifiable_attrs={"diskEncryptionType"})
+        assert result["securityAttributeStatus"]["osVersion"] == "configured"
+
+    def test_non_unverifiable_absent_attrs_remain_not_configured(self):
+        policy = {"id": "x", "name": "test", "platform": "MACOS", "osVersion": {"minimum": "14.0.0"}}
+        result = _enrich_policy_with_attribute_status(policy, unverifiable_attrs={"diskEncryptionType"})
+        assert result["securityAttributeStatus"]["screenLockType"] == "not_configured"
+
+    def test_partial_failure_section_added_when_unverifiable(self):
+        policy = {"id": "x", "name": "test", "platform": "MACOS"}
+        result = _enrich_policy_with_attribute_status(policy, unverifiable_attrs={"diskEncryptionType"})
+        assert "partial_failure" in result
+        assert "diskEncryptionType" in result["partial_failure"]["unverifiable_attributes"]
+        assert "message" in result["partial_failure"]
+
+    def test_partial_failure_message_says_not_treat_as_not_configured(self):
+        policy = {"id": "x", "name": "test", "platform": "MACOS"}
+        result = _enrich_policy_with_attribute_status(policy, unverifiable_attrs={"diskEncryptionType"})
+        assert "not configured" in result["partial_failure"]["message"].lower()
+
+    def test_no_partial_failure_section_when_no_unverifiable_attrs(self):
+        policy = {"id": "x", "name": "test", "platform": "MACOS"}
+        result = _enrich_policy_with_attribute_status(policy)
+        assert "partial_failure" not in result
+
+    def test_empty_unverifiable_attrs_set_does_not_add_partial_failure(self):
+        policy = {"id": "x", "name": "test", "platform": "MACOS"}
+        result = _enrich_policy_with_attribute_status(policy, unverifiable_attrs=set())
+        assert "partial_failure" not in result
+
+    def test_all_unverifiable_attrs_listed_in_partial_failure(self):
+        policy = {"id": "x", "name": "test", "platform": "MACOS"}
+        result = _enrich_policy_with_attribute_status(
+            policy, unverifiable_attrs={"diskEncryptionType", "screenLockType"}
+        )
+        listed = result["partial_failure"]["unverifiable_attributes"]
+        assert "diskEncryptionType" in listed
+        assert "screenLockType" in listed
+
 
 # ===========================================================================
 # _compute_policy_diff
 # ===========================================================================
 
-class TestComputePolicyDiff:
+class TestDetectUnverifiableAttributes:
+    """Tests for the _detect_unverifiable_attributes helper."""
+
+    def test_returns_empty_set_when_resp_is_none(self):
+        assert _detect_unverifiable_attributes({}, None) == set()
+
+    def test_returns_empty_set_for_200_response(self):
+        resp = MagicMock()
+        resp.status_code = 200
+        assert _detect_unverifiable_attributes({"platform": "MACOS"}, resp) == set()
+
+    def test_returns_empty_set_for_201_response(self):
+        resp = MagicMock()
+        resp.status_code = 201
+        assert _detect_unverifiable_attributes({"platform": "MACOS"}, resp) == set()
+
+    def test_returns_missing_attrs_for_207_response(self):
+        resp = MagicMock()
+        resp.status_code = 207
+        policy = {"platform": "MACOS", "osVersion": {"minimum": "14.0.0"}}
+        result = _detect_unverifiable_attributes(policy, resp)
+        assert "diskEncryptionType" in result
+        assert "screenLockType" in result
+        assert "secureHardwarePresent" in result
+        assert "osVersion" not in result  # present in the policy dict
+
+    def test_returns_empty_set_for_207_when_all_attrs_present(self):
+        resp = MagicMock()
+        resp.status_code = 207
+        policy = {
+            "platform": "MACOS",
+            "osVersion": {"minimum": "14.0.0"},
+            "diskEncryptionType": {"include": ["ALL_INTERNAL_VOLUMES"]},
+            "screenLockType": {"include": ["BIOMETRIC"]},
+            "secureHardwarePresent": True,
+        }
+        result = _detect_unverifiable_attributes(policy, resp)
+        assert result == set()
+
+    def test_unknown_platform_returns_empty_set_for_207(self):
+        resp = MagicMock()
+        resp.status_code = 207
+        result = _detect_unverifiable_attributes({"platform": "UNKNOWN"}, resp)
+        assert result == set()
+
+    def test_resp_without_status_code_returns_empty_set(self):
+        """When resp has neither status_code nor status, no partial failure is assumed."""
+        resp = object()  # bare object — no status attributes
+        result = _detect_unverifiable_attributes({"platform": "MACOS"}, resp)
+        assert result == set()
+
+    def test_ios_missing_attrs_for_207(self):
+        resp = MagicMock()
+        resp.status_code = 207
+        policy = {"platform": "IOS"}
+        result = _detect_unverifiable_attributes(policy, resp)
+        assert "jailbreak" in result
+        assert "screenLockType" in result
+        assert "osVersion" in result
+
+
+# ===========================================================================
+# _compute_policy_diff
+# ===========================================================================
     """Tests for the _compute_policy_diff helper."""
 
     def test_identical_policies_return_empty_list(self):
@@ -675,6 +823,70 @@ class TestListDeviceAssurancePolicies:
         assert "okta.deviceAssurance.read" in result["error"]
         mock_get_client.assert_not_called()
 
+    # --- AC2: version_threshold pre-validation ---
+
+    @pytest.mark.asyncio
+    async def test_two_component_version_threshold_rejected_before_api_call(
+        self, ctx_no_elicitation
+    ):
+        """AC2: passing version_threshold='14.2' must be rejected by the
+        validate_os_version_params decorator before the tool body runs."""
+        result = await list_device_assurance_policies(
+            ctx=ctx_no_elicitation, version_threshold="14.2"
+        )
+        assert "error" in result
+        assert "Incomplete" in result["error"]
+        assert "14.2.0" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_incomplete_threshold_error_warns_not_to_assume(
+        self, ctx_no_elicitation
+    ):
+        result = await list_device_assurance_policies(
+            ctx=ctx_no_elicitation, version_threshold="10.15"
+        )
+        assert "error" in result
+        assert "Do NOT assume" in result["error"]
+
+    @pytest.mark.asyncio
+    @patch("okta_mcp_server.tools.device_assurance.device_assurance.get_okta_client")
+    async def test_valid_three_component_threshold_passes_through(
+        self, mock_get_client, ctx_no_elicitation
+    ):
+        mock_policy = _make_policy_model(MACOS_POLICY_DICT)
+        client = AsyncMock()
+        client.list_device_assurance_policies.return_value = ([mock_policy], MagicMock(), None)
+        mock_get_client.return_value = client
+
+        result = await list_device_assurance_policies(
+            ctx=ctx_no_elicitation, version_threshold="14.2.1"
+        )
+        assert "error" not in result
+        assert result["version_threshold"] == "14.2.1"
+
+    @pytest.mark.asyncio
+    @patch("okta_mcp_server.tools.device_assurance.device_assurance.get_okta_client")
+    async def test_none_version_threshold_omitted_from_response(
+        self, mock_get_client, ctx_no_elicitation
+    ):
+        mock_policy = _make_policy_model(MACOS_POLICY_DICT)
+        client = AsyncMock()
+        client.list_device_assurance_policies.return_value = ([mock_policy], MagicMock(), None)
+        mock_get_client.return_value = client
+
+        result = await list_device_assurance_policies(ctx=ctx_no_elicitation)
+        assert "error" not in result
+        assert "version_threshold" not in result
+
+    @pytest.mark.asyncio
+    async def test_invalid_format_threshold_rejected(
+        self, ctx_no_elicitation
+    ):
+        result = await list_device_assurance_policies(
+            ctx=ctx_no_elicitation, version_threshold="notaversion"
+        )
+        assert "error" in result
+
 
 # ===========================================================================
 # get_device_assurance_policy
@@ -769,35 +981,34 @@ class TestCreateDeviceAssurancePolicy:
 
         result = await create_device_assurance_policy(
             ctx=ctx_no_elicitation,
-            policy_data={"name": "Test MacOS Policy", "platform": "MACOS", "osVersion": {"minimum": "14.0.0"}},
+            policy_data={"name": "Test MacOS Policy", "platform": "MACOS"},
+            user_stated_os_version="14.0.0",
         )
 
         assert result["id"] == DEVICE_ASSURANCE_ID
         client.create_device_assurance_policy.assert_awaited_once()
 
     @pytest.mark.asyncio
-    @patch("okta_mcp_server.tools.device_assurance.device_assurance.DeviceAssurance")
-    @patch("okta_mcp_server.tools.device_assurance.device_assurance.get_okta_client")
-    async def test_two_component_version_normalised_before_api_call(
-        self, mock_get_client, mock_da_cls, ctx_no_elicitation
+    async def test_two_component_version_rejected_before_api_call(
+        self, ctx_no_elicitation
     ):
-        mock_policy = _make_policy_model(MACOS_POLICY_DICT)
-        client = AsyncMock()
-        client.create_device_assurance_policy.return_value = (mock_policy, MagicMock(), None)
-        mock_get_client.return_value = client
-        mock_da_cls.from_dict.return_value = MagicMock()
+        # AC2: X.Y in user_stated_os_version must be rejected before the API is called.
+        result = await create_device_assurance_policy(
+            ctx=ctx_no_elicitation,
+            policy_data={"name": "Test", "platform": "MACOS"},
+            user_stated_os_version="14.2",
+        )
 
-        policy_data = {"name": "Test", "platform": "MACOS", "osVersion": {"minimum": "14.2"}}
-        await create_device_assurance_policy(ctx=ctx_no_elicitation, policy_data=policy_data)
-
-        # Confirms normalisation mutated the dict before the model was built
-        assert policy_data["osVersion"]["minimum"] == "14.2.0"
+        assert "error" in result
+        assert "Incomplete" in result["error"]
+        assert "14.2.0" in result["error"]
 
     @pytest.mark.asyncio
     async def test_invalid_os_version_returns_error_before_api_call(self, ctx_no_elicitation):
         result = await create_device_assurance_policy(
             ctx=ctx_no_elicitation,
-            policy_data={"name": "Test", "platform": "MACOS", "osVersion": {"minimum": "14"}},
+            policy_data={"name": "Test", "platform": "MACOS"},
+            user_stated_os_version="14",
         )
 
         assert "error" in result
@@ -890,6 +1101,8 @@ class TestReplaceDeviceAssurancePolicy:
         assert "before" in result
         assert "after" in result
         assert "changes" in result
+        assert "_display_required" in result
+        assert result["_display_required"]  # must be a non-empty instruction string
         assert result["before"]["name"] == "Old Name"
         assert result["after"]["name"] == "New Name"
 
@@ -976,10 +1189,38 @@ class TestReplaceDeviceAssurancePolicy:
         result = await replace_device_assurance_policy(
             ctx=ctx_no_elicitation,
             device_assurance_id=DEVICE_ASSURANCE_ID,
-            policy_data={"name": "Test", "platform": "MACOS", "osVersion": {"minimum": "bad-version"}},
+            policy_data={"name": "Test", "platform": "MACOS"},
+            user_stated_os_version="bad-version",
         )
 
         assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_os_version_in_policy_data_without_user_stated_rejected(
+        self, ctx_no_elicitation
+    ):
+        """AC2: If policy_data contains osVersion but user_stated_os_version is absent,
+        the tool must refuse — forcing the LLM to always use the verbatim channel."""
+        result = await replace_device_assurance_policy(
+            ctx=ctx_no_elicitation,
+            device_assurance_id=DEVICE_ASSURANCE_ID,
+            policy_data={"name": "Test", "platform": "MACOS", "osVersion": {"minimum": "13.2.0"}},
+        )
+        assert "error" in result
+        assert "osVersion must NOT be included" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_xy_in_user_stated_os_version_rejected(self, ctx_no_elicitation):
+        """AC2: A two-component version in user_stated_os_version must be rejected
+        by the decorator before the tool body or API call runs."""
+        result = await replace_device_assurance_policy(
+            ctx=ctx_no_elicitation,
+            device_assurance_id=DEVICE_ASSURANCE_ID,
+            policy_data={"name": "Test", "platform": "MACOS"},
+            user_stated_os_version="13.2",
+        )
+        assert "error" in result
+        assert "Incomplete" in result["error"]
 
     @pytest.mark.asyncio
     async def test_invalid_id_returns_error_without_api_call(self, ctx_no_elicitation):
