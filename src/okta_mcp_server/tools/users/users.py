@@ -184,18 +184,22 @@ async def get_user(user_id: str, ctx: Context = None) -> list:
 
 
 @mcp.tool()
-async def create_user(profile: dict, ctx: Context = None) -> list:
+async def create_user(profile: dict, activate: bool = True, ctx: Context = None) -> list:
     """Create a user in the Okta organization.
 
     This tool creates a new user in the Okta organization with the provided profile.
 
     Parameters:
         profile (dict, required): The profile of the user to create.
+        activate (bool, optional): Whether to activate the user on creation.
+            Defaults to True (user lands in PROVISIONED, activation email sent).
+            Set to False to create the user in STAGED status (no activation email,
+            no provisioning workflows fire). Useful for pre-hire / bulk imports.
 
     Returns:
         List containing the created user details.
     """
-    logger.info("Creating new user in Okta organization")
+    logger.info(f"Creating new user in Okta organization (activate={activate})")
     logger.debug(f"User profile: email={profile.get('email', 'N/A')}, login={profile.get('login', 'N/A')}")
 
     manager = ctx.request_context.lifespan_context.okta_auth_manager
@@ -206,7 +210,7 @@ async def create_user(profile: dict, ctx: Context = None) -> list:
         user_data = {"profile": profile}
         logger.debug("Calling Okta API to create user")
 
-        user, _, err = await client.create_user(user_data)
+        user, _, err = await client.create_user(user_data, {"activate": str(activate).lower()})
 
         if err:
             logger.error(f"Okta API error while creating user: {err}")
