@@ -66,15 +66,26 @@ def extract_after_cursor(response) -> Optional[str]:
 
 
 async def paginate_all_results(
-    initial_response, initial_items: List, max_pages: int = 50, delay_between_requests: float = 0.1
+    initial_response,
+    initial_items: List,
+    max_pages: int = 50,
+    delay_between_requests: float = 0.1,
+    fetch_page_fn=None,
 ) -> Tuple[List, Dict[str, Any]]:
     """Auto-paginate through all pages of results.
 
+    Supports both Okta SDK v2 (OktaAPIResponse with has_next/next) and
+    v3 (ApiResponse with Link headers).
+
     Args:
-        initial_response: The first OktaAPIResponse object
+        initial_response: The first API response object (OktaAPIResponse v2 or ApiResponse v3)
         initial_items: The first page of items
         max_pages: Maximum number of pages to fetch (safety limit)
         delay_between_requests: Delay in seconds between requests
+        fetch_page_fn: Optional async callable used for SDK v3 pagination.
+            Signature: ``async (after: str) -> (items, response, err)``.
+            When provided, the v3 Link-header path is used; otherwise the
+            function falls back to the SDK v2 ``has_next()`` / ``next()`` path.
 
     Returns:
         Tuple of (all_items, pagination_info)
@@ -85,6 +96,54 @@ async def paginate_all_results(
 
     pagination_info = {"pages_fetched": 1, "total_items": len(all_items), "stopped_early": False, "stop_reason": None}
 
+    # --- Okta SDK v3 path: ApiResponse with Link header ---
+    if fetch_page_fn is not None:
+        try:
+            while pages_fetched < max_pages:
+                cursor = extract_after_cursor(response)
+                if not cursor:
+                    break
+
+                if delay_between_requests > 0:
+                    await asyncio.sleep(delay_between_requests)
+
+                try:
+                    next_items, response, next_err = await fetch_page_fn(cursor)
+
+                    if next_err:
+                        logger.warning(f"Error fetching page {pages_fetched + 1}: {next_err}")
+                        pagination_info["stopped_early"] = True
+                        pagination_info["stop_reason"] = f"API error: {next_err}"
+                        break
+
+                    if not next_items:
+                        break
+
+                    all_items.extend(next_items)
+                    pages_fetched += 1
+                    logger.debug(f"Fetched page {pages_fetched}, total items: {len(all_items)}")
+
+                except Exception as e:
+                    logger.error(f"Exception during pagination on page {pages_fetched + 1}: {e}")
+                    pagination_info["stopped_early"] = True
+                    pagination_info["stop_reason"] = f"Exception: {e}"
+                    break
+
+            if pages_fetched >= max_pages and extract_after_cursor(response):
+                pagination_info["stopped_early"] = True
+                pagination_info["stop_reason"] = f"Reached maximum page limit ({max_pages})"
+                logger.warning(f"Stopped pagination at {max_pages} pages limit")
+
+        except Exception as e:
+            logger.error(f"Unexpected error during pagination: {e}")
+            pagination_info["stopped_early"] = True
+            pagination_info["stop_reason"] = f"Unexpected error: {e}"
+
+        pagination_info["pages_fetched"] = pages_fetched
+        pagination_info["total_items"] = len(all_items)
+        return all_items, pagination_info
+
+    # --- Okta SDK v2 path: OktaAPIResponse with has_next()/next() ---
     if not response or not hasattr(response, "has_next"):
         return all_items, pagination_info
 

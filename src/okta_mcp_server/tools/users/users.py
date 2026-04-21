@@ -17,7 +17,7 @@ from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DEACTIVATE_USER, DELETE_USER
-from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, paginate_all_results
+from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
 from okta_mcp_server.utils.validation import validate_ids
 
 
@@ -99,9 +99,13 @@ async def list_users(
         # Convert users to the expected format
         user_items = [(user.profile, user.id) for user in users]
 
-        if fetch_all and response and hasattr(response, "has_next") and response.has_next():
+        if fetch_all and response and extract_after_cursor(response):
             logger.info(f"fetch_all=True, auto-paginating from initial {len(users)} users")
-            all_users, pagination_info = await paginate_all_results(response, users)
+            all_users, pagination_info = await paginate_all_results(
+                response,
+                users,
+                fetch_page_fn=lambda after: client.list_users(**{**query_params, "after": after}),
+            )
             all_user_items = [(user.profile, user.id) for user in all_users]
 
             logger.info(

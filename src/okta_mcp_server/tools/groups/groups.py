@@ -14,7 +14,7 @@ from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DELETE_GROUP
-from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, paginate_all_results
+from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
 from okta_mcp_server.utils.validation import validate_ids
 
 
@@ -86,9 +86,13 @@ async def list_groups(
             logger.info("No groups found")
             return create_paginated_response([], response, fetch_all)
 
-        if fetch_all and response and hasattr(response, "has_next") and response.has_next():
+        if fetch_all and response and extract_after_cursor(response):
             logger.info(f"fetch_all=True, auto-paginating from initial {len(groups)} groups")
-            all_groups, pagination_info = await paginate_all_results(response, groups)
+            all_groups, pagination_info = await paginate_all_results(
+                response,
+                groups,
+                fetch_page_fn=lambda after: client.list_groups(**{**query_params, "after": after}),
+            )
 
             logger.info(
                 f"Successfully retrieved {len(all_groups)} groups across {pagination_info['pages_fetched']} pages"
@@ -384,9 +388,13 @@ async def list_group_users(
             logger.info(f"No users found in group {group_id}")
             return create_paginated_response([], response, fetch_all)
 
-        if fetch_all and response and hasattr(response, "has_next") and response.has_next():
+        if fetch_all and response and extract_after_cursor(response):
             logger.info(f"fetch_all=True, auto-paginating from initial {len(users)} users in group {group_id}")
-            all_users, pagination_info = await paginate_all_results(response, users)
+            all_users, pagination_info = await paginate_all_results(
+                response,
+                users,
+                fetch_page_fn=lambda after: client.list_group_users(group_id, **{**query_params, "after": after}),
+            )
 
             pages_fetched = pagination_info["pages_fetched"]
             logger.info(
