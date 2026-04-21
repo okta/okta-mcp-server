@@ -65,6 +65,7 @@ def main():
 
     logger.info("Starting Okta MCP Server")
     from okta_mcp_server.tools.applications import applications  # noqa: F401
+    from okta_mcp_server.tools.device_assurance import device_assurance  # noqa: F401
     from okta_mcp_server.tools.groups import groups  # noqa: F401
     from okta_mcp_server.tools.policies import policies  # noqa: F401
     from okta_mcp_server.tools.system_logs import system_logs  # noqa: F401
