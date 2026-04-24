@@ -69,6 +69,7 @@ def main():
     from okta_mcp_server.tools.groups import groups  # noqa: F401
     from okta_mcp_server.tools.policies import policies  # noqa: F401
     from okta_mcp_server.tools.system_logs import system_logs  # noqa: F401
+    from okta_mcp_server.tools.system_logs import login_failures  # noqa: F401
     from okta_mcp_server.tools.users import users  # noqa: F401
 
     mcp.run()
