@@ -13,6 +13,7 @@ dependencies = [
     "keyring>=25.6.0",
     "keyrings.alt>=5.0.0",
     "flatdict>=4.1.0",
+    "authlib>=1.3.0",
 ]
 
 [build-system]
@@ -26,7 +27,22 @@ packages = ["src/okta_mcp_server"]
 dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=1.3.0",
+    "pytest-cov>=6.0.0",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+filterwarnings = [
+    "ignore::authlib.deprecate.AuthlibDeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["src/okta_mcp_server"]
+omit = ["tests/*"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
 
 [project.scripts]
 okta-mcp-server = "okta_mcp_server:main"

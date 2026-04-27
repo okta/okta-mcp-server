@@ -1,5 +1,6 @@
 services:
   okta-mcp-server:
+    image: okta-mcp-server
     build:
       context: .
       dockerfile: Dockerfile
@@ -29,5 +30,8 @@ services:
     # restart: "no"
 
     volumes:
-      - okta-keyring:/root/.local/share/python_keyring
+      - okta-keyring:/home/appuser/.local/share/python_keyring
       - ./logs:/app/logs
+
+volumes:
+  okta-keyring:
