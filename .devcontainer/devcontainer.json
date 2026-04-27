@@ -1,0 +1,26 @@
+{
+  "name": "Okta MCP Server",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "remoteUser": "appuser",
+  "remoteEnv": {
+    "PYTHON_KEYRING_BACKEND": "keyrings.alt.file.PlaintextKeyring",
+    "PYTHONUNBUFFERED": "1",
+    "OKTA_MCP_TRANSPORT": "sse"
+  },
+  "mounts": [
+    "source=okta-keyring,target=/home/appuser/.local/share/python_keyring,type=volume",
+    "source=${localWorkspaceFolder}/logs,target=/app/logs,type=bind"
+  ],
+  "forwardPorts": [8000],
+  "customizations": {
+    "jetbrains": {
+      "backend": "PyCharm",
+      "projectSettings": {
+        "pythonInterpreterPath": "/app/.venv/bin/python"
+      }
+    }
+  }
+}

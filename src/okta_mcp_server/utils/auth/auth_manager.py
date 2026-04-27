@@ -14,10 +14,12 @@ import time
 import webbrowser
 from dataclasses import dataclass, field
 
-import jwt
 import keyring
 import keyring.backend
 import requests
+import authlib
+from authlib.integrations.requests_client import OAuth2Session
+from authlib.oauth2.rfc7523 import PrivateKeyJWT
 from loguru import logger
 
 SERVICE_NAME = "OktaAuthManager"
@@ -25,7 +27,13 @@ SERVICE_NAME = "OktaAuthManager"
 
 @dataclass
 class OktaAuthManager:
-    """Manages Okta configuration, authentication, and token state."""
+    """Manages Okta configuration, authentication, and token state.
+
+    Two authentication flows are supported:
+
+    * Device Authorization Grant (default): interactive, browser-based; tokens stored in OS keyring.
+    * Private Key JWT (``OKTA_PRIVATE_KEY`` + ``OKTA_KEY_ID`` set): browserless, no refresh token.
+    """
 
     org_url: str = field(init=False)
     client_id: str = field(init=False)
@@ -39,7 +47,7 @@ class OktaAuthManager:
 
     def __init__(self):
         """Initialize and validate Okta configuration from environment variables."""
-        logger.debug("Initializing OktaAuthManager")
+        logger.debug(f"Initializing OktaAuthManager with authlib version {authlib.__version__}")
         self.org_url = os.environ.get("OKTA_ORG_URL")
         self.client_id = os.environ.get("OKTA_CLIENT_ID")
         self.scopes = f"{self.scopes} {os.environ.get('OKTA_SCOPES', '').strip()}"
@@ -70,39 +78,8 @@ class OktaAuthManager:
         logger.info(f"OktaAuthManager initialized with org_url: {self.org_url}, client_id: {self.client_id}")
         logger.debug(f"Configured scopes: {self.scopes}")
 
-    def _get_client_assertion(self) -> str:
-        """Generate a JWT client assertion for browserless authentication."""
-        logger.debug("Generating client assertion JWT")
-
-        token_url = f"{self.org_url}/oauth2/v1/token"
-
-        headers = {"alg": "RS256", "kid": self.key_id}
-
-        payload = {
-            "iss": self.client_id,
-            "sub": self.client_id,
-            "aud": token_url,
-            "iat": int(time.time()),
-            "exp": int(time.time()) + 300,  # 5 minutes expiration
-        }
-
-        try:
-            # Ensure the key is in bytes format
-            private_key = self.private_key
-            if isinstance(private_key, str):
-                private_key = private_key.encode("utf-8")
-
-            client_assertion = jwt.encode(payload, private_key, algorithm="RS256", headers=headers)
-
-            logger.debug("Client assertion JWT generated successfully")
-            return client_assertion
-
-        except Exception as e:
-            logger.error(f"Failed to generate client assertion: {e}")
-            raise
-
     def _browserless_authenticate(self) -> str | None:
-        """Perform browserless authentication using client credentials with JWT assertion."""
+        """Perform browserless authentication using client credentials with private_key_jwt."""
         logger.info("Starting browserless authentication")
 
         self.org_url = self.org_url.rstrip("/")
@@ -110,52 +87,36 @@ class OktaAuthManager:
         if env_scopes:
             self.scopes = env_scopes
         token_url = f"{self.org_url}/oauth2/v1/token"
-        headers = {
-            "Accept": "application/json",
-            "Content-Type": "application/x-www-form-urlencoded",
-        }
 
         try:
-            client_assertion = self._get_client_assertion()
-
-            data = {
-                "grant_type": "client_credentials",
-                "scope": self.scopes,
-                "client_assertion_type": "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
-                "client_assertion": client_assertion,
-            }
+            session = OAuth2Session(
+                client_id=self.client_id,
+                client_secret=self.private_key,
+                token_endpoint_auth_method="private_key_jwt",
+                scope=self.scopes,
+            )
+            session.register_client_auth_method(
+                PrivateKeyJWT(token_endpoint=token_url, headers={"kid": self.key_id})
+            )
 
             logger.debug(f"Requesting token from: {token_url}")
             logger.debug(f"Scopes: {self.scopes}")
 
-            response = requests.post(token_url, headers=headers, data=data)
-            logger.debug(f"Response status code: {response.status_code}")
+            token = session.fetch_token(url=token_url, grant_type="client_credentials")
+            access_token = token.get("access_token")
 
-            if response.status_code == 200:
-                resp_json = response.json()
-                access_token = resp_json.get("access_token")
+            if access_token:
+                logger.info("Successfully obtained access token via browserless authentication")
+                keyring.set_password(SERVICE_NAME, "api_token", access_token)
+                self.token_timestamp = int(time.time())
+                logger.debug("Note: Client credentials flow does not provide refresh tokens")
+                return access_token
 
-                if access_token:
-                    logger.info("Successfully obtained access token via browserless authentication")
-                    keyring.set_password(SERVICE_NAME, "api_token", access_token)
-                    self.token_timestamp = int(time.time())
-
-                    # Note: Client credentials flow doesn't provide refresh tokens
-                    logger.debug("Note: Client credentials flow does not provide refresh tokens")
-
-                    return access_token
-
-                logger.error("No access token in response")
-                return None
-
-            logger.error(f"Failed to get token: HTTP {response.status_code} - {response.text}")
+            logger.error("No access token in response")
             return None
 
-        except requests.RequestException as e:
-            logger.error(f"Request error during browserless authentication: {e}")
-            return None
         except Exception as e:
-            logger.error(f"Unexpected error during browserless authentication: {e}")
+            logger.error(f"Browserless authentication failed: {e}")
             return None
 
     def _initiate_device_authorization(self) -> dict:
@@ -224,8 +185,17 @@ class OktaAuthManager:
                     sys.stdout.flush()
                     time.sleep(device_data["interval"])
 
+                elif resp_json.get("error") == "slow_down":
+                    device_data["interval"] = device_data["interval"] * 2
+                    logger.debug(f"Slow down requested, increased interval to {device_data['interval']} seconds")
+                    time.sleep(device_data["interval"])
+
                 elif resp_json.get("error") == "access_denied":
                     logger.error("Access denied by user")
+                    return None
+
+                elif resp_json.get("error") == "expired_token":
+                    logger.error("Device code has expired")
                     return None
 
                 else:
@@ -244,42 +214,33 @@ class OktaAuthManager:
         """Attempt to refresh the access token using the stored refresh token."""
         logger.info("Attempting to refresh access token")
 
-        refresh_token = keyring.get_password(SERVICE_NAME, "refresh_token")
-        if not refresh_token:
+        stored_refresh_token = keyring.get_password(SERVICE_NAME, "refresh_token")
+        if not stored_refresh_token:
             logger.warning("No refresh token available")
             return False
 
         token_url = f"{self.org_url}/oauth2/v1/token"
-        headers = {"Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded"}
-        data = {
-            "client_id": self.client_id,
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-        }
-
         logger.debug(f"Refresh token request URL: {token_url}")
 
         try:
-            response = requests.post(token_url, headers=headers, data=data)
-            logger.debug(f"Refresh response status: {response.status_code}")
+            session = OAuth2Session(
+                client_id=self.client_id,
+                token_endpoint_auth_method="none",
+            )
+            token = session.refresh_token(url=token_url, refresh_token=stored_refresh_token)
 
-            if response.status_code == 200:
-                resp_json = response.json()
-                keyring.set_password(SERVICE_NAME, "api_token", resp_json["access_token"])
+            keyring.set_password(SERVICE_NAME, "api_token", token["access_token"])
 
-                if "refresh_token" in resp_json:
-                    logger.debug("New refresh token received and stored")
-                    keyring.set_password(SERVICE_NAME, "refresh_token", resp_json["refresh_token"])
+            if "refresh_token" in token:
+                logger.debug("New refresh token received and stored")
+                keyring.set_password(SERVICE_NAME, "refresh_token", token["refresh_token"])
 
-                self.token_timestamp = int(time.time())
-                logger.info("Token refreshed successfully")
-                return True
-            else:
-                logger.error(f"Failed to refresh token: HTTP {response.status_code} - {response.text}")
-                return False
+            self.token_timestamp = int(time.time())
+            logger.info("Token refreshed successfully")
+            return True
 
-        except requests.RequestException as e:
-            logger.error(f"Error during token refresh: {e}")
+        except Exception as e:
+            logger.error(f"Failed to refresh token: {e}")
             return False
 
     async def authenticate(self):
