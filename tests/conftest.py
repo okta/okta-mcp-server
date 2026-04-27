@@ -199,4 +199,8 @@ def mock_okta_client():
     client.deactivate_application.return_value = (None, None)
     client.deactivate_policy.return_value = (None, None)
     client.deactivate_policy_rule.return_value = (None, None)
+    # Default get_user returns a DEPROVISIONED user (pre-condition for permanent deletion).
+    _deprovisioned_user = MagicMock()
+    _deprovisioned_user.status = "DEPROVISIONED"
+    client.get_user.return_value = (_deprovisioned_user, None, None)
     return client

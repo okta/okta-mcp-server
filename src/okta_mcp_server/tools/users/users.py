@@ -5,8 +5,6 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
 
-import csv
-import os
 from typing import Optional
 
 from loguru import logger
@@ -19,7 +17,7 @@ from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DEACTIVATE_USER, DELETE_USER
-from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
+from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, paginate_all_results
 from okta_mcp_server.utils.validation import validate_ids
 
 
@@ -39,28 +37,13 @@ async def list_users(
     Use fetch_all=True to automatically fetch all pages of results.
     By default, it will only fetch users whose status is not "DEPROVISIONED".
 
-    IMPORTANT — default page size:
-        When limit is NOT provided, the server defaults to 20 users per page.
-        ALWAYS omit the limit parameter unless the user explicitly requests a
-        different page size.
-
     Parameters:
         search (str, optional): The value of the search string when searching for some specific set of users.
         filter (str, optional): A filter string to filter users by Okta profile attributes.
         q (str, optional): A query string to search users by Okta profile attributes.
         fetch_all (bool, optional): If True, automatically fetch all pages of results. Default: False.
-            NOTE: fetch_all is capped at 10 pages (2,000 users) to keep responses manageable.
-            If the org has more users than the cap, the result will be partial. Always check
-            pagination_info.stopped_early in the response — if True, the count is incomplete
-            and you MUST tell the user "at least N users were found; the result may be incomplete.
-            Use export_users_csv() for a complete export."
-            NEVER say the org has been "fully enumerated" or report the count as the exact total
-            when stopped_early is True.
-            WARNING: For orgs with more than 2,000 users, use export_users_csv() instead —
-            it writes directly to disk and handles any org size without response size limits.
         after (str, optional): Pagination cursor for fetching results after this point.
-        limit (int, optional): Maximum number of users to return per page (min 20, max 200).
-            Default: 20.
+        limit (int, optional): Maximum number of users to return per page (min 20, max 100).
         The search, filter, and q are performed on user profile attributes.
 
     Examples:
@@ -75,7 +58,9 @@ async def list_users(
 
     Returns:
         Dict containing:
-        - items: List of (user.profile, user.id) tuples
+        - items: List of dicts with keys 'id', 'profile', and 'status'
+          (status values: STAGED, PROVISIONED, ACTIVE, RECOVERY, LOCKED_OUT,
+           PASSWORD_EXPIRED, SUSPENDED, DEPROVISIONED)
         - total_fetched: Number of users returned
         - has_more: Boolean indicating if more results are available
         - next_cursor: Cursor for the next page (if has_more is True)
@@ -87,29 +72,20 @@ async def list_users(
         f"Search: '{search}', Filter: '{filter}', Q: '{q}', fetch_all: {fetch_all}, after: '{after}', limit: {limit}"
     )
 
-    # Enforce a consistent default page size when no limit is provided.
-    if limit is None:
-        limit = 20
-
     # Validate limit parameter range
-    limit_clamped = None
-    if limit < 20:
-        logger.warning(f"Limit {limit} is below minimum (20), setting to 20")
-        limit_clamped = f"limit {limit} is below minimum (20); clamped to 20"
-        limit = 20
-    elif limit > 200:
-        logger.warning(f"Limit {limit} exceeds maximum (200), setting to 200")
-        limit_clamped = f"limit {limit} exceeds maximum (200); clamped to 200"
-        limit = 200
+    if limit is not None:
+        if limit < 20:
+            logger.warning(f"Limit {limit} is below minimum (20), setting to 20")
+            limit = 20
+        elif limit > 100:
+            logger.warning(f"Limit {limit} exceeds maximum (100), setting to 100")
+            limit = 100
 
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
     try:
         client = await get_okta_client(manager)
-        # When fetch_all=True, force limit=200 on every page to minimise API
-        # round-trips regardless of what the caller passed in as `limit`.
-        effective_limit = 200 if fetch_all else limit
-        query_params = build_query_params(search=search, filter=filter, q=q, after=after, limit=effective_limit)
+        query_params = build_query_params(search=search, filter=filter, q=q, after=after, limit=limit)
 
         logger.debug("Calling Okta API to list users")
         users, response, err = await client.list_users(**query_params)
@@ -120,72 +96,26 @@ async def list_users(
 
         if not users:
             logger.info("No users found")
-            result = create_paginated_response([], response, fetch_all_used=fetch_all)
-            if limit_clamped:
-                result["warning"] = limit_clamped
-            return result
+            return create_paginated_response([], response, fetch_all_used=fetch_all)
 
-        # Convert users to the expected format
-        user_items = [(user.profile, user.id) for user in users]
+        # Convert users to the expected format — include status so the LLM can
+        # decide whether deactivation is needed before calling deactivate_user.
+        user_items = [{"id": user.id, "profile": user.profile, "status": user.status} for user in users]
 
-        _has_more = (hasattr(response, "has_next") and response.has_next()) or bool(extract_after_cursor(response))
-        if fetch_all and response and _has_more:
+        if fetch_all and response and hasattr(response, "has_next") and response.has_next():
             logger.info(f"fetch_all=True, auto-paginating from initial {len(users)} users")
-
-            async def _next_page(cursor):
-                # Always use max page size during fetch_all to minimise API
-                # round-trips, regardless of the caller-supplied limit.
-                p = {k: v for k, v in query_params.items() if k not in ["after", "limit"]}
-                p["after"] = cursor
-                p["limit"] = 200
-                return await client.list_users(**p)
-
-            async def _on_page(pages, total):
-                logger.info(f"[list_users] Page {pages} fetched — {total} users total so far")
-                if pages % 5 == 0:
-                    await ctx.info(f"Fetching users... {total} fetched so far ({pages} pages)")
-
-            all_users, pagination_info = await paginate_all_results(
-                response, users, next_page_fn=_next_page, on_page=_on_page, max_pages=10
-            )
-            all_user_items = [(user.profile, user.id) for user in all_users]
+            all_users, pagination_info = await paginate_all_results(response, users)
+            all_user_items = [{"id": user.id, "profile": user.profile, "status": user.status} for user in all_users]
 
             logger.info(
                 f"Successfully retrieved {len(all_user_items)} users across {pagination_info['pages_fetched']} pages"
             )
-            result = create_paginated_response(
+            return create_paginated_response(
                 all_user_items, response, fetch_all_used=True, pagination_info=pagination_info
             )
-            if limit_clamped:
-                result["warning"] = limit_clamped
-            # When a manual `after` cursor was supplied AND fetch_all=True, total_fetched
-            # only counts users from that cursor onwards — not the full org total.
-            # Surface this so the LLM can communicate it accurately to the user.
-            if after:
-                result["pagination_note"] = (
-                    "IMPORTANT: fetch_all resumed from the provided 'after' cursor. "
-                    f"'total_fetched' ({result['total_fetched']}) counts only the users fetched "
-                    "from that cursor onwards — NOT the total number of users in the org. "
-                    "You MUST NOT say the org has been 'fully enumerated' or report this as the total user count. "
-                    "Tell the user: 'Fetched N additional users from cursor onwards. "
-                    "The total org user count may be much higher.'"
-                )
-            if pagination_info.get("stopped_early"):
-                result["warning"] = (
-                    f"CRITICAL: fetch_all stopped early after {pagination_info['pages_fetched']} pages "
-                    f"({result['total_fetched']} users). The org almost certainly has MORE users. "
-                    f"Reason: {pagination_info.get('stop_reason')}. "
-                    "You MUST tell the user: 'At least {total} users were found but the result is INCOMPLETE. "
-                    "The org likely has more users. Use export_users_csv() for a complete export.' "
-                    "NEVER say the org has been 'fully enumerated' or report this count as the exact total."
-                )
-            return result
         else:
             logger.info(f"Successfully retrieved {len(user_items)} users")
-            result = create_paginated_response(user_items, response, fetch_all_used=fetch_all)
-            if limit_clamped:
-                result["warning"] = limit_clamped
-            return result
+            return create_paginated_response(user_items, response, fetch_all_used=fetch_all)
 
     except Exception as e:
         logger.error(f"Exception while listing users: {type(e).__name__}: {e}")
@@ -344,8 +274,14 @@ async def deactivate_user(user_id: str, ctx: Context = None) -> list:
     """Deactivates a user from the Okta organization.
 
     This tool deactivates a user from the Okta organization by their ID.
-    The user will be asked for confirmation before the deactivation proceeds.
+    Confirmation is handled server-side via MCP elicitation — call this tool
+    directly without prompting the user for manual confirmation first.
     Deactivating the user is a prerequisite for deleting the user.
+
+    IMPORTANT: Do NOT call this tool if the user's status is already
+    'DEPROVISIONED'. In that case call delete_deactivated_user directly.
+    Only call this tool for users whose status is ACTIVE, STAGED,
+    PROVISIONED, RECOVERY, LOCKED_OUT, PASSWORD_EXPIRED, or SUSPENDED.
 
     Parameters:
         user_id (str, required): The ID of the user to deactivate.
@@ -354,6 +290,36 @@ async def deactivate_user(user_id: str, ctx: Context = None) -> list:
         List containing the result of the deactivation operation.
     """
     logger.info(f"Deactivation requested for user: {user_id}")
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+
+        # Guard: check current status before attempting deactivation.
+        # Calling the Okta deactivate endpoint on a DEPROVISIONED user returns
+        # a 404 error because the Okta API treats DEPROVISIONED users as
+        # effectively non-existent for lifecycle operations.
+        logger.debug(f"Fetching current status for user {user_id} before deactivation")
+        user, _, get_err = await client.get_user(user_id)
+
+        if get_err:
+            logger.error(f"Okta API error while fetching user {user_id} before deactivation: {get_err}")
+            return [f"Error: {get_err}"]
+
+        user_status = getattr(user, "status", None)
+        logger.debug(f"User {user_id} current status: {user_status}")
+
+        if user_status == "DEPROVISIONED":
+            logger.info(f"Skipping deactivation for user {user_id}: already DEPROVISIONED")
+            return [
+                f"User {user_id} is already in DEPROVISIONED state — deactivation is not needed. "
+                f"Call delete_deactivated_user to permanently delete this user."
+            ]
+
+    except Exception as e:
+        logger.error(f"Exception while checking user {user_id} status: {type(e).__name__}: {e}")
+        return [f"Exception: {e}"]
 
     outcome = await elicit_or_fallback(
         ctx,
@@ -366,10 +332,7 @@ async def deactivate_user(user_id: str, ctx: Context = None) -> list:
         logger.info(f"User deactivation cancelled for {user_id}")
         return [{"message": "User deactivation cancelled by user."}]
 
-    manager = ctx.request_context.lifespan_context.okta_auth_manager
-
     try:
-        client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to deactivate user {user_id}")
 
         result = await client.deactivate_user(user_id)
@@ -391,8 +354,9 @@ async def deactivate_user(user_id: str, ctx: Context = None) -> list:
 async def delete_deactivated_user(user_id: str, ctx: Context = None) -> list:
     """Delete a user from the Okta organization who has already been deactivated or deprovisioned.
 
-    This tool permanently deletes a deactivated/deprovisioned user. The user will be
-    asked for confirmation before the deletion proceeds.
+    This tool permanently deletes a deactivated/deprovisioned user.
+    Confirmation is handled server-side via MCP elicitation — call this tool
+    directly without prompting the user for manual confirmation first.
 
     Parameters:
         user_id (str, required): The ID of the deactivated or deprovisioned user to delete.
@@ -401,6 +365,41 @@ async def delete_deactivated_user(user_id: str, ctx: Context = None) -> list:
         List containing the result of the deletion operation.
     """
     logger.info(f"Deletion requested for deactivated user: {user_id}")
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+
+        # Check the user's current status before attempting deletion.
+        # The Okta API's DELETE endpoint behaves differently based on user state:
+        #   - ACTIVE / any non-deprovisioned state → transitions to DEPROVISIONED (does NOT delete)
+        #   - DEPROVISIONED → permanently deletes the user
+        # Without this check the tool would silently deactivate an active user and
+        # return a misleading "User deleted successfully" message.
+        logger.debug(f"Fetching current status for user {user_id} before deletion")
+        user, _, get_err = await client.get_user(user_id)
+
+        if get_err:
+            logger.error(f"Okta API error while fetching user {user_id} before deletion: {get_err}")
+            return [f"Error: {get_err}"]
+
+        user_status = getattr(user, "status", None)
+        logger.debug(f"User {user_id} current status: {user_status}")
+
+        if user_status != "DEPROVISIONED":
+            logger.warning(
+                f"Deletion rejected for user {user_id}: status is '{user_status}', expected 'DEPROVISIONED'"
+            )
+            return [
+                f"Error: User {user_id} cannot be permanently deleted because their current status is "
+                f"'{user_status}'. Only users in 'DEPROVISIONED' state can be permanently deleted. "
+                f"Please deactivate the user first using the deactivate_user tool, then retry."
+            ]
+
+    except Exception as e:
+        logger.error(f"Exception while checking user {user_id} status: {type(e).__name__}: {e}")
+        return [f"Exception: {e}"]
 
     outcome = await elicit_or_fallback(
         ctx,
@@ -413,11 +412,8 @@ async def delete_deactivated_user(user_id: str, ctx: Context = None) -> list:
         logger.info(f"User deletion cancelled for {user_id}")
         return [{"message": "User deletion cancelled by user."}]
 
-    manager = ctx.request_context.lifespan_context.okta_auth_manager
-
     try:
-        client = await get_okta_client(manager)
-        logger.debug(f"Calling Okta API to delete user {user_id}")
+        logger.debug(f"Calling Okta API to permanently delete deprovisioned user {user_id}")
 
         result = await client.delete_user(user_id)
         err = result[-1]
@@ -426,199 +422,8 @@ async def delete_deactivated_user(user_id: str, ctx: Context = None) -> list:
             logger.error(f"Okta API error while deleting user {user_id}: {err}")
             return [f"Error: {err}"]
 
-        logger.info(f"Successfully deleted user: {user_id}")
-        return [f"User {user_id} deleted successfully."]
+        logger.info(f"Successfully permanently deleted user: {user_id}")
+        return [f"User {user_id} permanently deleted successfully."]
     except Exception as e:
         logger.error(f"Exception while deleting user {user_id}: {type(e).__name__}: {e}")
         return [f"Exception: {e}"]
-
-
-@mcp.tool()
-async def export_users_csv(
-    ctx: Context,
-    output_path: str = "/tmp/okta_users_export.csv",
-    search: str = "",
-    filter: Optional[str] = None,
-    q: Optional[str] = None,
-) -> dict:
-    """Fetch all users from the Okta organization and save them to a CSV file on disk.
-
-    Uses the same pagination logic as list_users (fetch_all=True) but writes results
-    directly to a CSV file instead of returning them, avoiding response size limits.
-
-    Parameters:
-        output_path (str): Absolute path where the CSV file will be written.
-            Defaults to /tmp/okta_users_export.csv.
-        search (str, optional): Search expression for filtering users.
-        filter (str, optional): Filter string for users.
-        q (str, optional): Query string for users.
-
-    Returns:
-        Dict containing:
-        - output_path: Path to the written CSV file
-        - total_users: Total number of users written
-        - pages_fetched: Number of pages fetched
-        - stopped_early: Whether pagination hit the page cap
-        - stop_reason: Reason pagination stopped (if stopped_early)
-    """
-    logger.info(f"export_users_csv: starting export to {output_path}")
-
-    CSV_FIELDS = [
-        "id", "status", "login", "email", "firstName", "lastName",
-        "displayName", "mobilePhone", "primaryPhone", "department",
-        "title", "organization", "userType", "employeeNumber",
-        "costCenter", "division", "manager",
-    ]
-
-    # SDK v3 UserProfile stores attributes in snake_case (first_name, not firstName).
-    # Map CSV column names (camelCase) → SDK attribute names (snake_case).
-    _PROFILE_ATTR = {
-        "firstName": "first_name",
-        "lastName": "last_name",
-        "displayName": "display_name",
-        "mobilePhone": "mobile_phone",
-        "primaryPhone": "primary_phone",
-        "userType": "user_type",
-        "employeeNumber": "employee_number",
-        "costCenter": "cost_center",
-        # Already snake_case in SDK v3:
-        "login": "login",
-        "email": "email",
-        "department": "department",
-        "title": "title",
-        "organization": "organization",
-        "division": "division",
-        "manager": "manager",
-    }
-
-    manager = ctx.request_context.lifespan_context.okta_auth_manager
-
-    try:
-        client = await get_okta_client(manager)
-        query_params = build_query_params(search=search, filter=filter, q=q, limit=200)
-
-        logger.debug("Calling Okta API — first page")
-        users, response, err = await client.list_users(**query_params)
-
-        if err:
-            logger.error(f"Okta API error: {err}")
-            return {"error": str(err)}
-
-        if not users:
-            logger.info("No users found")
-            return {"output_path": output_path, "total_users": 0, "pages_fetched": 1}
-
-        _has_more = (hasattr(response, "has_next") and response.has_next()) or bool(extract_after_cursor(response))
-
-        all_users = list(users)
-        pagination_info = {"pages_fetched": 1, "total_items": len(all_users), "stopped_early": False, "stop_reason": None}
-
-        if _has_more:
-            async def _next_page(cursor):
-                p = {k: v for k, v in query_params.items() if k != "after"}
-                p["after"] = cursor
-                return await client.list_users(**p)
-
-            async def _on_page(pages, total):
-                logger.info(f"[export_users_csv] Page {pages} fetched — {total} users so far")
-                if pages % 5 == 0:
-                    await ctx.info(f"Exporting users... {total} written so far ({pages} pages)")
-
-            all_users, pagination_info = await paginate_all_results(
-                response, users, next_page_fn=_next_page, on_page=_on_page
-            )
-
-        # Write CSV
-        os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
-        with open(output_path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=CSV_FIELDS, extrasaction="ignore")
-            writer.writeheader()
-            for user in all_users:
-                profile = user.profile
-
-                def pget(csv_col, _profile=profile):
-                    # Try all known attribute name variants for the given CSV column name.
-                    # Okta SDK v3 (Pydantic v2) stores fields in snake_case internally
-                    # (e.g. first_name, last_name), but some builds expose camelCase.
-                    # Try: mapped snake_case → original camelCase → dict lookup (for
-                    # dynamic/custom profiles) → empty string as last resort.
-                    sdk_attr = _PROFILE_ATTR.get(csv_col, csv_col)
-
-                    # 1. Pydantic snake_case attribute (SDK v3 primary)
-                    val = getattr(_profile, sdk_attr, None)
-                    if val is not None and val != "":
-                        return val
-
-                    # 2. CamelCase attribute (SDK v3 fallback / some builds)
-                    if sdk_attr != csv_col:
-                        val = getattr(_profile, csv_col, None)
-                        if val is not None and val != "":
-                            return val
-
-                    # 3. Dict-style access for dynamic/custom profile attributes
-                    if hasattr(_profile, "__dict__"):
-                        val = _profile.__dict__.get(sdk_attr) or _profile.__dict__.get(csv_col)
-                        if val is not None and val != "":
-                            return val
-
-                    # 4. model_fields / model_dump for Pydantic v2 models
-                    if hasattr(_profile, "model_dump"):
-                        try:
-                            dumped = _profile.model_dump(by_alias=True)
-                            val = dumped.get(csv_col) or dumped.get(sdk_attr)
-                            if val is not None and val != "":
-                                return val
-                        except Exception:
-                            pass
-
-                    return ""
-
-                writer.writerow({
-                    "id": getattr(user, "id", ""),
-                    "status": getattr(user, "status", ""),
-                    "login": pget("login"),
-                    "email": pget("email"),
-                    "firstName": pget("firstName"),
-                    "lastName": pget("lastName"),
-                    "displayName": pget("displayName"),
-                    "mobilePhone": pget("mobilePhone"),
-                    "primaryPhone": pget("primaryPhone"),
-                    "department": pget("department"),
-                    "title": pget("title"),
-                    "organization": pget("organization"),
-                    "userType": pget("userType"),
-                    "employeeNumber": pget("employeeNumber"),
-                    "costCenter": pget("costCenter"),
-                    "division": pget("division"),
-                    "manager": pget("manager"),
-                })
-
-        total = len(all_users)
-        logger.info(f"export_users_csv: wrote {total} users to {output_path}")
-        await ctx.info(f"Export complete! {total} users written to {output_path}")
-
-        # Count users with missing firstName/lastName so the LLM can surface a note.
-        missing_names = sum(
-            1 for u in all_users
-            if not (getattr(u.profile, "first_name", None) or getattr(u.profile, "firstName", None))
-            or not (getattr(u.profile, "last_name", None) or getattr(u.profile, "lastName", None))
-        )
-
-        result = {
-            "output_path": output_path,
-            "total_users": total,
-            "pages_fetched": pagination_info["pages_fetched"],
-            "stopped_early": pagination_info["stopped_early"],
-            "stop_reason": pagination_info.get("stop_reason"),
-        }
-        if missing_names > 0:
-            result["note"] = (
-                f"{missing_names} of {total} users have empty firstName or lastName in the CSV. "
-                "This means those users were created in Okta without a first/last name — "
-                "the data is not missing from the export, it is simply not set in Okta for those accounts."
-            )
-        return result
-
-    except Exception as e:
-        logger.error(f"Exception in export_users_csv: {type(e).__name__}: {e}")
-        return {"error": str(e)}

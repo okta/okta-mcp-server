@@ -14,7 +14,7 @@ from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DELETE_GROUP
-from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
+from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, paginate_all_results
 from okta_mcp_server.utils.validation import validate_ids
 
 
@@ -60,17 +60,14 @@ async def list_groups(
         f"Search: '{search}', Filter: '{filter}', Q: '{q}', fetch_all: {fetch_all}, after: '{after}', limit: {limit}"
     )
 
-    # Enforce a consistent default page size when no limit is provided.
-    if limit is None:
-        limit = 20
-
     # Validate limit parameter range
-    if limit < 20:
-        logger.warning(f"Limit {limit} is below minimum (20), setting to 20")
-        limit = 20
-    elif limit > 100:
-        logger.warning(f"Limit {limit} exceeds maximum (100), setting to 100")
-        limit = 100
+    if limit is not None:
+        if limit < 20:
+            logger.warning(f"Limit {limit} is below minimum (20), setting to 20")
+            limit = 20
+        elif limit > 100:
+            logger.warning(f"Limit {limit} exceeds maximum (100), setting to 100")
+            limit = 100
 
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
@@ -89,21 +86,9 @@ async def list_groups(
             logger.info("No groups found")
             return create_paginated_response([], response, fetch_all)
 
-        _has_more = (hasattr(response, "has_next") and response.has_next()) or bool(extract_after_cursor(response))
-        if fetch_all and response and _has_more:
+        if fetch_all and response and hasattr(response, "has_next") and response.has_next():
             logger.info(f"fetch_all=True, auto-paginating from initial {len(groups)} groups")
-
-            async def _next_page(cursor):
-                p = dict(query_params)
-                p["after"] = cursor
-                return await client.list_groups(**p)
-
-            async def _on_page(pages, total):
-                await ctx.info(f"Fetching groups... {total} fetched so far ({pages} pages)")
-
-            all_groups, pagination_info = await paginate_all_results(
-                response, groups, next_page_fn=_next_page, on_page=_on_page
-            )
+            all_groups, pagination_info = await paginate_all_results(response, groups)
 
             logger.info(
                 f"Successfully retrieved {len(all_groups)} groups across {pagination_info['pages_fetched']} pages"
@@ -197,7 +182,8 @@ async def delete_group(group_id: str, ctx: Context = None) -> list:
     """Delete a group by ID from the Okta organization.
 
     This tool deletes a group by its ID from the Okta organization.
-    The user will be asked for confirmation before the deletion proceeds.
+    Confirmation is handled server-side via MCP elicitation — call this tool
+    directly without prompting the user for manual confirmation first.
 
     Parameters:
         group_id (str, required): The ID of the group to delete.
@@ -263,8 +249,9 @@ async def confirm_delete_group(group_id: str, confirmation: str, ctx: Context = 
         support MCP elicitation.  New clients should rely on the built-in
         elicitation prompt in ``delete_group`` instead.
 
-    This function MUST ONLY be called after the human user has explicitly typed 'DELETE' as confirmation.
-    NEVER call this function automatically after delete_group.
+    This deprecated tool is part of the legacy two-tool confirmation flow for clients that
+    do not support MCP elicitation. Call this tool directly with confirmation='DELETE' once
+    the user has confirmed — do NOT ask the user to manually type 'DELETE' in the chat.
 
     Parameters:
         group_id (str, required): The ID of the group to delete.
@@ -373,17 +360,14 @@ async def list_group_users(
     logger.info(f"Listing users in group: {group_id}")
     logger.debug(f"fetch_all: {fetch_all}, after: '{after}', limit: {limit}")
 
-    # Enforce a consistent default page size when no limit is provided.
-    if limit is None:
-        limit = 20
-
     # Validate limit parameter range
-    if limit < 20:
-        logger.warning(f"Limit {limit} is below minimum (20), setting to 20")
-        limit = 20
-    elif limit > 100:
-        logger.warning(f"Limit {limit} exceeds maximum (100), setting to 100")
-        limit = 100
+    if limit is not None:
+        if limit < 20:
+            logger.warning(f"Limit {limit} is below minimum (20), setting to 20")
+            limit = 20
+        elif limit > 100:
+            logger.warning(f"Limit {limit} exceeds maximum (100), setting to 100")
+            limit = 100
 
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
@@ -402,21 +386,9 @@ async def list_group_users(
             logger.info(f"No users found in group {group_id}")
             return create_paginated_response([], response, fetch_all)
 
-        _has_more = (hasattr(response, "has_next") and response.has_next()) or bool(extract_after_cursor(response))
-        if fetch_all and response and _has_more:
+        if fetch_all and response and hasattr(response, "has_next") and response.has_next():
             logger.info(f"fetch_all=True, auto-paginating from initial {len(users)} users in group {group_id}")
-
-            async def _next_page(cursor):
-                p = dict(query_params)
-                p["after"] = cursor
-                return await client.list_group_users(group_id, **p)
-
-            async def _on_page(pages, total):
-                await ctx.info(f"Fetching group users... {total} fetched so far ({pages} pages)")
-
-            all_users, pagination_info = await paginate_all_results(
-                response, users, next_page_fn=_next_page, on_page=_on_page
-            )
+            all_users, pagination_info = await paginate_all_results(response, users)
 
             pages_fetched = pagination_info["pages_fetched"]
             logger.info(
@@ -488,22 +460,8 @@ async def add_user_to_group(group_id: str, user_id: str, ctx: Context = None) ->
 
     try:
         client = await get_okta_client(manager)
-
-        # Idempotency check: use list_user_groups(user_id) and check if group_id is
-        # present. This is always a single API call regardless of group size because
-        # users typically belong to O(10-50) groups, whereas groups can have thousands
-        # of members. Querying from the user side is orders of magnitude cheaper than
-        # paginating all members of the group via list_group_users.
-        # SDK: list_user_groups(id) accepts only the user id — no pagination params —
-        # and returns the full list in one response.
-        logger.debug(f"Checking if user {user_id} is already a member of group {group_id}")
-        user_groups, _, groups_err = await client.list_user_groups(user_id)
-        if not groups_err and user_groups:
-            if any(g.id == group_id for g in user_groups):
-                logger.info(f"User {user_id} is already a member of group {group_id}")
-                return [f"User {user_id} is already a member of group {group_id}"]
-
         logger.debug(f"Calling Okta API to add user {user_id} to group {group_id}")
+
         result = await client.assign_user_to_group(group_id, user_id)
         err = result[-1]
 

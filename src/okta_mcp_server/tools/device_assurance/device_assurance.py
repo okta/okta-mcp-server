@@ -6,80 +6,28 @@
 # See the License for the specific language governing permissions and limitations under the License.
 
 import datetime
+import re
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
 from mcp.server.fastmcp import Context
 from okta.exceptions.exceptions import ForbiddenException, UnauthorizedException
 from okta.models.device_assurance import DeviceAssurance
-from pydantic import BaseModel, ConfigDict, model_validator
 
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DELETE_DEVICE_ASSURANCE_POLICY
-from okta_mcp_server.utils.validation import validate_ids, validate_os_version_params
+from okta_mcp_server.utils.validation import validate_ids
 
+# Semantic version pattern: X.Y, X.Y.Z, or X.Y.Z.W (each component a non-negative integer)
+_SEMVER_PATTERN = re.compile(r"^\d+\.\d+(\.\d+(\.\d+)?)?$")
 
-# ---------------------------------------------------------------------------
-# Input types for create/replace tools
-#
-# Pydantic BaseModel with extra='forbid' so FastMCP will reject any field that
-# is not in the schema.  ``osVersion`` is intentionally absent: the OS version
-# is always supplied via the top-level ``user_stated_os_version`` parameter so
-# it is validated verbatim before being injected into the API payload.
-# The model_validator fires BEFORE the tool body runs, giving a clear error
-# message when the LLM tries to put osVersion inside policy_data.
-# ---------------------------------------------------------------------------
+# Matches two-component versions (X.Y) that need normalising to X.Y.0
+_TWO_COMPONENT_VERSION = re.compile(r"^\d+\.\d+$")
 
-class _ScreenLockTypeInput(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    include: Optional[List[str]] = None
-
-
-class _DiskEncryptionTypeInput(BaseModel):
-    model_config = ConfigDict(extra="allow")
-    type: Optional[str] = None
-
-
-_OS_VERSION_IN_POLICY_DATA_ERROR = (
-    "osVersion must NOT be included in policy_data. "
-    "Pass the OS version as a separate parameter: user_stated_os_version. "
-    "Set user_stated_os_version to the EXACT characters the user typed — "
-    "do NOT normalize or append '.0'. "
-    "Then retry this call with osVersion removed from policy_data."
-)
-
-
-class PolicyDataInput(BaseModel):
-    """Accepted fields for create/replace. ``osVersion`` is intentionally excluded —
-    always pass the OS version via the ``user_stated_os_version`` parameter."""
-    model_config = ConfigDict(extra="forbid")
-
-    name: Optional[str] = None
-    platform: Optional[str] = None
-    diskEncryptionType: Optional[_DiskEncryptionTypeInput] = None
-    secureHardwarePresent: Optional[bool] = None
-    screenLockType: Optional[_ScreenLockTypeInput] = None
-    jailbreak: Optional[bool] = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def reject_os_version(cls, data: Any) -> Any:
-        """Intercept osVersion before Pydantic validates anything else.
-
-        This runs BEFORE the tool body, so the LLM sees a clear error
-        immediately rather than a silent strip or an API failure.
-        """
-        if isinstance(data, dict) and "osVersion" in data:
-            raise ValueError(_OS_VERSION_IN_POLICY_DATA_ERROR)
-        return data
-
-    def as_api_dict(self) -> Dict[str, Any]:
-        """Return a plain dict of set (non-None) fields, ready for the Okta API."""
-        return {k: v for k, v in self.model_dump().items() if v is not None}
-
-
+# Matches single-component versions (X) — valid for Android major-only OS versions
+_SINGLE_COMPONENT_VERSION = re.compile(r"^\d+$")
 
 # Security-relevant attributes that can be configured per platform.
 # If an attribute is expected for a platform but absent from the API response,
@@ -150,6 +98,51 @@ def _missing_required_scope(required_scope: str, manager: Any) -> bool:
     return configured is not None and required_scope not in configured
 
 
+def _validate_os_version(policy_data: Dict[str, Any]) -> Optional[str]:
+    """Validate and normalise osVersion.minimum format if present.
+
+    Accepts X.Y, X.Y.Z, and X.Y.Z.W formats. Two-component versions (X.Y)
+    are automatically normalised to X.Y.0 in-place before being sent to the API.
+
+    Android exception: single-component major versions (e.g. "12") are accepted
+    and passed through as-is — the Okta API expects the raw major version for Android
+    and rejects normalised forms like "12.0.0".
+
+    Returns an error message string if validation fails, None if valid.
+    """
+    os_version = policy_data.get("osVersion") or policy_data.get("os_version")
+    if not os_version:
+        return None
+
+    minimum = os_version.get("minimum")
+    if not minimum:
+        return None
+
+    platform = (policy_data.get("platform") or "").upper()
+
+    # Android accepts single-component major versions (e.g. "12").
+    # The Okta API for Android expects the major version as-is (e.g. "12"), not "12.0.0".
+    if platform == "ANDROID" and _SINGLE_COMPONENT_VERSION.match(minimum):
+        logger.debug(f"Android OS version '{minimum}' accepted as-is (major version)")
+        return None
+
+    if not _SEMVER_PATTERN.match(minimum):
+        return (
+            f"Invalid OS version format: '{minimum}'. "
+            f"Version must be in X.Y, X.Y.Z, or X.Y.Z.W format "
+            f"(e.g., '14.2', '14.2.1', '14.2.1.0'). "
+            f"For Android, a major version only (e.g. '12') is also accepted."
+        )
+
+    # Normalise X.Y → X.Y.0 so the Okta API always receives a full three-component version.
+    if _TWO_COMPONENT_VERSION.match(minimum):
+        normalized = f"{minimum}.0"
+        logger.debug(f"Normalised OS version '{minimum}' → '{normalized}'")
+        os_version["minimum"] = normalized
+
+    return None
+
+
 def _validate_platform_attributes(policy_data: Dict[str, Any]) -> Optional[str]:
     """Validate that the requested attributes are supported by the given platform.
 
@@ -182,26 +175,13 @@ def _validate_platform_attributes(policy_data: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _enrich_policy_with_attribute_status(
-    policy_dict: Dict[str, Any],
-    unverifiable_attrs: Optional[set[str]] = None,
-) -> Dict[str, Any]:
+def _enrich_policy_with_attribute_status(policy_dict: Dict[str, Any]) -> Dict[str, Any]:
     """Add explicit security attribute status to a policy response.
 
     For each security-relevant attribute on the policy's platform, marks it as
-    ``'configured'``, ``'not_configured'``, or ``'unverifiable'``. This prevents
-    ambiguity between:
-    - "the attribute was checked and found compliant"
-    - "the attribute was never configured in this policy"
-    - "the attribute could not be verified due to a partial API failure" (AC4)
-
-    AC1: The policy ``status`` field (ACTIVE/INACTIVE) is always surfaced.
-    If absent from the API response, it is set to ``"UNKNOWN"`` so the LLM
-    can detect the gap rather than silently omitting it.
-
-    AC4: If ``unverifiable_attrs`` is provided, attributes in that set are marked
-    ``'unverifiable'`` rather than ``'not_configured'``, and a ``partial_failure``
-    section is added to the response listing them explicitly.
+    'configured' or 'not_configured'. This prevents ambiguity between
+    "the attribute was checked and found compliant" vs "the attribute was
+    never configured in this policy".
     """
     platform = policy_dict.get("platform")
     if not platform:
@@ -209,61 +189,16 @@ def _enrich_policy_with_attribute_status(
 
     expected_attrs = _PLATFORM_SECURITY_ATTRIBUTES.get(platform, [])
     attribute_status: Dict[str, str] = {}
-    unverifiable_set = unverifiable_attrs or set()
 
     for attr in expected_attrs:
-        if attr in unverifiable_set:
-            attribute_status[attr] = "unverifiable"
-        elif policy_dict.get(attr) is not None:
+        value = policy_dict.get(attr)
+        if value is not None:
             attribute_status[attr] = "configured"
         else:
             attribute_status[attr] = "not_configured"
 
-    # AC4: Explicitly surface the list of unverifiable attributes so the LLM
-    # never misrepresents them as 'not configured'.
-    unverifiable_list = [a for a in expected_attrs if a in unverifiable_set]
-    if unverifiable_list:
-        policy_dict["partial_failure"] = {
-            "unverifiable_attributes": unverifiable_list,
-            "message": (
-                "The following security attributes could not be verified due to "
-                f"a partial API failure: {', '.join(unverifiable_list)}. "
-                "Their status is unknown — do not treat them as 'not configured'."
-            ),
-        }
-
-    # AC1: Always surface the policy activation status (ACTIVE / INACTIVE).
-    # If the SDK model omits it, set an explicit sentinel so the LLM can detect the gap.
-    if "status" not in policy_dict:
-        policy_dict["status"] = "UNKNOWN"
-
     policy_dict["securityAttributeStatus"] = attribute_status
     return policy_dict
-
-
-def _detect_unverifiable_attributes(policy_dict: Dict[str, Any], resp: Any) -> set[str]:
-    """Detect which security attributes could not be verified due to a partial API response.
-
-    A partial API failure is indicated when the HTTP response carries a 207
-    (Multi-Status) status code. In that case, security attributes that are absent
-    from the policy dict are considered *unverifiable* — they may be configured but
-    the API could not confirm their current values.
-
-    Returns:
-        A set of attribute names that are unverifiable. Empty set when no partial
-        failure is detected.
-    """
-    if resp is None:
-        return set()
-
-    status_code = getattr(resp, "status_code", None) or getattr(resp, "status", None)
-    if status_code != 207:
-        return set()
-
-    platform = policy_dict.get("platform", "")
-    expected_attrs = _PLATFORM_SECURITY_ATTRIBUTES.get(platform, [])
-    # In a partial (207) response, any absent expected attribute is unverifiable.
-    return {attr for attr in expected_attrs if policy_dict.get(attr) is None}
 
 
 def _compute_policy_diff(
@@ -334,34 +269,13 @@ def _get_implication(attr: str, before: Any, after: Any) -> str:
 
 
 @mcp.tool()
-@validate_os_version_params("version_threshold")
-async def list_device_assurance_policies(
-    ctx: Context, version_threshold: Optional[str] = None
-) -> Dict[str, Any]:
+async def list_device_assurance_policies(ctx: Context) -> Dict[str, Any]:
     """List all Device Assurance Policies in the Okta organization.
 
     Use this to audit which device assurance policies exist, compare OS
     version requirements across policies, find policies that do or do not
     block jailbroken/rooted devices, or identify policies whose platform
     requirements may be outdated.
-
-    *** MANDATORY — OS VERSION THRESHOLD QUERIES ***
-        Any time the user's request mentions a version number for filtering or
-        comparison (e.g. "older than 14.2", "below 14.2.1", "at least 13.x"):
-
-        1. You MUST pass that exact user-supplied string as ``version_threshold``.
-           WRONG: list_device_assurance_policies()                         ← bypasses validation
-           RIGHT: list_device_assurance_policies(version_threshold="<user value>") ← always pass through
-           NEVER call this tool with no arguments and then filter the result
-           yourself — that completely bypasses format validation.
-
-        2. If the version is rejected (e.g. because the patch component is
-           missing), relay the error word-for-word. STOP and ask the user:
-           "What is the exact full version in X.Y.Z format?" Do NOT guess
-           or complete the version yourself. Do NOT proceed until the user
-           explicitly confirms the full X.Y.Z version.
-
-        3. NEVER guess or infer what the user "probably" meant — always ask.
 
     IMPORTANT — always call fresh: Never reuse results from a previous call
     to resolve a policy name to an ID. Always call this tool again to get
@@ -379,13 +293,6 @@ async def list_device_assurance_policies(
     Returns:
         Dict containing:
             - policies (List[Dict]): List of device assurance policy objects.
-              Each policy includes a ``status`` field (``ACTIVE``, ``INACTIVE``,
-              or ``UNKNOWN`` if the API did not return it). You MUST present this
-              field when listing or comparing policies so the user sees the current
-              activation state.
-            - version_threshold (str, optional): Echo of the validated threshold
-              when one was supplied. Use this value for any subsequent filtering
-              or comparison in your response.
             - retrieved_at (str): ISO-8601 UTC timestamp of when this list
               was fetched. Use this to detect stale data.
             - note (str): Reminder that the list may become stale and must
@@ -464,13 +371,11 @@ async def list_device_assurance_policies(
             }
 
         logger.info(f"Successfully retrieved {len(policy_list)} device assurance policy(ies)")
-        enriched_policies = []
-        for policy in policy_list:
-            policy_dict = policy.to_dict()
-            unverifiable = _detect_unverifiable_attributes(policy_dict, resp)
-            enriched_policies.append(_enrich_policy_with_attribute_status(policy_dict, unverifiable))
-        result: Dict[str, Any] = {
-            "policies": enriched_policies,
+        return {
+            "policies": [
+                _enrich_policy_with_attribute_status(policy.to_dict())
+                for policy in policy_list
+            ],
             "retrieved_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "note": (
                 "This list was retrieved at the time shown in retrieved_at. "
@@ -478,9 +383,6 @@ async def list_device_assurance_policies(
                 "a policy name to an ID — the list may have changed since it was last fetched."
             ),
         }
-        if version_threshold is not None:
-            result["version_threshold"] = version_threshold
-        return result
 
     except (ForbiddenException, UnauthorizedException) as e:
         logger.error(f"Access denied listing device assurance policies: {e}")
@@ -532,7 +434,7 @@ async def get_device_assurance_policy(
 
     try:
         okta_client = await get_okta_client(manager)
-        policy, resp, err = await okta_client.get_device_assurance_policy(device_assurance_id)
+        policy, _, err = await okta_client.get_device_assurance_policy(device_assurance_id)
 
         if err:
             logger.error(f"Error getting device assurance policy {device_assurance_id}: {err}")
@@ -542,9 +444,7 @@ async def get_device_assurance_policy(
 
         if not policy:
             return None
-        policy_dict = policy.to_dict()
-        unverifiable = _detect_unverifiable_attributes(policy_dict, resp)
-        return _enrich_policy_with_attribute_status(policy_dict, unverifiable)
+        return _enrich_policy_with_attribute_status(policy.to_dict())
 
     except (ForbiddenException, UnauthorizedException) as e:
         logger.error(f"Access denied getting device assurance policy {device_assurance_id}: {e}")
@@ -555,21 +455,10 @@ async def get_device_assurance_policy(
 
 
 @mcp.tool()
-@validate_os_version_params("user_stated_os_version")
 async def create_device_assurance_policy(
-    ctx: Context, policy_data: PolicyDataInput, user_stated_os_version: Optional[str] = None
+    ctx: Context, policy_data: Dict[str, Any]
 ) -> Optional[Dict[str, Any]]:
     """Create a new Device Assurance Policy.
-
-    *** MANDATORY — OS VERSION ***
-        If the policy requires a minimum OS version:
-        a. Do NOT put osVersion inside policy_data — the tool constructs it
-           from user_stated_os_version after validation.
-        b. Set user_stated_os_version to the EXACT characters the user typed,
-           verbatim. NEVER invent or complete the version. "12.1" and
-           "12.1.0" are NOT the same — never append a patch number yourself.
-        c. If user_stated_os_version is rejected, relay the error and ask:
-           "What is the exact full version in X.Y.Z format?"
 
     Platform-specific attribute support:
         - ANDROID: name, platform, osVersion, jailbreak (false only), screenLockType
@@ -583,7 +472,9 @@ async def create_device_assurance_policy(
             - name (str, required): The policy name.
             - platform (str, required): Target platform.
                 One of: ANDROID, IOS, MACOS, WINDOWS, CHROMEOS.
-            - osVersion: Do NOT include — use user_stated_os_version instead.
+            - osVersion (dict, optional): Minimum OS version requirements.
+                Format: {\"minimum\": \"X.Y.Z\"} where X.Y.Z is semantic version.
+                For ANDROID, use major version only: {\"minimum\": \"12\"}
             - diskEncryptionType (dict, optional): Required disk encryption (MACOS, WINDOWS only).
                 Format: {\"type\": \"ALL_INTERNAL_VOLUMES\"}
             - secureHardwarePresent (bool, optional): Require secure hardware (MACOS, WINDOWS only).
@@ -592,10 +483,6 @@ async def create_device_assurance_policy(
                 Note: For ANDROID, [\"PASSCODE\"] alone is not valid — must include BIOMETRIC.
             - jailbreak (bool, optional): Block jailbroken/rooted devices (IOS, ANDROID only).
                 Note: Currently only accepts false value.
-        user_stated_os_version (str, optional): The EXACT OS version string the user
-            typed, character-for-character. Required when setting a minimum OS version.
-            For ANDROID a single major version (e.g. "12") is accepted.
-            For all other platforms X.Y.Z is required — X.Y alone will be rejected.
 
     Returns:
         Dict containing the created policy details, or an error dict.
@@ -613,24 +500,16 @@ async def create_device_assurance_policy(
         return _build_scope_error("create", 403)
 
     try:
-        # AC2: Intercept osVersion when the function is called directly (e.g. in tests)
-        # without going through Pydantic/FastMCP.  In production FastMCP calls, the
-        # PolicyDataInput model_validator fires first and the function is never reached
-        # if osVersion is present.
-        raw = policy_data if isinstance(policy_data, dict) else policy_data.as_api_dict()
-        if raw.get("osVersion") and user_stated_os_version is None:
-            return {"error": _OS_VERSION_IN_POLICY_DATA_ERROR}
+        version_error = _validate_os_version(policy_data)
+        if version_error:
+            return {"error": version_error}
 
-        # Inject the verbatim-validated version into the API payload.
-        if user_stated_os_version:
-            raw = {**raw, "osVersion": {"minimum": user_stated_os_version}}
-
-        platform_error = _validate_platform_attributes(raw)
+        platform_error = _validate_platform_attributes(policy_data)
         if platform_error:
             return {"error": platform_error}
 
         okta_client = await get_okta_client(manager)
-        policy_model = DeviceAssurance.from_dict(raw)
+        policy_model = DeviceAssurance.from_dict(policy_data)
         policy, _, err = await okta_client.create_device_assurance_policy(policy_model)
 
         if err:
@@ -652,31 +531,10 @@ async def create_device_assurance_policy(
 
 @mcp.tool()
 @validate_ids("device_assurance_id", error_return_type="dict")
-@validate_os_version_params("user_stated_os_version")
 async def replace_device_assurance_policy(
-    ctx: Context, device_assurance_id: str, policy_data: PolicyDataInput,
-    user_stated_os_version: Optional[str] = None,
+    ctx: Context, device_assurance_id: str, policy_data: Dict[str, Any]
 ) -> Optional[Dict[str, Any]]:
     """Replace (fully update) an existing Device Assurance Policy.
-
-    *** MANDATORY RESPONSE FORMAT — YOU MUST FOLLOW THIS EVERY TIME ***
-        This tool ALWAYS returns ``"before"``, ``"after"``, and ``"changes"``
-        fields. After every successful call you MUST:
-        1. Present a formatted before/after comparison table to the user.
-        2. For every entry in ``"changes"``, show the attribute name,
-           old value, new value, and the ``"implication"`` string.
-        3. NEVER reply with just "Done" or a one-line summary.
-           The user must see the full comparison — always.
-        4. OS VERSION — always use ``user_stated_os_version`` parameter:
-           a. Do NOT put osVersion in policy_data — the tool derives it from
-              user_stated_os_version after validation.
-           b. Set user_stated_os_version to the EXACT characters the user
-              typed, verbatim. NEVER invent or complete the version. "X.Y" and
-              "X.Y.0" are NOT the same — never append a patch number yourself.
-           c. If user_stated_os_version is rejected, relay the error — STOP and ask:
-              "What is the exact full version in X.Y.Z format?"
-           d. Do NOT call this tool until the user explicitly states the full
-              X.Y.Z version.
 
     Use this to update minimum OS version requirements, change platform
     compliance settings, or standardise policy configurations across your
@@ -689,11 +547,9 @@ async def replace_device_assurance_policy(
         - WINDOWS: name, platform, osVersion, diskEncryptionType, screenLockType, secureHardwarePresent
         - CHROMEOS: name, platform, osVersion
 
-    The response ALWAYS includes ``"before"`` and ``"after"`` state comparisons
-    plus a ``"changes"`` list with security implications for each modified attribute.
-    You MUST present this as a formatted confirmation summary to the user, showing
-    exactly what changed and its security implication. Never simply say "Done" —
-    always display the before/after comparison table.
+    The response includes a "before" and "after" state comparison plus a
+    list of changes with security implications so the user can review what
+    changed before the update takes effect.
 
     Parameters:
         device_assurance_id (str, required): The ID of the policy to update.
@@ -701,7 +557,9 @@ async def replace_device_assurance_policy(
             - name (str, required): The policy name.
             - platform (str, required): Target platform.
                 One of: ANDROID, IOS, MACOS, WINDOWS, CHROMEOS.
-            - osVersion: Do NOT include — use user_stated_os_version instead.
+            - osVersion (dict, optional): Minimum OS version requirements.
+                Format: {\"minimum\": \"X.Y.Z\"} where X.Y.Z is semantic version.
+                For ANDROID, use major version only: {\"minimum\": \"12\"}
             - diskEncryptionType (dict, optional): Required disk encryption (MACOS, WINDOWS only).
                 Format: {\"type\": \"ALL_INTERNAL_VOLUMES\"}
             - secureHardwarePresent (bool, optional): Require secure hardware (MACOS, WINDOWS only).
@@ -710,10 +568,6 @@ async def replace_device_assurance_policy(
                 Note: For ANDROID, [\"PASSCODE\"] alone is not valid — must include BIOMETRIC.
             - jailbreak (bool, optional): Block jailbroken/rooted devices (IOS, ANDROID only).
                 Note: Currently only accepts false value.
-        user_stated_os_version (str, optional): The EXACT OS version string the user
-            typed, character-for-character. Required when changing the minimum OS version.
-            For ANDROID a single major version (e.g. "12") is accepted.
-            For all other platforms X.Y.Z is required — X.Y alone will be rejected.
 
     Returns:
         Dict containing:
@@ -736,23 +590,18 @@ async def replace_device_assurance_policy(
         return _build_scope_error("replace", 403)
 
     try:
-        # AC2: same guard as create — intercept osVersion in direct-call paths.
-        raw = policy_data if isinstance(policy_data, dict) else policy_data.as_api_dict()
-        if raw.get("osVersion") and user_stated_os_version is None:
-            return {"error": _OS_VERSION_IN_POLICY_DATA_ERROR}
+        version_error = _validate_os_version(policy_data)
+        if version_error:
+            return {"error": version_error}
 
-        # Inject the verbatim-validated version into the API payload.
-        if user_stated_os_version:
-            raw = {**raw, "osVersion": {"minimum": user_stated_os_version}}
-
-        platform_error = _validate_platform_attributes(raw)
+        platform_error = _validate_platform_attributes(policy_data)
         if platform_error:
             return {"error": platform_error}
 
         okta_client = await get_okta_client(manager)
 
         # Fetch current state for before/after comparison
-        current_policy, fetch_resp, fetch_err = await okta_client.get_device_assurance_policy(
+        current_policy, _, fetch_err = await okta_client.get_device_assurance_policy(
             device_assurance_id
         )
         if fetch_err:
@@ -763,17 +612,12 @@ async def replace_device_assurance_policy(
                 return _build_scope_error("replace", fetch_err.status)
             return {"error": str(fetch_err)}
 
-        before_dict = current_policy.to_dict() if current_policy else {}
-        before_unverifiable = (
-            _detect_unverifiable_attributes(before_dict, fetch_resp) if current_policy else set()
-        )
-        before_state = (
-            _enrich_policy_with_attribute_status(before_dict, before_unverifiable)
-            if current_policy else {}
-        )
+        before_state = _enrich_policy_with_attribute_status(
+            current_policy.to_dict()
+        ) if current_policy else {}
 
-        policy_model = DeviceAssurance.from_dict(raw)
-        policy, replace_resp, err = await okta_client.replace_device_assurance_policy(
+        policy_model = DeviceAssurance.from_dict(policy_data)
+        policy, _, err = await okta_client.replace_device_assurance_policy(
             device_assurance_id, policy_model
         )
 
@@ -786,9 +630,7 @@ async def replace_device_assurance_policy(
         if not policy:
             return None
 
-        after_dict = policy.to_dict()
-        after_unverifiable = _detect_unverifiable_attributes(after_dict, replace_resp)
-        after_state = _enrich_policy_with_attribute_status(after_dict, after_unverifiable)
+        after_state = _enrich_policy_with_attribute_status(policy.to_dict())
         changes = _compute_policy_diff(before_state, after_state)
 
         logger.info(f"Successfully replaced device assurance policy {device_assurance_id}")
@@ -796,12 +638,6 @@ async def replace_device_assurance_policy(
             "before": before_state,
             "after": after_state,
             "changes": changes,
-            "_display_required": (
-                "MANDATORY: Present 'before' and 'after' as a comparison table. "
-                "For every entry in 'changes', show: attribute name, before value, "
-                "after value, and implication. "
-                "Do NOT respond with 'Done' or a brief summary."
-            ),
         }
 
     except (ForbiddenException, UnauthorizedException) as e:
@@ -819,7 +655,8 @@ async def delete_device_assurance_policy(
 ) -> Dict[str, Any]:
     """Delete a Device Assurance Policy from the Okta organization.
 
-    The user will be asked for confirmation before the deletion proceeds.
+    Confirmation is handled server-side via MCP elicitation — call this tool
+    directly without prompting the user for manual confirmation first.
     Note: A policy that is currently assigned to an authentication policy
     cannot be deleted.
 

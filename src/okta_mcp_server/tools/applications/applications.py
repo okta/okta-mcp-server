@@ -43,7 +43,6 @@ def _build_application_model(app_config: Dict[str, Any]) -> Any:
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DEACTIVATE_APPLICATION, DELETE_APPLICATION
-from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
 from okta_mcp_server.utils.validation import validate_ids
 
 
@@ -56,8 +55,7 @@ async def list_applications(
     filter: Optional[str] = None,
     expand: Optional[str] = None,
     include_non_deleted: Optional[bool] = None,
-    fetch_all: bool = False,
-) -> dict:
+) -> list:
     """List all applications from the Okta organization.
 
     Parameters:
@@ -68,25 +66,12 @@ async def list_applications(
         expand (str, optional): Expands the app user object to include the user's profile or expand the app group
         object to include the group's profile
         include_non_deleted (bool, optional): Include non-deleted applications in the results
-        fetch_all (bool, optional): If True, automatically fetch all pages of results. Default: False.
-
-    Examples:
-        For pagination:
-        - First call: list_applications()
-        - Next page: list_applications(after="cursor_value")
-        - All pages: list_applications(fetch_all=True)
 
     Returns:
-        Dict containing:
-        - items: List of application objects
-        - total_fetched: Number of applications returned
-        - has_more: Boolean indicating if more results are available
-        - next_cursor: Cursor for the next page (if has_more is True)
-        - fetch_all_used: Boolean indicating if fetch_all was used
-        - pagination_info: Additional pagination metadata (when fetch_all=True)
+        List containing the applications from the Okta organization.
     """
     logger.info("Listing applications from Okta organization")
-    logger.debug(f"Query parameters: q='{q}', filter='{filter}', limit={limit}, fetch_all={fetch_all}")
+    logger.debug(f"Query parameters: q='{q}', filter='{filter}', limit={limit}")
 
     # Validate limit parameter range
     if limit is not None:
@@ -101,50 +86,37 @@ async def list_applications(
 
     try:
         client = await get_okta_client(manager)
-        query_params = build_query_params(
-            q=q, after=after, limit=limit, filter=filter, expand=expand,
-            include_non_deleted=include_non_deleted,
-        )
+        query_params = {}
+
+        if q:
+            query_params["q"] = q
+        if after:
+            query_params["after"] = after
+        if limit:
+            query_params["limit"] = limit
+        if filter:
+            query_params["filter"] = filter
+        if expand:
+            query_params["expand"] = expand
+        if include_non_deleted is not None:
+            query_params["include_non_deleted"] = include_non_deleted
 
         logger.debug("Calling Okta API to list applications")
-        apps, response, err = await client.list_applications(**query_params)
+        apps, _, err = await client.list_applications(**query_params)
 
         if err:
             logger.error(f"Okta API error while listing applications: {err}")
-            return {"error": str(err)}
+            return [f"Error: {err}"]
 
         if not apps:
             logger.info("No applications found")
-            return create_paginated_response([], response, fetch_all)
+            return []
 
-        app_count = len(apps)
-        logger.debug(f"Retrieved {app_count} applications in first page")
-
-        _has_more = (hasattr(response, "has_next") and response.has_next()) or bool(extract_after_cursor(response))
-        if fetch_all and response and _has_more:
-            logger.info(f"fetch_all=True, auto-paginating from initial {app_count} applications")
-
-            async def _next_page(cursor):
-                p = dict(query_params)
-                p["after"] = cursor
-                return await client.list_applications(**p)
-
-            async def _on_page(pages, total):
-                await ctx.info(f"Fetching applications... {total} fetched so far ({pages} pages)")
-
-            all_apps, pagination_info = await paginate_all_results(
-                response, apps, next_page_fn=_next_page, on_page=_on_page
-            )
-            logger.info(
-                f"Successfully retrieved {len(all_apps)} applications across {pagination_info['pages_fetched']} pages"
-            )
-            return create_paginated_response(all_apps, response, fetch_all_used=True, pagination_info=pagination_info)
-        else:
-            logger.info(f"Successfully retrieved {app_count} applications")
-            return create_paginated_response(apps, response, fetch_all_used=fetch_all)
+        logger.info(f"Successfully retrieved {len(apps)} applications")
+        return [app for app in apps]
     except Exception as e:
         logger.error(f"Exception while listing applications: {type(e).__name__}: {e}")
-        return {"error": str(e)}
+        return [f"Exception: {e}"]
 
 
 @mcp.tool()
@@ -258,7 +230,8 @@ async def delete_application(ctx: Context, app_id: str) -> list:
     """Delete an application by ID from the Okta organization.
 
     This tool deletes an application by its ID from the Okta organization.
-    The user will be asked for confirmation before the deletion proceeds.
+    Confirmation is handled server-side via MCP elicitation — call this tool
+    directly without prompting the user for manual confirmation first.
 
     Parameters:
         app_id (str, required): The ID of the application to delete
@@ -324,8 +297,9 @@ async def confirm_delete_application(ctx: Context, app_id: str, confirmation: st
         support MCP elicitation.  New clients should rely on the built-in
         elicitation prompt in ``delete_application`` instead.
 
-    This function MUST ONLY be called after the human user has explicitly typed 'DELETE' as confirmation.
-    NEVER call this function automatically after delete_application.
+    This deprecated tool is part of the legacy two-tool confirmation flow for clients that
+    do not support MCP elicitation. Call this tool directly with confirmation='DELETE' once
+    the user has confirmed — do NOT ask the user to manually type 'DELETE' in the chat.
 
     Parameters:
         app_id (str, required): The ID of the application to delete

@@ -10,7 +10,6 @@ from typing import Any, Dict, Optional
 from loguru import logger
 from mcp.server.fastmcp import Context
 
-import okta.models as okta_models
 from okta.models.policy_rule import PolicyRule
 
 from okta_mcp_server.server import mcp
@@ -24,36 +23,6 @@ from okta_mcp_server.utils.messages import (
     DELETE_POLICY_RULE,
 )
 from okta_mcp_server.utils.validation import validate_ids
-
-
-# Mapping from Okta policy rule type → typed SDK model class.
-# The base PolicyRule model silently drops type-specific fields like `actions` and
-# `conditions`, causing 400 API errors ("Expecting an action but none were found").
-# Each typed subclass preserves those fields.
-_POLICY_RULE_MODEL_MAP: Dict[str, Any] = {
-    "SIGN_ON": okta_models.OktaSignOnPolicyRule,
-    "PASSWORD": okta_models.PasswordPolicyRule,
-    "ACCESS_POLICY": okta_models.AccessPolicyRule,
-    "PROFILE_ENROLLMENT": okta_models.ProfileEnrollmentPolicyRule,
-    "MFA_ENROLL": okta_models.AuthenticatorEnrollmentPolicyRule,
-    "IDP_DISCOVERY": okta_models.IdpDiscoveryPolicyRule,
-    "DEVICE_SIGNAL_COLLECTION": okta_models.DeviceSignalCollectionPolicyRule,
-    "ENTITY_RISK": okta_models.EntityRiskPolicyRule,
-    "POST_AUTH_SESSION": okta_models.PostAuthSessionPolicyRule,
-}
-
-
-def _build_policy_rule_model(rule_data: Dict[str, Any]) -> Any:
-    """Convert a plain dict to the appropriate typed Okta SDK PolicyRule model.
-
-    The base PolicyRule model lacks type-specific fields such as `actions` and
-    `conditions`. Without this mapping those fields are silently dropped, causing
-    Okta API 400 errors like "Expecting an action but none were found".
-    """
-    rule_type = str(rule_data.get("type", "")).upper()
-    model_cls = _POLICY_RULE_MODEL_MAP.get(rule_type, PolicyRule)
-    logger.debug(f"Using model class '{model_cls.__name__}' for rule type '{rule_type}'")
-    return model_cls.from_dict(rule_data)
 
 
 @mcp.tool()
@@ -223,7 +192,8 @@ async def update_policy(ctx: Context, policy_id: str, policy_data: Dict[str, Any
 async def delete_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
     """Delete a policy.
 
-    The user will be asked for confirmation before the deletion proceeds.
+    Confirmation is handled server-side via MCP elicitation — call this tool
+    directly without prompting the user for manual confirmation first.
 
     Parameters:
         policy_id (str, required): The ID of the policy to delete.
@@ -296,7 +266,8 @@ async def activate_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
 async def deactivate_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
     """Deactivate a policy.
 
-    The user will be asked for confirmation before the deactivation proceeds.
+    Confirmation is handled server-side via MCP elicitation — call this tool
+    directly without prompting the user for manual confirmation first.
 
     Parameters:
         policy_id (str, required): The ID of the policy to deactivate.
@@ -426,7 +397,7 @@ async def create_policy_rule(ctx: Context, policy_id: str, rule_data: Dict[str, 
     okta_client = await get_okta_client(manager)
 
     try:
-        policy_rule = _build_policy_rule_model(rule_data)
+        policy_rule = PolicyRule.from_dict(rule_data)
         rule, _, err = await okta_client.create_policy_rule(policy_id, policy_rule)
 
         if err:
@@ -459,7 +430,7 @@ async def update_policy_rule(
     okta_client = await get_okta_client(manager)
 
     try:
-        policy_rule = _build_policy_rule_model(rule_data)
+        policy_rule = PolicyRule.from_dict(rule_data)
         rule, _, err = await okta_client.replace_policy_rule(policy_id, rule_id, policy_rule)
 
         if err:
@@ -478,7 +449,8 @@ async def update_policy_rule(
 async def delete_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Dict[str, Any]:
     """Delete a policy rule.
 
-    The user will be asked for confirmation before the deletion proceeds.
+    Confirmation is handled server-side via MCP elicitation — call this tool
+    directly without prompting the user for manual confirmation first.
 
     Parameters:
         policy_id (str, required): The ID of the policy.
