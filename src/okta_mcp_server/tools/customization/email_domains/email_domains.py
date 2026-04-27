@@ -41,6 +41,7 @@ from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DELETE_EMAIL_DOMAIN
+from okta_mcp_server.utils.scope_guard import require_scopes
 from okta_mcp_server.utils.validation import validate_ids
 
 # ---------------------------------------------------------------------------
@@ -76,6 +77,7 @@ def _serialize(obj) -> Any:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.emailDomains.read")
 async def list_email_domains(
     ctx: Context,
     expand_brands: bool = False,
@@ -141,6 +143,7 @@ async def list_email_domains(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.emailDomains.manage")
 async def create_email_domain(
     ctx: Context,
     brand_id: str,
@@ -256,6 +259,7 @@ async def create_email_domain(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.emailDomains.read")
 @validate_ids("email_domain_id")
 async def get_email_domain(
     ctx: Context,
@@ -312,6 +316,7 @@ async def get_email_domain(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.emailDomains.manage")
 @validate_ids("email_domain_id")
 async def replace_email_domain(
     ctx: Context,
@@ -374,6 +379,7 @@ async def replace_email_domain(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.emailDomains.manage")
 @validate_ids("email_domain_id")
 async def delete_email_domain(
     ctx: Context,
@@ -455,6 +461,7 @@ async def delete_email_domain(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.emailDomains.manage")
 @validate_ids("email_domain_id")
 async def verify_email_domain(
     ctx: Context,

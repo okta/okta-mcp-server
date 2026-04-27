@@ -72,6 +72,7 @@ from okta_mcp_server.utils.messages import (
     DELETE_PREVIEW_ERROR_PAGE,
     DELETE_PREVIEW_SIGN_IN_PAGE,
 )
+from okta_mcp_server.utils.scope_guard import require_scopes
 from okta_mcp_server.utils.validation import validate_ids
 
 
@@ -126,6 +127,7 @@ def _build_sign_in_page(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.brands.read")
 @validate_ids("brand_id")
 async def get_error_page_resources(
     ctx: Context,
@@ -174,6 +176,7 @@ async def get_error_page_resources(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.brands.read")
 @validate_ids("brand_id")
 async def get_customized_error_page(
     ctx: Context,
@@ -214,6 +217,7 @@ async def get_customized_error_page(
 
 
 @mcp.tool()
+@require_scopes("okta.brands.manage")
 @validate_ids("brand_id")
 async def replace_customized_error_page(
     ctx: Context,
@@ -273,6 +277,7 @@ async def replace_customized_error_page(
 
 
 @mcp.tool()
+@require_scopes("okta.brands.manage")
 @validate_ids("brand_id")
 async def delete_customized_error_page(
     ctx: Context,
@@ -324,6 +329,7 @@ async def delete_customized_error_page(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.brands.read")
 @validate_ids("brand_id")
 async def get_default_error_page(
     ctx: Context,
@@ -367,6 +373,7 @@ async def get_default_error_page(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.brands.read")
 @validate_ids("brand_id")
 async def get_preview_error_page(
     ctx: Context,
@@ -406,6 +413,7 @@ async def get_preview_error_page(
 
 
 @mcp.tool()
+@require_scopes("okta.brands.manage")
 @validate_ids("brand_id")
 async def replace_preview_error_page(
     ctx: Context,
@@ -462,6 +470,7 @@ async def replace_preview_error_page(
 
 
 @mcp.tool()
+@require_scopes("okta.brands.manage")
 @validate_ids("brand_id")
 async def delete_preview_error_page(
     ctx: Context,
@@ -513,6 +522,7 @@ async def delete_preview_error_page(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.brands.read")
 @validate_ids("brand_id")
 async def get_sign_in_page_resources(
     ctx: Context,
@@ -561,6 +571,7 @@ async def get_sign_in_page_resources(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.brands.read")
 @validate_ids("brand_id")
 async def get_customized_sign_in_page(
     ctx: Context,
@@ -601,6 +612,7 @@ async def get_customized_sign_in_page(
 
 
 @mcp.tool()
+@require_scopes("okta.brands.manage")
 @validate_ids("brand_id")
 async def replace_customized_sign_in_page(
     ctx: Context,
@@ -675,6 +687,7 @@ async def replace_customized_sign_in_page(
 
 
 @mcp.tool()
+@require_scopes("okta.brands.manage")
 @validate_ids("brand_id")
 async def delete_customized_sign_in_page(
     ctx: Context,
@@ -727,6 +740,7 @@ async def delete_customized_sign_in_page(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.brands.read")
 @validate_ids("brand_id")
 async def get_default_sign_in_page(
     ctx: Context,
@@ -772,6 +786,7 @@ async def get_default_sign_in_page(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.brands.read")
 @validate_ids("brand_id")
 async def get_preview_sign_in_page(
     ctx: Context,
@@ -812,6 +827,7 @@ async def get_preview_sign_in_page(
 
 
 @mcp.tool()
+@require_scopes("okta.brands.manage")
 @validate_ids("brand_id")
 async def replace_preview_sign_in_page(
     ctx: Context,
@@ -875,6 +891,7 @@ async def replace_preview_sign_in_page(
 
 
 @mcp.tool()
+@require_scopes("okta.brands.manage")
 @validate_ids("brand_id")
 async def delete_preview_sign_in_page(
     ctx: Context,
@@ -927,6 +944,7 @@ async def delete_preview_sign_in_page(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.brands.read")
 @validate_ids("brand_id")
 async def list_sign_in_widget_versions(
     ctx: Context,
@@ -979,6 +997,7 @@ async def list_sign_in_widget_versions(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.brands.read")
 @validate_ids("brand_id")
 async def get_sign_out_page_settings(
     ctx: Context,
@@ -1022,6 +1041,7 @@ async def get_sign_out_page_settings(
 
 
 @mcp.tool()
+@require_scopes("okta.brands.manage")
 @validate_ids("brand_id")
 async def replace_sign_out_page_settings(
     ctx: Context,

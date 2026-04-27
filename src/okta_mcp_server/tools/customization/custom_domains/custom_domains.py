@@ -40,6 +40,7 @@ from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DELETE_CUSTOM_DOMAIN
+from okta_mcp_server.utils.scope_guard import require_scopes
 from okta_mcp_server.utils.validation import InvalidFilePathError, validate_file_path, validate_ids
 
 
@@ -67,6 +68,7 @@ def _serialize_domain(domain) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.domains.read")
 async def list_custom_domains(ctx: Context) -> Dict[str, Any]:
     """List all custom domains in the Okta organization.
 
@@ -120,6 +122,7 @@ async def list_custom_domains(ctx: Context) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.domains.manage")
 async def create_custom_domain(
     ctx: Context,
     domain: str,
@@ -204,6 +207,7 @@ async def create_custom_domain(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.domains.read")
 @validate_ids("domain_id")
 async def get_custom_domain(
     ctx: Context,
@@ -244,6 +248,7 @@ async def get_custom_domain(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.domains.manage")
 @validate_ids("domain_id", "brand_id")
 async def replace_custom_domain(
     ctx: Context,
@@ -296,6 +301,7 @@ async def replace_custom_domain(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.domains.manage")
 @validate_ids("domain_id")
 async def delete_custom_domain(
     ctx: Context,
@@ -357,6 +363,7 @@ async def delete_custom_domain(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.domains.manage")
 @validate_ids("domain_id")
 async def upsert_custom_domain_certificate(
     ctx: Context,
@@ -455,6 +462,7 @@ async def upsert_custom_domain_certificate(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.domains.manage")
 @validate_ids("domain_id")
 async def verify_custom_domain(
     ctx: Context,

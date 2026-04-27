@@ -56,6 +56,7 @@ from okta_mcp_server.utils.messages import (
     DELETE_THEME_FAVICON,
     DELETE_THEME_LOGO,
 )
+from okta_mcp_server.utils.scope_guard import require_scopes
 from okta_mcp_server.utils.validation import InvalidFilePathError, validate_file_path, validate_ids
 
 
@@ -84,6 +85,7 @@ _LOADING_VARIANTS = {e.value for e in LoadingPageTouchPointVariant}
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.brands.read")
 @validate_ids("brand_id")
 async def list_brand_themes(
     ctx: Context,
@@ -133,6 +135,7 @@ async def list_brand_themes(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.brands.read")
 @validate_ids("brand_id", "theme_id")
 async def get_brand_theme(
     ctx: Context,
@@ -176,6 +179,7 @@ async def get_brand_theme(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.brands.manage")
 @validate_ids("brand_id", "theme_id")
 async def replace_brand_theme(
     ctx: Context,
@@ -285,6 +289,7 @@ async def replace_brand_theme(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.brands.manage")
 @validate_ids("brand_id", "theme_id")
 async def upload_brand_theme_logo(
     ctx: Context,
@@ -347,6 +352,7 @@ async def upload_brand_theme_logo(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.brands.manage")
 @validate_ids("brand_id", "theme_id")
 async def delete_brand_theme_logo(
     ctx: Context,
@@ -405,6 +411,7 @@ async def delete_brand_theme_logo(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.brands.manage")
 @validate_ids("brand_id", "theme_id")
 async def upload_brand_theme_favicon(
     ctx: Context,
@@ -465,6 +472,7 @@ async def upload_brand_theme_favicon(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.brands.manage")
 @validate_ids("brand_id", "theme_id")
 async def delete_brand_theme_favicon(
     ctx: Context,
@@ -523,6 +531,7 @@ async def delete_brand_theme_favicon(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.brands.manage")
 @validate_ids("brand_id", "theme_id")
 async def upload_brand_theme_background_image(
     ctx: Context,
@@ -585,6 +594,7 @@ async def upload_brand_theme_background_image(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@require_scopes("okta.brands.manage")
 @validate_ids("brand_id", "theme_id")
 async def delete_brand_theme_background_image(
     ctx: Context,

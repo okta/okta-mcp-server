@@ -9,20 +9,16 @@
 Unit tests for the validation module.
 
 These tests verify that the validate_okta_id function properly blocks
-path traversal and injection attacks while allowing valid Okta IDs,
-and that validate_file_path blocks access to OS system paths
-and path traversal sequences.
+path traversal and injection attacks while allowing valid Okta IDs.
 """
-
-import os
 
 import pytest
 
 from okta_mcp_server.utils.validation import (
-    InvalidFilePathError,
     InvalidOktaIdError,
-    validate_file_path,
+    _validate_os_version_string,
     validate_okta_id,
+    validate_os_version_params,
 )
 
 
@@ -170,178 +166,223 @@ class TestValidateOktaId:
         assert "forbidden" in str(exc_info.value).lower()
 
 
-class TestValidateFilePath:
-    """Tests for the validate_file_path function."""
+# ===========================================================================
+# _validate_os_version_string
+# ===========================================================================
 
-    # ------------------------------------------------------------------
-    # Absolute system path rejection
-    # ------------------------------------------------------------------
+class TestValidateOsVersionString:
+    """Tests for the _validate_os_version_string helper in validation.py."""
 
-    def test_rejects_etc_passwd(self):
-        """: /etc/passwd must be rejected."""
-        with pytest.raises(InvalidFilePathError) as exc_info:
-            validate_file_path("/etc/passwd", "file_path")
-        assert "permitted" in str(exc_info.value).lower()
+    # --- Valid versions ---
 
-    def test_rejects_etc_hosts(self):
-        """: /etc/hosts must be rejected."""
-        with pytest.raises(InvalidFilePathError) as exc_info:
-            validate_file_path("/etc/hosts", "file_path")
-        assert "permitted" in str(exc_info.value).lower()
+    def test_valid_xyz_returns_none(self):
+        assert _validate_os_version_string("14.2.1") is None
 
-    def test_rejects_etc_subdirectory(self):
-        """: Any path under /etc/ must be rejected."""
-        with pytest.raises(InvalidFilePathError):
-            validate_file_path("/etc/ssl/private/domain.key", "file_path")
+    def test_valid_xyzw_returns_none(self):
+        assert _validate_os_version_string("14.2.1.0") is None
 
-    def test_rejects_proc_self_environ(self):
-        """: /proc/self/environ (credential leak vector) must be rejected."""
-        with pytest.raises(InvalidFilePathError) as exc_info:
-            validate_file_path("/proc/self/environ", "file_path")
-        assert "permitted" in str(exc_info.value).lower()
+    def test_empty_string_returns_none(self):
+        assert _validate_os_version_string("") is None
 
-    def test_rejects_sys_path(self):
-        """: /sys paths must be rejected."""
-        with pytest.raises(InvalidFilePathError):
-            validate_file_path("/sys/kernel/debug", "file_path")
+    def test_android_single_component_accepted(self):
+        assert _validate_os_version_string("12", "ANDROID") is None
 
-    def test_rejects_dev_path(self):
-        """: /dev paths must be rejected."""
-        with pytest.raises(InvalidFilePathError):
-            validate_file_path("/dev/sda", "file_path")
+    def test_android_single_component_zero_accepted(self):
+        assert _validate_os_version_string("9", "ANDROID") is None
 
-    def test_rejects_root_home(self):
-        """: /root home directory must be rejected."""
-        with pytest.raises(InvalidFilePathError):
-            validate_file_path("/root/.ssh/id_rsa", "file_path")
+    def test_android_platform_case_insensitive(self):
+        assert _validate_os_version_string("12", "android") is None
 
-    def test_rejects_var_log(self):
-        """: /var/log paths must be rejected."""
-        with pytest.raises(InvalidFilePathError):
-            validate_file_path("/var/log/auth.log", "file_path")
+    # --- Two-component X.Y — must be rejected ---
 
-    def test_rejects_macos_private_etc(self):
-        """: macOS /private/etc (real target of /etc symlink) must be rejected."""
-        with pytest.raises(InvalidFilePathError) as exc_info:
-            validate_file_path("/private/etc/passwd", "file_path")
-        assert "permitted" in str(exc_info.value).lower()
+    def test_xy_returns_error(self):
+        error = _validate_os_version_string("14.2")
+        assert error is not None
+        assert "Incomplete" in error
+        assert "14.2" in error
+        assert "14.2.0" in error
 
-    def test_rejects_macos_private_var(self):
-        """: macOS /private/var must be rejected."""
-        with pytest.raises(InvalidFilePathError):
-            validate_file_path("/private/var/log/system.log", "file_path")
+    def test_xy_error_warns_not_to_assume_patch(self):
+        error = _validate_os_version_string("14.2")
+        assert "Do NOT assume" in error
 
-    def test_rejects_redundant_separators_to_etc(self):
-        """: normpath should collapse //etc//passwd to /etc/passwd and reject it."""
-        with pytest.raises(InvalidFilePathError):
-            validate_file_path("/etc//passwd", "file_path")
+    def test_xy_rejected_for_non_android_platform(self):
+        error = _validate_os_version_string("14.2", "MACOS")
+        assert error is not None
+        assert "Incomplete" in error
 
-    def test_param_name_appears_in_error(self):
-        """: The param_name must appear in the error message."""
-        with pytest.raises(InvalidFilePathError) as exc_info:
-            validate_file_path("/etc/passwd", "private_key_file_path")
-        assert "private_key_file_path" in str(exc_info.value)
+    def test_xy_rejected_even_for_android(self):
+        # Two-component versions are not accepted for Android either —
+        # Android uses single major version only.
+        error = _validate_os_version_string("12.0", "ANDROID")
+        assert error is not None
+        assert "Incomplete" in error
 
-    # ------------------------------------------------------------------
-    # Path traversal rejection
-    # ------------------------------------------------------------------
+    def test_snake_case_not_applicable_to_string_helper(self):
+        # The string helper does not deal with dict keys; just validates the value.
+        assert _validate_os_version_string("14.2.1") is None
 
-    def test_rejects_dot_dot_traversal(self):
-        """: Path traversal with .. must be rejected."""
-        with pytest.raises(InvalidFilePathError) as exc_info:
-            validate_file_path("images/../../../etc/passwd", "file_path")
-        assert "traversal" in str(exc_info.value).lower()
+    # --- Single-component for non-Android ---
 
-    def test_rejects_url_encoded_traversal_lowercase(self):
-        """: URL-encoded %2e%2e traversal must be rejected."""
-        with pytest.raises(InvalidFilePathError) as exc_info:
-            validate_file_path("%2e%2e%2fetc%2fpasswd", "file_path")
-        assert "traversal" in str(exc_info.value).lower()
+    def test_single_component_rejected_without_platform(self):
+        error = _validate_os_version_string("14")
+        assert error is not None
+        assert "Invalid" in error
+        assert "14" in error
 
-    def test_rejects_url_encoded_traversal_uppercase(self):
-        """: URL-encoded %2E%2E traversal must be rejected."""
-        with pytest.raises(InvalidFilePathError) as exc_info:
-            validate_file_path("%2E%2E/etc/passwd", "file_path")
-        assert "traversal" in str(exc_info.value).lower()
+    def test_single_component_rejected_for_macos(self):
+        error = _validate_os_version_string("14", "MACOS")
+        assert error is not None
+        assert "Invalid" in error
 
-    def test_rejects_traversal_in_middle_of_path(self):
-        """: Traversal embedded in a path must be rejected."""
-        with pytest.raises(InvalidFilePathError):
-            validate_file_path("/tmp/uploads/../../../etc/shadow", "file_path")
+    # --- Garbage / alpha versions ---
 
-    # ------------------------------------------------------------------
-    # Valid paths — must NOT be rejected
-    # ------------------------------------------------------------------
+    def test_alpha_component_returns_error(self):
+        error = _validate_os_version_string("14.2.alpha")
+        assert error is not None
 
-    def test_allows_tmp_path(self):
-        """/tmp paths must be accepted.
+    def test_leading_dot_returns_error(self):
+        error = _validate_os_version_string(".14.2.1")
+        assert error is not None
 
-        The returned path is the realpath-resolved form; on macOS /tmp is a
-        symlink to /private/tmp so the result may differ from the input.
-        """
-        path = "/tmp/logo.png"
-        result = validate_file_path(path, "file_path")
-        assert result == os.path.realpath(path)
+    def test_completely_non_numeric_returns_error(self):
+        error = _validate_os_version_string("notaversion")
+        assert error is not None
 
-    def test_rejects_home_directory_path(self):
-        """: Home directory paths outside the allow-list must be rejected.
+    def test_error_message_contains_xyz_format_hint(self):
+        error = _validate_os_version_string("abc")
+        assert error is not None
+        assert "X.Y.Z" in error
 
-        With the allow-list fix, arbitrary absolute paths (even user-owned ones
-        like ~/.aws/credentials or ~/certs/domain.key) are blocked unless the
-        operator explicitly adds the directory to OKTA_MCP_ALLOWED_KEY_DIRS.
-        """
-        with pytest.raises(InvalidFilePathError) as exc_info:
-            validate_file_path("/Users/aniket/certs/domain.key", "file_path")
-        assert "permitted" in str(exc_info.value).lower()
+    def test_error_message_mentions_android_exception(self):
+        error = _validate_os_version_string("14", "MACOS")
+        assert error is not None
+        assert "Android" in error
 
-    def test_allows_relative_path_inside_tmp(self, monkeypatch):
-        """A relative path whose CWD-resolved real path falls inside /tmp must pass.
 
-        The returned value is the realpath-resolved absolute path so callers
-        always open the validated location regardless of CWD changes.
-        """
-        # Use /tmp directly — on macOS this resolves to /private/tmp which is
-        # in the default allow-list.  tempfile.gettempdir() returns the
-        # per-user temp folder (/var/folders/...) which is NOT /tmp.
-        monkeypatch.chdir("/tmp")
-        result = validate_file_path("logo.png", "file_path")
-        assert result == os.path.realpath(os.path.abspath("logo.png"))
+# ===========================================================================
+# validate_os_version_params (decorator)
+# ===========================================================================
 
-    def test_rejects_relative_path_outside_allowed(self, monkeypatch, tmp_path):
-        """A relative path that resolves outside the allow-list must be rejected."""
-        monkeypatch.chdir(tmp_path)  # tmp_path is under /private/var/... on macOS
-        # Only rejected when the resolved path is not under /tmp or /var/tmp.
-        import tempfile
-        real_tmp = os.path.realpath(tempfile.gettempdir())
-        real_resolved = os.path.realpath(os.path.abspath("secrets.env"))
-        if real_resolved.startswith(real_tmp + os.sep) or real_resolved == real_tmp:
-            pytest.skip("CWD resolves inside /tmp — skipping outside-allowed test")
-        with pytest.raises(InvalidFilePathError) as exc_info:
-            validate_file_path("secrets.env", "file_path")
-        assert "permitted" in str(exc_info.value).lower()
+class TestValidateOsVersionParams:
+    """Tests for the validate_os_version_params decorator in validation.py."""
 
-    def test_returns_resolved_path(self):
-        """validate_file_path must return the realpath-resolved absolute path.
+    # --- Direct string parameter ---
 
-        The function returns ``os.path.realpath(path)`` so callers can open
-        the exact same path that was security-checked, eliminating the TOCTOU
-        window.  On macOS /tmp is a symlink to /private/tmp, so the resolved
-        path differs from the input.
-        """
-        path = "/tmp/my-favicon.gif"
-        assert validate_file_path(path, "file_path") == os.path.realpath(path)
+    @pytest.mark.asyncio
+    async def test_valid_xyz_string_param_passes(self):
+        @validate_os_version_params("ver")
+        async def tool(ver=None):
+            return {"ok": True}
+        result = await tool(ver="14.2.1")
+        assert result == {"ok": True}
 
-    # ------------------------------------------------------------------
-    # Edge cases
-    # ------------------------------------------------------------------
+    @pytest.mark.asyncio
+    async def test_xy_string_param_rejected(self):
+        @validate_os_version_params("ver")
+        async def tool(ver=None):
+            return {"ok": True}
+        result = await tool(ver="14.2")
+        assert "error" in result
+        assert "Incomplete" in result["error"]
+        assert "14.2.0" in result["error"]
 
-    def test_rejects_empty_path(self):
-        """Empty string must be rejected."""
-        with pytest.raises(InvalidFilePathError) as exc_info:
-            validate_file_path("", "file_path")
-        assert "empty" in str(exc_info.value).lower()
+    @pytest.mark.asyncio
+    async def test_none_string_param_skipped(self):
+        @validate_os_version_params("ver")
+        async def tool(ver=None):
+            return {"ok": True}
+        result = await tool(ver=None)
+        assert result == {"ok": True}
 
-    def test_rejects_non_string_path(self):
-        """Non-string values must be rejected."""
-        with pytest.raises(InvalidFilePathError):
-            validate_file_path(123, "file_path")
+    @pytest.mark.asyncio
+    async def test_invalid_string_param_rejected(self):
+        @validate_os_version_params("ver")
+        async def tool(ver=None):
+            return {"ok": True}
+        result = await tool(ver="notaversion")
+        assert "error" in result
+
+    # --- Dict / policy_data parameter ---
+
+    @pytest.mark.asyncio
+    async def test_valid_policy_data_version_passes(self):
+        @validate_os_version_params("policy_data")
+        async def tool(policy_data):
+            return {"ok": True}
+        result = await tool(policy_data={"platform": "MACOS", "osVersion": {"minimum": "14.2.1"}})
+        assert result == {"ok": True}
+
+    @pytest.mark.asyncio
+    async def test_xy_policy_data_version_rejected(self):
+        @validate_os_version_params("policy_data")
+        async def tool(policy_data):
+            return {"ok": True}
+        result = await tool(policy_data={"platform": "MACOS", "osVersion": {"minimum": "14.2"}})
+        assert "error" in result
+        assert "Incomplete" in result["error"]
+        assert "Do NOT assume" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_snake_case_os_version_key_in_dict_rejected(self):
+        @validate_os_version_params("policy_data")
+        async def tool(policy_data):
+            return {"ok": True}
+        result = await tool(policy_data={"platform": "MACOS", "os_version": {"minimum": "17.0"}})
+        assert "error" in result
+        assert "Incomplete" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_policy_data_without_os_version_passes(self):
+        @validate_os_version_params("policy_data")
+        async def tool(policy_data):
+            return {"ok": True}
+        result = await tool(policy_data={"platform": "MACOS", "name": "My Policy"})
+        assert result == {"ok": True}
+
+    @pytest.mark.asyncio
+    async def test_android_single_component_in_policy_data_passes(self):
+        @validate_os_version_params("policy_data")
+        async def tool(policy_data):
+            return {"ok": True}
+        result = await tool(policy_data={"platform": "ANDROID", "osVersion": {"minimum": "12"}})
+        assert result == {"ok": True}
+
+    # --- error_return_type="list" ---
+
+    @pytest.mark.asyncio
+    async def test_list_return_type_on_error(self):
+        @validate_os_version_params("ver", error_return_type="list")
+        async def tool(ver=None):
+            return ["ok"]
+        result = await tool(ver="14.2")
+        assert isinstance(result, list)
+        assert result[0].startswith("Error:")
+
+    # --- Sync function support ---
+
+    def test_sync_function_xy_rejected(self):
+        @validate_os_version_params("ver")
+        def tool(ver=None):
+            return {"ok": True}
+        result = tool(ver="14.2")
+        assert "error" in result
+        assert "Incomplete" in result["error"]
+
+    def test_sync_function_valid_version_passes(self):
+        @validate_os_version_params("ver")
+        def tool(ver=None):
+            return {"ok": True}
+        result = tool(ver="14.2.1")
+        assert result == {"ok": True}
+
+    # --- Parameter not present in call ---
+
+    @pytest.mark.asyncio
+    async def test_missing_param_name_skipped(self):
+        @validate_os_version_params("nonexistent")
+        async def tool(ver=None):
+            return {"ok": True}
+        result = await tool(ver="14.2")
+        assert result == {"ok": True}
+

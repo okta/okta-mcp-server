@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional
 from loguru import logger
 from mcp.server.fastmcp import Context
 
+import okta.models as okta_models
 from okta.models.policy_rule import PolicyRule
 
 from okta_mcp_server.server import mcp
@@ -22,10 +23,42 @@ from okta_mcp_server.utils.messages import (
     DELETE_POLICY,
     DELETE_POLICY_RULE,
 )
+from okta_mcp_server.utils.scope_guard import require_scopes
 from okta_mcp_server.utils.validation import validate_ids
 
 
+# Mapping from Okta policy rule type → typed SDK model class.
+# The base PolicyRule model silently drops type-specific fields like `actions` and
+# `conditions`, causing 400 API errors ("Expecting an action but none were found").
+# Each typed subclass preserves those fields.
+_POLICY_RULE_MODEL_MAP: Dict[str, Any] = {
+    "SIGN_ON": okta_models.OktaSignOnPolicyRule,
+    "PASSWORD": okta_models.PasswordPolicyRule,
+    "ACCESS_POLICY": okta_models.AccessPolicyRule,
+    "PROFILE_ENROLLMENT": okta_models.ProfileEnrollmentPolicyRule,
+    "MFA_ENROLL": okta_models.AuthenticatorEnrollmentPolicyRule,
+    "IDP_DISCOVERY": okta_models.IdpDiscoveryPolicyRule,
+    "DEVICE_SIGNAL_COLLECTION": okta_models.DeviceSignalCollectionPolicyRule,
+    "ENTITY_RISK": okta_models.EntityRiskPolicyRule,
+    "POST_AUTH_SESSION": okta_models.PostAuthSessionPolicyRule,
+}
+
+
+def _build_policy_rule_model(rule_data: Dict[str, Any]) -> Any:
+    """Convert a plain dict to the appropriate typed Okta SDK PolicyRule model.
+
+    The base PolicyRule model lacks type-specific fields such as `actions` and
+    `conditions`. Without this mapping those fields are silently dropped, causing
+    Okta API 400 errors like "Expecting an action but none were found".
+    """
+    rule_type = str(rule_data.get("type", "")).upper()
+    model_cls = _POLICY_RULE_MODEL_MAP.get(rule_type, PolicyRule)
+    logger.debug(f"Using model class '{model_cls.__name__}' for rule type '{rule_type}'")
+    return model_cls.from_dict(rule_data)
+
+
 @mcp.tool()
+@require_scopes("okta.policies.read")
 async def list_policies(
     ctx: Context,
     type: str,
@@ -96,6 +129,7 @@ async def list_policies(
 
 
 @mcp.tool()
+@require_scopes("okta.policies.read")
 @validate_ids("policy_id", error_return_type="dict")
 async def get_policy(ctx: Context, policy_id: str) -> Optional[Dict[str, Any]]:
     """Retrieve a specific policy by ID.
@@ -124,6 +158,7 @@ async def get_policy(ctx: Context, policy_id: str) -> Optional[Dict[str, Any]]:
 
 
 @mcp.tool()
+@require_scopes("okta.policies.manage")
 async def create_policy(ctx: Context, policy_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Create a new policy.
 
@@ -159,6 +194,7 @@ async def create_policy(ctx: Context, policy_data: Dict[str, Any]) -> Optional[D
 
 
 @mcp.tool()
+@require_scopes("okta.policies.manage")
 @validate_ids("policy_id", error_return_type="dict")
 async def update_policy(ctx: Context, policy_id: str, policy_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Update an existing policy.
@@ -188,12 +224,12 @@ async def update_policy(ctx: Context, policy_id: str, policy_data: Dict[str, Any
 
 
 @mcp.tool()
+@require_scopes("okta.policies.manage")
 @validate_ids("policy_id", error_return_type="dict")
 async def delete_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
     """Delete a policy.
 
-    Confirmation is handled server-side via MCP elicitation — call this tool
-    directly without prompting the user for manual confirmation first.
+    The user will be asked for confirmation before the deletion proceeds.
 
     Parameters:
         policy_id (str, required): The ID of the policy to delete.
@@ -233,6 +269,7 @@ async def delete_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
+@require_scopes("okta.policies.manage")
 @validate_ids("policy_id", error_return_type="dict")
 async def activate_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
     """Activate a policy.
@@ -262,12 +299,12 @@ async def activate_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
+@require_scopes("okta.policies.manage")
 @validate_ids("policy_id", error_return_type="dict")
 async def deactivate_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
     """Deactivate a policy.
 
-    Confirmation is handled server-side via MCP elicitation — call this tool
-    directly without prompting the user for manual confirmation first.
+    The user will be asked for confirmation before the deactivation proceeds.
 
     Parameters:
         policy_id (str, required): The ID of the policy to deactivate.
@@ -307,6 +344,7 @@ async def deactivate_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
+@require_scopes("okta.policies.read")
 @validate_ids("policy_id", error_return_type="dict")
 async def list_policy_rules(ctx: Context, policy_id: str) -> Dict[str, Any]:
     """List all rules for a specific policy.
@@ -348,6 +386,7 @@ async def list_policy_rules(ctx: Context, policy_id: str) -> Dict[str, Any]:
 
 
 @mcp.tool()
+@require_scopes("okta.policies.read")
 @validate_ids("policy_id", "rule_id", error_return_type="dict")
 async def get_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Optional[Dict[str, Any]]:
     """Retrieve a specific policy rule.
@@ -377,6 +416,7 @@ async def get_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Optiona
 
 
 @mcp.tool()
+@require_scopes("okta.policies.manage")
 @validate_ids("policy_id", error_return_type="dict")
 async def create_policy_rule(ctx: Context, policy_id: str, rule_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Create a new rule for a policy.
@@ -397,7 +437,7 @@ async def create_policy_rule(ctx: Context, policy_id: str, rule_data: Dict[str, 
     okta_client = await get_okta_client(manager)
 
     try:
-        policy_rule = PolicyRule.from_dict(rule_data)
+        policy_rule = _build_policy_rule_model(rule_data)
         rule, _, err = await okta_client.create_policy_rule(policy_id, policy_rule)
 
         if err:
@@ -412,6 +452,7 @@ async def create_policy_rule(ctx: Context, policy_id: str, rule_data: Dict[str, 
 
 
 @mcp.tool()
+@require_scopes("okta.policies.manage")
 @validate_ids("policy_id", "rule_id", error_return_type="dict")
 async def update_policy_rule(
     ctx: Context, policy_id: str, rule_id: str, rule_data: Dict[str, Any]
@@ -430,7 +471,7 @@ async def update_policy_rule(
     okta_client = await get_okta_client(manager)
 
     try:
-        policy_rule = PolicyRule.from_dict(rule_data)
+        policy_rule = _build_policy_rule_model(rule_data)
         rule, _, err = await okta_client.replace_policy_rule(policy_id, rule_id, policy_rule)
 
         if err:
@@ -445,12 +486,12 @@ async def update_policy_rule(
 
 
 @mcp.tool()
+@require_scopes("okta.policies.manage")
 @validate_ids("policy_id", "rule_id", error_return_type="dict")
 async def delete_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Dict[str, Any]:
     """Delete a policy rule.
 
-    Confirmation is handled server-side via MCP elicitation — call this tool
-    directly without prompting the user for manual confirmation first.
+    The user will be asked for confirmation before the deletion proceeds.
 
     Parameters:
         policy_id (str, required): The ID of the policy.
@@ -491,6 +532,7 @@ async def delete_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Dict
 
 
 @mcp.tool()
+@require_scopes("okta.policies.manage")
 @validate_ids("policy_id", "rule_id", error_return_type="dict")
 async def activate_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Dict[str, Any]:
     """Activate a policy rule.
@@ -521,6 +563,7 @@ async def activate_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Di
 
 
 @mcp.tool()
+@require_scopes("okta.policies.manage")
 @validate_ids("policy_id", "rule_id", error_return_type="dict")
 async def deactivate_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Dict[str, Any]:
     """Deactivate a policy rule.

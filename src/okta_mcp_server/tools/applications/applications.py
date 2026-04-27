@@ -43,10 +43,13 @@ def _build_application_model(app_config: Dict[str, Any]) -> Any:
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DEACTIVATE_APPLICATION, DELETE_APPLICATION
+from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
+from okta_mcp_server.utils.scope_guard import require_scopes
 from okta_mcp_server.utils.validation import validate_ids
 
 
 @mcp.tool()
+@require_scopes("okta.apps.read", error_return_type="list")
 async def list_applications(
     ctx: Context,
     q: Optional[str] = None,
@@ -55,7 +58,8 @@ async def list_applications(
     filter: Optional[str] = None,
     expand: Optional[str] = None,
     include_non_deleted: Optional[bool] = None,
-) -> list:
+    fetch_all: bool = False,
+) -> dict:
     """List all applications from the Okta organization.
 
     Parameters:
@@ -66,12 +70,25 @@ async def list_applications(
         expand (str, optional): Expands the app user object to include the user's profile or expand the app group
         object to include the group's profile
         include_non_deleted (bool, optional): Include non-deleted applications in the results
+        fetch_all (bool, optional): If True, automatically fetch all pages of results. Default: False.
+
+    Examples:
+        For pagination:
+        - First call: list_applications()
+        - Next page: list_applications(after="cursor_value")
+        - All pages: list_applications(fetch_all=True)
 
     Returns:
-        List containing the applications from the Okta organization.
+        Dict containing:
+        - items: List of application objects
+        - total_fetched: Number of applications returned
+        - has_more: Boolean indicating if more results are available
+        - next_cursor: Cursor for the next page (if has_more is True)
+        - fetch_all_used: Boolean indicating if fetch_all was used
+        - pagination_info: Additional pagination metadata (when fetch_all=True)
     """
     logger.info("Listing applications from Okta organization")
-    logger.debug(f"Query parameters: q='{q}', filter='{filter}', limit={limit}")
+    logger.debug(f"Query parameters: q='{q}', filter='{filter}', limit={limit}, fetch_all={fetch_all}")
 
     # Validate limit parameter range
     if limit is not None:
@@ -86,40 +103,54 @@ async def list_applications(
 
     try:
         client = await get_okta_client(manager)
-        query_params = {}
-
-        if q:
-            query_params["q"] = q
-        if after:
-            query_params["after"] = after
-        if limit:
-            query_params["limit"] = limit
-        if filter:
-            query_params["filter"] = filter
-        if expand:
-            query_params["expand"] = expand
-        if include_non_deleted is not None:
-            query_params["include_non_deleted"] = include_non_deleted
+        query_params = build_query_params(
+            q=q, after=after, limit=limit, filter=filter, expand=expand,
+            include_non_deleted=include_non_deleted,
+        )
 
         logger.debug("Calling Okta API to list applications")
-        apps, _, err = await client.list_applications(**query_params)
+        apps, response, err = await client.list_applications(**query_params)
 
         if err:
             logger.error(f"Okta API error while listing applications: {err}")
-            return [f"Error: {err}"]
+            return {"error": str(err)}
 
         if not apps:
             logger.info("No applications found")
-            return []
+            return create_paginated_response([], response, fetch_all)
 
-        logger.info(f"Successfully retrieved {len(apps)} applications")
-        return [app for app in apps]
+        app_count = len(apps)
+        logger.debug(f"Retrieved {app_count} applications in first page")
+
+        _has_more = (hasattr(response, "has_next") and response.has_next()) or bool(extract_after_cursor(response))
+        if fetch_all and response and _has_more:
+            logger.info(f"fetch_all=True, auto-paginating from initial {app_count} applications")
+
+            async def _next_page(cursor):
+                p = dict(query_params)
+                p["after"] = cursor
+                return await client.list_applications(**p)
+
+            async def _on_page(pages, total):
+                await ctx.info(f"Fetching applications... {total} fetched so far ({pages} pages)")
+
+            all_apps, pagination_info = await paginate_all_results(
+                response, apps, next_page_fn=_next_page, on_page=_on_page
+            )
+            logger.info(
+                f"Successfully retrieved {len(all_apps)} applications across {pagination_info['pages_fetched']} pages"
+            )
+            return create_paginated_response(all_apps, response, fetch_all_used=True, pagination_info=pagination_info)
+        else:
+            logger.info(f"Successfully retrieved {app_count} applications")
+            return create_paginated_response(apps, response, fetch_all_used=fetch_all)
     except Exception as e:
         logger.error(f"Exception while listing applications: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return {"error": str(e)}
 
 
 @mcp.tool()
+@require_scopes("okta.apps.read")
 @validate_ids("app_id", error_return_type="dict")
 async def get_application(ctx: Context, app_id: str, expand: Optional[str] = None) -> Any:
     """Get an application by ID from the Okta organization.
@@ -157,6 +188,7 @@ async def get_application(ctx: Context, app_id: str, expand: Optional[str] = Non
 
 
 @mcp.tool()
+@require_scopes("okta.apps.manage")
 async def create_application(ctx: Context, app_config: Dict[str, Any], activate: bool = True) -> Any:
     """Create a new application in the Okta organization.
 
@@ -191,6 +223,7 @@ async def create_application(ctx: Context, app_config: Dict[str, Any], activate:
 
 
 @mcp.tool()
+@require_scopes("okta.apps.manage")
 @validate_ids("app_id", error_return_type="dict")
 async def update_application(ctx: Context, app_id: str, app_config: Dict[str, Any]) -> Any:
     """Update an application by ID in the Okta organization.
@@ -225,13 +258,13 @@ async def update_application(ctx: Context, app_id: str, app_config: Dict[str, An
 
 
 @mcp.tool()
+@require_scopes("okta.apps.manage", error_return_type="list")
 @validate_ids("app_id")
 async def delete_application(ctx: Context, app_id: str) -> list:
     """Delete an application by ID from the Okta organization.
 
     This tool deletes an application by its ID from the Okta organization.
-    Confirmation is handled server-side via MCP elicitation — call this tool
-    directly without prompting the user for manual confirmation first.
+    The user will be asked for confirmation before the deletion proceeds.
 
     Parameters:
         app_id (str, required): The ID of the application to delete
@@ -288,6 +321,7 @@ async def delete_application(ctx: Context, app_id: str) -> list:
 
 
 @mcp.tool()
+@require_scopes("okta.apps.manage", error_return_type="list")
 @validate_ids("app_id")
 async def confirm_delete_application(ctx: Context, app_id: str, confirmation: str) -> list:
     """Confirm and execute application deletion after receiving confirmation.
@@ -297,9 +331,8 @@ async def confirm_delete_application(ctx: Context, app_id: str, confirmation: st
         support MCP elicitation.  New clients should rely on the built-in
         elicitation prompt in ``delete_application`` instead.
 
-    This deprecated tool is part of the legacy two-tool confirmation flow for clients that
-    do not support MCP elicitation. Call this tool directly with confirmation='DELETE' once
-    the user has confirmed — do NOT ask the user to manually type 'DELETE' in the chat.
+    This function MUST ONLY be called after the human user has explicitly typed 'DELETE' as confirmation.
+    NEVER call this function automatically after delete_application.
 
     Parameters:
         app_id (str, required): The ID of the application to delete
@@ -335,6 +368,7 @@ async def confirm_delete_application(ctx: Context, app_id: str, confirmation: st
 
 
 @mcp.tool()
+@require_scopes("okta.apps.manage", error_return_type="list")
 @validate_ids("app_id")
 async def activate_application(ctx: Context, app_id: str) -> list:
     """Activate an application in the Okta organization.
@@ -368,6 +402,7 @@ async def activate_application(ctx: Context, app_id: str) -> list:
 
 
 @mcp.tool()
+@require_scopes("okta.apps.manage", error_return_type="list")
 @validate_ids("app_id")
 async def deactivate_application(ctx: Context, app_id: str) -> list:
     """Deactivate an application in the Okta organization.
