@@ -31,7 +31,7 @@ from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DELETE_BRAND
-from okta_mcp_server.utils.pagination import create_paginated_response, paginate_all_results
+from okta_mcp_server.utils.pagination import create_paginated_response, extract_after_cursor, paginate_all_results
 from okta_mcp_server.utils.scope_guard import require_scopes
 from okta_mcp_server.utils.validation import validate_ids
 
@@ -147,9 +147,23 @@ async def list_brands(
             logger.info("No brands found")
             return create_paginated_response([], response, fetch_all)
 
-        if fetch_all and response and hasattr(response, "has_next") and response.has_next():
+        _has_more = (hasattr(response, "has_next") and response.has_next()) or bool(extract_after_cursor(response))
+        if fetch_all and response and _has_more:
             logger.info(f"fetch_all=True, auto-paginating from initial {len(brands)} brand(s)")
-            all_brands, pagination_info = await paginate_all_results(response, brands)
+
+            async def _next_page(cursor):
+                p: Dict[str, Any] = {k: v for k, v in kwargs.items() if k != "after"}
+                p["after"] = cursor
+                return await client.list_brands(**p)
+
+            async def _on_page(pages, total):
+                logger.info(f"[list_brands] Page {pages} fetched — {total} brands total so far")
+                if pages % 5 == 0:
+                    await ctx.info(f"Fetching brands... {total} fetched so far ({pages} pages)")
+
+            all_brands, pagination_info = await paginate_all_results(
+                response, brands, next_page_fn=_next_page, on_page=_on_page
+            )
             serialized = [_serialize_brand(b) for b in all_brands]
             logger.info(
                 f"Successfully retrieved {len(all_brands)} brand(s) across "
@@ -245,20 +259,29 @@ async def create_brand(
         client = await get_okta_client(manager)
 
         # Check for an existing brand with the same name before creating.
-        existing_brands, _, list_err = await client.list_brands()
-        if not list_err and existing_brands:
-            for existing in existing_brands:
-                if getattr(existing, "name", None) == name:
-                    existing_id = getattr(existing, "id", "unknown")
-                    logger.warning(
-                        f"Brand with name '{name}' already exists (id: {existing_id})"
+        # Paginate through ALL brands so orgs with >20 brands are fully covered.
+        all_existing: list = []
+        _page, _resp, _list_err = await client.list_brands()
+        if not _list_err and _page:
+            all_existing.extend(_page)
+            while _resp and extract_after_cursor(_resp):
+                _cursor = extract_after_cursor(_resp)
+                _page, _resp, _list_err = await client.list_brands(after=_cursor)
+                if _list_err or not _page:
+                    break
+                all_existing.extend(_page)
+        for existing in all_existing:
+            if getattr(existing, "name", None) == name:
+                existing_id = getattr(existing, "id", "unknown")
+                logger.warning(
+                    f"Brand with name '{name}' already exists (id: {existing_id})"
+                )
+                return {
+                    "error": (
+                        f"A brand named '{name}' already exists (id: {existing_id!r}). "
+                        "Use list_brands() to find it or choose a different name."
                     )
-                    return {
-                        "error": (
-                            f"A brand named '{name}' already exists (id: {existing_id!r}). "
-                            "Use list_brands() to find it or choose a different name."
-                        )
-                    }
+                }
 
         create_request = CreateBrandRequest(name=name)
         brand, _, err = await client.create_brand(create_request)

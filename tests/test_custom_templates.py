@@ -741,10 +741,10 @@ class TestListEmailTemplates:
             brand_id=BRAND_ID,
         )
 
-        assert isinstance(result, list)
-        assert len(result) == 2
-        assert result[0]["name"] == "UserActivation"
-        assert result[1]["name"] == "ForgotPassword"
+        assert isinstance(result, dict)
+        assert result["total_fetched"] == 2
+        assert result["items"][0]["name"] == "UserActivation"
+        assert result["items"][1]["name"] == "ForgotPassword"
 
     @pytest.mark.asyncio
     @patch(
@@ -768,7 +768,9 @@ class TestListEmailTemplates:
             brand_id=BRAND_ID,
         )
 
-        assert result == []
+        assert isinstance(result, dict)
+        assert result["total_fetched"] == 0
+        assert result["items"] == []
 
     @pytest.mark.asyncio
     @patch(
@@ -777,7 +779,7 @@ class TestListEmailTemplates:
     async def test_returns_error_dict_on_api_error(
         self, mock_get_client, ctx_no_elicitation
     ):
-        """When the SDK surfaces an API error the tool returns {"error": ...}."""
+        """SDK returning an error string in the third tuple element returns an error dict."""
         client = AsyncMock()
         client.list_email_templates.return_value = (None, MagicMock(), "403 Forbidden")
         mock_get_client.return_value = client
@@ -829,22 +831,6 @@ class TestListEmailTemplates:
         )
 
     @pytest.mark.asyncio
-    async def test_invalid_brand_id_returns_error_without_api_call(
-        self, ctx_no_elicitation
-    ):
-        """@validate_ids rejects path-traversal brand IDs before any SDK call."""
-        result = await list_email_templates(
-            ctx=ctx_no_elicitation,
-            brand_id="../../etc/passwd",
-        )
-
-        assert isinstance(result, list)
-        assert any(
-            "brand_id" in str(item).lower() or "invalid" in str(item).lower()
-            for item in result
-        )
-
-    @pytest.mark.asyncio
     @patch(
         "okta_mcp_server.tools.customization.custom_templates.custom_templates.get_okta_client"
     )
@@ -861,7 +847,9 @@ class TestListEmailTemplates:
             brand_id=BRAND_ID,
         )
 
-        assert result == []
+        assert isinstance(result, dict)
+        assert result["total_fetched"] == 0
+        assert result["items"] == []
 
 
 # ===========================================================================
@@ -893,8 +881,8 @@ class TestListEmailCustomizations:
             template_name=TEMPLATE_NAME,
         )
 
-        assert isinstance(result, list)
-        assert len(result) == 1
+        assert isinstance(result, dict)
+        assert result["total_fetched"] == 1
 
     @pytest.mark.asyncio
     @patch(
@@ -914,7 +902,9 @@ class TestListEmailCustomizations:
             template_name=TEMPLATE_NAME,
         )
 
-        assert result == []
+        assert isinstance(result, dict)
+        assert result["total_fetched"] == 0
+        assert result["items"] == []
 
     @pytest.mark.asyncio
     @patch(

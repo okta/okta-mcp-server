@@ -695,6 +695,618 @@ class TestGetLogsFetchAll:
         assert result["fetch_all_used"] is True
 
 
+class TestListBrandsFetchAll:
+    @pytest.mark.asyncio
+    async def test_fetch_all_true_paginates_all_pages(self):
+        """list_brands with fetch_all=True stitches multiple pages together."""
+        from okta_mcp_server.tools.customization.brands.brands import list_brands
+
+        page1 = _make_items(2, "brand")
+        page2 = _make_items(2, "brand")
+
+        resp1 = _make_v3_response(after_cursor="b2")
+        resp2 = _make_v3_response(after_cursor=None)
+
+        client = AsyncMock()
+        client.list_brands.side_effect = [
+            (page1, resp1, None),
+            (page2, resp2, None),
+        ]
+
+        ctx, _ = _make_ctx_with_client(client)
+        ctx.info = AsyncMock()
+
+        with patch("okta_mcp_server.tools.customization.brands.brands.get_okta_client", return_value=client):
+            result = await list_brands(ctx, fetch_all=True, limit=2)
+
+        assert result["fetch_all_used"] is True
+        assert result["total_fetched"] == 4
+        assert result["pagination_info"]["pages_fetched"] == 2
+        assert result["pagination_info"]["stopped_early"] is False
+
+    @pytest.mark.asyncio
+    async def test_fetch_all_false_returns_single_page(self):
+        """list_brands with fetch_all=False returns only the first page with cursor."""
+        from okta_mcp_server.tools.customization.brands.brands import list_brands
+
+        brands = _make_items(3, "brand")
+        resp = _make_v3_response(after_cursor="bc")
+        client = AsyncMock()
+        client.list_brands.return_value = (brands, resp, None)
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.customization.brands.brands.get_okta_client", return_value=client):
+            result = await list_brands(ctx, fetch_all=False)
+
+        assert result["fetch_all_used"] is False
+        assert result["total_fetched"] == 3
+        assert result["has_more"] is True
+        assert result["next_cursor"] == "bc"
+        assert client.list_brands.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_fetch_all_true_single_page_no_next_cursor(self):
+        """fetch_all=True on a single-page result: no extra requests made."""
+        from okta_mcp_server.tools.customization.brands.brands import list_brands
+
+        brands = _make_items(2, "brand")
+        resp = _make_v3_response(after_cursor=None)
+        client = AsyncMock()
+        client.list_brands.return_value = (brands, resp, None)
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.customization.brands.brands.get_okta_client", return_value=client):
+            result = await list_brands(ctx, fetch_all=True)
+
+        assert client.list_brands.call_count == 1
+        assert result["total_fetched"] == 2
+        assert result["fetch_all_used"] is True  # flag is set even when guard didn't paginate
+
+    @pytest.mark.asyncio
+    async def test_manual_cursor_pagination(self):
+        """Passing after= fetches the next page starting from that cursor."""
+        from okta_mcp_server.tools.customization.brands.brands import list_brands
+
+        brands = _make_items(3, "brand")
+        resp = _make_v3_response(after_cursor=None)
+        client = AsyncMock()
+        client.list_brands.return_value = (brands, resp, None)
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.customization.brands.brands.get_okta_client", return_value=client):
+            result = await list_brands(ctx, after="some_cursor")
+
+        # The cursor should have been forwarded to the API call
+        call_kwargs = client.list_brands.call_args[1]
+        assert call_kwargs.get("after") == "some_cursor"
+        assert result["total_fetched"] == 3
+
+    @pytest.mark.asyncio
+    async def test_api_error_returns_error_dict(self):
+        """An Okta API error is surfaced as an error key."""
+        from okta_mcp_server.tools.customization.brands.brands import list_brands
+
+        client = AsyncMock()
+        client.list_brands.return_value = (None, None, "some API error")
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.customization.brands.brands.get_okta_client", return_value=client):
+            result = await list_brands(ctx)
+
+        assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_empty_result(self):
+        """An empty brand list returns a valid paginated response with zero items."""
+        from okta_mcp_server.tools.customization.brands.brands import list_brands
+
+        resp = _make_v3_response(after_cursor=None)
+        client = AsyncMock()
+        client.list_brands.return_value = ([], resp, None)
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.customization.brands.brands.get_okta_client", return_value=client):
+            result = await list_brands(ctx)
+
+        assert result["total_fetched"] == 0
+        assert result["has_more"] is False
+
+
+class TestListPoliciesFetchAll:
+    @pytest.mark.asyncio
+    async def test_fetch_all_true_paginates_all_pages(self):
+        """list_policies with fetch_all=True stitches multiple pages together."""
+        from okta_mcp_server.tools.policies.policies import list_policies
+
+        page1 = _make_items(2, "pol")
+        for p in page1:
+            p.to_dict = lambda: {"id": "pol1"}
+        page2 = _make_items(2, "pol")
+        for p in page2:
+            p.to_dict = lambda: {"id": "pol2"}
+
+        resp1 = _make_v3_response(after_cursor="p2")
+        resp2 = _make_v3_response(after_cursor=None)
+
+        client = AsyncMock()
+        client.list_policies.side_effect = [
+            (page1, resp1, None),
+            (page2, resp2, None),
+        ]
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.policies.policies.get_okta_client", return_value=client):
+            result = await list_policies(ctx, type="OKTA_SIGN_ON", fetch_all=True)
+
+        assert result["fetch_all_used"] is True
+        assert result["total_fetched"] == 4
+        assert result["pagination_info"]["pages_fetched"] == 2
+        assert result["pagination_info"]["stopped_early"] is False
+
+    @pytest.mark.asyncio
+    async def test_fetch_all_false_returns_single_page_with_cursor(self):
+        """list_policies with fetch_all=False returns one page and exposes cursor."""
+        from okta_mcp_server.tools.policies.policies import list_policies
+
+        policies = _make_items(3, "pol")
+        for p in policies:
+            p.to_dict = lambda: {"id": "pol"}
+        resp = _make_v3_response(after_cursor="pc")
+
+        client = AsyncMock()
+        client.list_policies.return_value = (policies, resp, None)
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.policies.policies.get_okta_client", return_value=client):
+            result = await list_policies(ctx, type="PASSWORD", fetch_all=False)
+
+        assert result["fetch_all_used"] is False
+        assert result["total_fetched"] == 3
+        assert result["has_more"] is True
+        assert result["next_cursor"] == "pc"
+        assert client.list_policies.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_fetch_all_true_single_page_no_cursor(self):
+        """fetch_all=True on a single-page result: no extra requests made."""
+        from okta_mcp_server.tools.policies.policies import list_policies
+
+        policies = _make_items(2, "pol")
+        for p in policies:
+            p.to_dict = lambda: {"id": "pol"}
+        resp = _make_v3_response(after_cursor=None)
+
+        client = AsyncMock()
+        client.list_policies.return_value = (policies, resp, None)
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.policies.policies.get_okta_client", return_value=client):
+            result = await list_policies(ctx, type="MFA_ENROLL", fetch_all=True)
+
+        assert client.list_policies.call_count == 1
+        assert result["total_fetched"] == 2
+
+    @pytest.mark.asyncio
+    async def test_empty_result(self):
+        """Empty policy list returns a valid paginated response."""
+        from okta_mcp_server.tools.policies.policies import list_policies
+
+        resp = _make_v3_response(after_cursor=None)
+        client = AsyncMock()
+        client.list_policies.return_value = ([], resp, None)
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.policies.policies.get_okta_client", return_value=client):
+            result = await list_policies(ctx, type="PASSWORD")
+
+        assert result["total_fetched"] == 0
+        assert result["has_more"] is False
+
+    @pytest.mark.asyncio
+    async def test_api_error_returns_error_dict(self):
+        """An Okta API error is surfaced as an error key."""
+        from okta_mcp_server.tools.policies.policies import list_policies
+
+        client = AsyncMock()
+        client.list_policies.return_value = (None, None, "some API error")
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.policies.policies.get_okta_client", return_value=client):
+            result = await list_policies(ctx, type="PASSWORD")
+
+        assert "error" in result
+
+
+class TestListPolicyRulesFetchAll:
+    @pytest.mark.asyncio
+    async def test_fetch_all_true_paginates_all_pages(self):
+        """list_policy_rules with fetch_all=True stitches multiple pages together."""
+        from okta_mcp_server.tools.policies.policies import list_policy_rules
+
+        page1 = _make_items(2, "rule")
+        for r in page1:
+            r.to_dict = lambda: {"id": "rule1"}
+        page2 = _make_items(1, "rule")
+        for r in page2:
+            r.to_dict = lambda: {"id": "rule2"}
+
+        resp1 = _make_v3_response(after_cursor="r2")
+        resp2 = _make_v3_response(after_cursor=None)
+
+        client = AsyncMock()
+        client.list_policy_rules.side_effect = [
+            (page1, resp1, None),
+            (page2, resp2, None),
+        ]
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.policies.policies.get_okta_client", return_value=client):
+            result = await list_policy_rules(ctx, policy_id="pol1", fetch_all=True)
+
+        assert result["fetch_all_used"] is True
+        assert result["total_fetched"] == 3
+        assert result["pagination_info"]["pages_fetched"] == 2
+
+    @pytest.mark.asyncio
+    async def test_fetch_all_false_returns_single_page_with_cursor(self):
+        """list_policy_rules with fetch_all=False returns cursor for next page."""
+        from okta_mcp_server.tools.policies.policies import list_policy_rules
+
+        rules = _make_items(3, "rule")
+        for r in rules:
+            r.to_dict = lambda: {"id": "rule"}
+        resp = _make_v3_response(after_cursor="rc")
+
+        client = AsyncMock()
+        client.list_policy_rules.return_value = (rules, resp, None)
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.policies.policies.get_okta_client", return_value=client):
+            result = await list_policy_rules(ctx, policy_id="pol1", fetch_all=False)
+
+        assert result["fetch_all_used"] is False
+        assert result["total_fetched"] == 3
+        assert result["has_more"] is True
+        assert result["next_cursor"] == "rc"
+        assert client.list_policy_rules.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_after_cursor_is_forwarded(self):
+        """The after cursor is forwarded to the API call."""
+        from okta_mcp_server.tools.policies.policies import list_policy_rules
+
+        rules = _make_items(2, "rule")
+        for r in rules:
+            r.to_dict = lambda: {"id": "rule"}
+        resp = _make_v3_response(after_cursor=None)
+
+        client = AsyncMock()
+        client.list_policy_rules.return_value = (rules, resp, None)
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.policies.policies.get_okta_client", return_value=client):
+            result = await list_policy_rules(ctx, policy_id="pol1", after="some_cursor")
+
+        call_kwargs = client.list_policy_rules.call_args
+        assert call_kwargs[1].get("after") == "some_cursor" or "some_cursor" in str(call_kwargs)
+        assert result["total_fetched"] == 2
+
+    @pytest.mark.asyncio
+    async def test_empty_result(self):
+        """Empty rules list returns a valid paginated response."""
+        from okta_mcp_server.tools.policies.policies import list_policy_rules
+
+        resp = _make_v3_response(after_cursor=None)
+        client = AsyncMock()
+        client.list_policy_rules.return_value = ([], resp, None)
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.policies.policies.get_okta_client", return_value=client):
+            result = await list_policy_rules(ctx, policy_id="pol1")
+
+        assert result["total_fetched"] == 0
+
+
+class TestListGroupAppsFetchAll:
+    @pytest.mark.asyncio
+    async def test_fetch_all_true_paginates_all_pages(self):
+        """list_group_apps with fetch_all=True stitches multiple pages together."""
+        from okta_mcp_server.tools.groups.groups import list_group_apps
+
+        page1 = _make_items(3, "app")
+        page2 = _make_items(2, "app")
+
+        resp1 = _make_v3_response(after_cursor="a2")
+        resp2 = _make_v3_response(after_cursor=None)
+
+        client = AsyncMock()
+        client.list_assigned_applications_for_group.side_effect = [
+            (page1, resp1, None),
+            (page2, resp2, None),
+        ]
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.groups.groups.get_okta_client", return_value=client):
+            result = await list_group_apps("grp1", ctx, fetch_all=True)
+
+        assert result["fetch_all_used"] is True
+        assert result["total_fetched"] == 5
+        assert result["pagination_info"]["pages_fetched"] == 2
+        assert result["pagination_info"]["stopped_early"] is False
+
+    @pytest.mark.asyncio
+    async def test_fetch_all_false_returns_single_page_with_cursor(self):
+        """list_group_apps with fetch_all=False returns cursor."""
+        from okta_mcp_server.tools.groups.groups import list_group_apps
+
+        apps = _make_items(4, "app")
+        resp = _make_v3_response(after_cursor="ac")
+
+        client = AsyncMock()
+        client.list_assigned_applications_for_group.return_value = (apps, resp, None)
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.groups.groups.get_okta_client", return_value=client):
+            result = await list_group_apps("grp1", ctx, fetch_all=False)
+
+        assert result["fetch_all_used"] is False
+        assert result["total_fetched"] == 4
+        assert result["has_more"] is True
+        assert result["next_cursor"] == "ac"
+        assert client.list_assigned_applications_for_group.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_fetch_all_true_single_page_no_cursor(self):
+        """fetch_all=True on a single-page result: no extra requests."""
+        from okta_mcp_server.tools.groups.groups import list_group_apps
+
+        apps = _make_items(2, "app")
+        resp = _make_v3_response(after_cursor=None)
+
+        client = AsyncMock()
+        client.list_assigned_applications_for_group.return_value = (apps, resp, None)
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.groups.groups.get_okta_client", return_value=client):
+            result = await list_group_apps("grp1", ctx, fetch_all=True)
+
+        assert client.list_assigned_applications_for_group.call_count == 1
+        assert result["total_fetched"] == 2
+
+    @pytest.mark.asyncio
+    async def test_empty_result(self):
+        """Empty app list returns a valid paginated response."""
+        from okta_mcp_server.tools.groups.groups import list_group_apps
+
+        resp = _make_v3_response(after_cursor=None)
+        client = AsyncMock()
+        client.list_assigned_applications_for_group.return_value = ([], resp, None)
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.groups.groups.get_okta_client", return_value=client):
+            result = await list_group_apps("grp1", ctx)
+
+        assert result["total_fetched"] == 0
+        assert result["has_more"] is False
+
+    @pytest.mark.asyncio
+    async def test_api_error_returns_error_dict(self):
+        """An Okta API error is surfaced as an error key."""
+        from okta_mcp_server.tools.groups.groups import list_group_apps
+
+        client = AsyncMock()
+        client.list_assigned_applications_for_group.return_value = (None, None, "API error")
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.groups.groups.get_okta_client", return_value=client):
+            result = await list_group_apps("grp1", ctx)
+
+        assert "error" in result
+
+
+class TestListEmailTemplatesFetchAll:
+    @pytest.mark.asyncio
+    async def test_fetch_all_true_paginates_all_pages(self):
+        """list_email_templates with fetch_all=True stitches multiple pages."""
+        from okta_mcp_server.tools.customization.custom_templates.custom_templates import list_email_templates
+
+        page1 = _make_items(3, "tmpl")
+        for t in page1:
+            t.model_dump = lambda **kw: {"name": "UserActivation"}
+        page2 = _make_items(2, "tmpl")
+        for t in page2:
+            t.model_dump = lambda **kw: {"name": "ForgotPassword"}
+
+        resp1 = _make_v3_response(after_cursor="t2")
+        resp2 = _make_v3_response(after_cursor=None)
+
+        client = AsyncMock()
+        client.list_email_templates.side_effect = [
+            (page1, resp1, None),
+            (page2, resp2, None),
+        ]
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.customization.custom_templates.custom_templates.get_okta_client", return_value=client):
+            result = await list_email_templates(ctx, brand_id="bnd1", fetch_all=True)
+
+        assert result["fetch_all_used"] is True
+        assert result["total_fetched"] == 5
+        assert result["pagination_info"]["pages_fetched"] == 2
+        assert result["pagination_info"]["stopped_early"] is False
+
+    @pytest.mark.asyncio
+    async def test_fetch_all_false_returns_single_page_with_cursor(self):
+        """list_email_templates fetch_all=False surfaces cursor."""
+        from okta_mcp_server.tools.customization.custom_templates.custom_templates import list_email_templates
+
+        templates = _make_items(3, "tmpl")
+        for t in templates:
+            t.model_dump = lambda **kw: {"name": "t"}
+        resp = _make_v3_response(after_cursor="tc")
+
+        client = AsyncMock()
+        client.list_email_templates.return_value = (templates, resp, None)
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.customization.custom_templates.custom_templates.get_okta_client", return_value=client):
+            result = await list_email_templates(ctx, brand_id="bnd1", fetch_all=False)
+
+        assert result["fetch_all_used"] is False
+        assert result["total_fetched"] == 3
+        assert result["has_more"] is True
+        assert result["next_cursor"] == "tc"
+        assert client.list_email_templates.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_empty_result(self):
+        """Empty template list returns a valid paginated response."""
+        from okta_mcp_server.tools.customization.custom_templates.custom_templates import list_email_templates
+
+        resp = _make_v3_response(after_cursor=None)
+        client = AsyncMock()
+        client.list_email_templates.return_value = ([], resp, None)
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.customization.custom_templates.custom_templates.get_okta_client", return_value=client):
+            result = await list_email_templates(ctx, brand_id="bnd1")
+
+        assert result["total_fetched"] == 0
+        assert result["has_more"] is False
+
+    @pytest.mark.asyncio
+    async def test_api_error_returns_error_dict(self):
+        """API error is surfaced as error key."""
+        from okta_mcp_server.tools.customization.custom_templates.custom_templates import list_email_templates
+
+        client = AsyncMock()
+        client.list_email_templates.return_value = (None, None, "API error")
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.customization.custom_templates.custom_templates.get_okta_client", return_value=client):
+            result = await list_email_templates(ctx, brand_id="bnd1")
+
+        assert "error" in result
+
+
+class TestListEmailCustomizationsFetchAll:
+    @pytest.mark.asyncio
+    async def test_fetch_all_true_paginates_all_pages(self):
+        """list_email_customizations with fetch_all=True stitches multiple pages."""
+        from okta_mcp_server.tools.customization.custom_templates.custom_templates import list_email_customizations
+
+        page1 = _make_items(2, "cust")
+        for c in page1:
+            c.model_dump = lambda **kw: {"language": "en"}
+        page2 = _make_items(2, "cust")
+        for c in page2:
+            c.model_dump = lambda **kw: {"language": "fr"}
+
+        resp1 = _make_v3_response(after_cursor="c2")
+        resp2 = _make_v3_response(after_cursor=None)
+
+        client = AsyncMock()
+        client.list_email_customizations.side_effect = [
+            (page1, resp1, None),
+            (page2, resp2, None),
+        ]
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.customization.custom_templates.custom_templates.get_okta_client", return_value=client):
+            result = await list_email_customizations(ctx, brand_id="bnd1", template_name="UserActivation", fetch_all=True)
+
+        assert result["fetch_all_used"] is True
+        assert result["total_fetched"] == 4
+        assert result["pagination_info"]["pages_fetched"] == 2
+
+    @pytest.mark.asyncio
+    async def test_fetch_all_false_returns_single_page_with_cursor(self):
+        """list_email_customizations fetch_all=False surfaces cursor."""
+        from okta_mcp_server.tools.customization.custom_templates.custom_templates import list_email_customizations
+
+        customizations = _make_items(3, "cust")
+        for c in customizations:
+            c.model_dump = lambda **kw: {"language": "en"}
+        resp = _make_v3_response(after_cursor="cc")
+
+        client = AsyncMock()
+        client.list_email_customizations.return_value = (customizations, resp, None)
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.customization.custom_templates.custom_templates.get_okta_client", return_value=client):
+            result = await list_email_customizations(ctx, brand_id="bnd1", template_name="ForgotPassword", fetch_all=False)
+
+        assert result["fetch_all_used"] is False
+        assert result["total_fetched"] == 3
+        assert result["has_more"] is True
+        assert result["next_cursor"] == "cc"
+        assert client.list_email_customizations.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_after_cursor_forwarded(self):
+        """after= cursor is forwarded to the API."""
+        from okta_mcp_server.tools.customization.custom_templates.custom_templates import list_email_customizations
+
+        customizations = _make_items(2, "cust")
+        for c in customizations:
+            c.model_dump = lambda **kw: {"language": "de"}
+        resp = _make_v3_response(after_cursor=None)
+
+        client = AsyncMock()
+        client.list_email_customizations.return_value = (customizations, resp, None)
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.customization.custom_templates.custom_templates.get_okta_client", return_value=client):
+            result = await list_email_customizations(ctx, brand_id="bnd1", template_name="UserActivation", after="some_cursor")
+
+        call_kwargs = client.list_email_customizations.call_args
+        assert "some_cursor" in str(call_kwargs)
+        assert result["total_fetched"] == 2
+
+    @pytest.mark.asyncio
+    async def test_empty_result(self):
+        """Empty customizations list returns a valid paginated response."""
+        from okta_mcp_server.tools.customization.custom_templates.custom_templates import list_email_customizations
+
+        resp = _make_v3_response(after_cursor=None)
+        client = AsyncMock()
+        client.list_email_customizations.return_value = ([], resp, None)
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.customization.custom_templates.custom_templates.get_okta_client", return_value=client):
+            result = await list_email_customizations(ctx, brand_id="bnd1", template_name="UserActivation")
+
+        assert result["total_fetched"] == 0
+        assert result["has_more"] is False
+
+
 # ---------------------------------------------------------------------------
 # Guard condition: v3 ApiResponse never has has_next attr
 # ---------------------------------------------------------------------------

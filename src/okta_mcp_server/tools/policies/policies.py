@@ -16,7 +16,7 @@ from okta.models.policy_rule import PolicyRule
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConfirmation, elicit_or_fallback
-from okta_mcp_server.utils.pagination import extract_after_cursor
+from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
 from okta_mcp_server.utils.messages import (
     DEACTIVATE_POLICY,
     DEACTIVATE_POLICY_RULE,
@@ -64,10 +64,11 @@ async def list_policies(
     type: str,
     status: Optional[str] = None,
     q: Optional[str] = None,
-    limit: Optional[int] = 20,
+    limit: Optional[int] = None,
     after: Optional[str] = None,
+    fetch_all: bool = False,
 ) -> Dict[str, Any]:
-    """List all the policies from the Okta organization.
+    """List all the policies from the Okta organization with pagination support.
 
     Parameters:
         type (str, required): Specifies the type of policy to return. Available policy types are:
@@ -75,40 +76,48 @@ async def list_policies(
             PROFILE_ENROLLMENT, POST_AUTH_SESSION, ENTITY_RISK
         status (str, optional): Refines the query by the status of the policy - ACTIVE or INACTIVE.
         q (str, optional): A query string to search policies by name.
-        limit (int, optional): Number of results to return (min 20, max 100).
-        after (str, optional): Specifies the pagination cursor for the next page of policies.
+        limit (int, optional): Number of results to return per page (min 20, max 100). Default: 20.
+        after (str, optional): Pagination cursor for the next page of policies.
+        fetch_all (bool, optional): If True, automatically fetch all pages. Default: False.
 
     Returns:
         Dict containing:
-            - policies (List[Dict]): List of policy dictionaries, each containing policy details
+            - items (List[Dict]): List of policy dictionaries
+            - total_fetched (int): Number of policies returned
+            - has_more (bool): Whether more results are available
+            - next_cursor (str | None): Cursor for the next page
+            - fetch_all_used (bool): Whether fetch_all was used
+            - pagination_info (Dict): Detailed pagination metadata (when fetch_all=True)
             - error (str): Error message if the operation fails
     """
     logger.info("Listing policies from Okta organization")
-    logger.debug(f"Type: '{type}', Status: '{status}', Q: '{q}', limit: {limit}")
+    logger.debug(f"Type: '{type}', Status: '{status}', Q: '{q}', fetch_all: {fetch_all}, after: '{after}', limit: {limit}")
+
+    if limit is None:
+        limit = 20
 
     # Validate limit parameter range
-    if limit is not None:
-        if limit < 20:
-            logger.warning(f"Limit {limit} is below minimum (20), setting to 20")
-            limit = 20
-        elif limit > 100:
-            logger.warning(f"Limit {limit} exceeds maximum (100), setting to 100")
-            limit = 100
+    if limit < 20:
+        logger.warning(f"Limit {limit} is below minimum (20), setting to 20")
+        limit = 20
+    elif limit > 100:
+        logger.warning(f"Limit {limit} exceeds maximum (100), setting to 100")
+        limit = 100
 
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
     try:
         okta_client = await get_okta_client(manager)
-        params = {"type": type, "limit": str(limit)}
+        effective_limit = 100 if fetch_all else limit
+        params = build_query_params(q=q, after=after, limit=effective_limit)
+        if "limit" in params:
+            params["limit"] = str(params["limit"])
+        params["type"] = type
         if status:
             params["status"] = status
-        if q:
-            params["q"] = q
-        if after:
-            params["after"] = after
 
         logger.debug("Calling Okta API to list policies")
-        policies, _, err = await okta_client.list_policies(**params)
+        policies, response, err = await okta_client.list_policies(**params)
 
         if err:
             logger.error(f"Error listing policies: {err}")
@@ -116,12 +125,31 @@ async def list_policies(
 
         if not policies:
             logger.info("No policies found")
-            return {"policies": []}
+            return create_paginated_response([], response, fetch_all_used=fetch_all)
 
+        _has_more = (hasattr(response, "has_next") and response.has_next()) or bool(extract_after_cursor(response))
+        if fetch_all and response and _has_more:
+            logger.info(f"fetch_all=True, auto-paginating from initial {len(policies)} policies")
+
+            async def _next_page(cursor):
+                p = {k: v for k, v in params.items() if k != "after"}
+                p["after"] = cursor
+                return await okta_client.list_policies(**p)
+
+            async def _on_page(pages, total):
+                logger.info(f"[list_policies] Page {pages} fetched — {total} policies so far")
+
+            all_policies, pagination_info = await paginate_all_results(
+                response, policies, next_page_fn=_next_page, on_page=_on_page
+            )
+            serialized = [p.to_dict() for p in all_policies]
+            logger.info(f"Successfully retrieved {len(all_policies)} policies across {pagination_info['pages_fetched']} pages")
+            return create_paginated_response(serialized, response, fetch_all_used=True, pagination_info=pagination_info)
+
+        serialized = [p.to_dict() for p in policies]
         logger.info(f"Successfully retrieved {len(policies)} policies")
-        return {
-            "policies": [policy.to_dict() for policy in policies],
-        }
+        result = create_paginated_response(serialized, response, fetch_all_used=fetch_all)
+        return result
 
     except Exception as e:
         logger.error(f"Exception listing policies: {e}")
@@ -346,24 +374,38 @@ async def deactivate_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
 @mcp.tool()
 @require_scopes("okta.policies.read")
 @validate_ids("policy_id", error_return_type="dict")
-async def list_policy_rules(ctx: Context, policy_id: str) -> Dict[str, Any]:
-    """List all rules for a specific policy.
+async def list_policy_rules(
+    ctx: Context,
+    policy_id: str,
+    after: Optional[str] = None,
+    fetch_all: bool = False,
+) -> Dict[str, Any]:
+    """List all rules for a specific policy with pagination support.
 
     Parameters:
         policy_id (str, required): The ID of the policy.
+        after (str, optional): Pagination cursor for the next page of rules.
+        fetch_all (bool, optional): If True, automatically fetch all pages. Default: False.
 
     Returns:
         Dict containing:
-            - rules (List[Dict]): List of policy rule dictionaries
-            - has_next (bool): Whether there are more results
-            - next_page_token (Optional[str]): Token for next page
+            - items (List[Dict]): List of policy rule dictionaries
+            - total_fetched (int): Number of rules returned
+            - has_more (bool): Whether more results are available
+            - next_cursor (str | None): Cursor for the next page
+            - fetch_all_used (bool): Whether fetch_all was used
+            - pagination_info (Dict): Detailed pagination metadata (when fetch_all=True)
             - error (str): Error message if the operation fails
     """
     manager = ctx.request_context.lifespan_context.okta_auth_manager
     okta_client = await get_okta_client(manager)
 
     try:
-        rules, resp, err = await okta_client.list_policy_rules(policy_id)
+        params = {}
+        if after:
+            params["after"] = after
+
+        rules, resp, err = await okta_client.list_policy_rules(policy_id, **params)
 
         if err:
             logger.error(f"Error listing policy rules: {err}")
@@ -371,14 +413,28 @@ async def list_policy_rules(ctx: Context, policy_id: str) -> Dict[str, Any]:
 
         if not rules:
             logger.info("No policy rules found")
-            return {"rules": []}
+            return create_paginated_response([], resp, fetch_all_used=fetch_all)
 
-        next_cursor = extract_after_cursor(resp)
-        return {
-            "rules": [rule.to_dict() for rule in rules],
-            "has_next": bool(next_cursor),
-            "next_page_token": next_cursor,
-        }
+        _has_more = (hasattr(resp, "has_next") and resp.has_next()) or bool(extract_after_cursor(resp))
+        if fetch_all and resp and _has_more:
+            logger.info(f"fetch_all=True, auto-paginating from initial {len(rules)} policy rules")
+
+            async def _next_page(cursor):
+                return await okta_client.list_policy_rules(policy_id, after=cursor)
+
+            async def _on_page(pages, total):
+                logger.info(f"[list_policy_rules] Page {pages} fetched — {total} rules so far")
+
+            all_rules, pagination_info = await paginate_all_results(
+                resp, rules, next_page_fn=_next_page, on_page=_on_page
+            )
+            serialized = [r.to_dict() for r in all_rules]
+            logger.info(f"Successfully retrieved {len(all_rules)} rules across {pagination_info['pages_fetched']} pages")
+            return create_paginated_response(serialized, resp, fetch_all_used=True, pagination_info=pagination_info)
+
+        serialized = [r.to_dict() for r in rules]
+        logger.info(f"Successfully retrieved {len(rules)} policy rules")
+        return create_paginated_response(serialized, resp, fetch_all_used=fetch_all)
 
     except Exception as e:
         logger.error(f"Exception listing policy rules: {e}")

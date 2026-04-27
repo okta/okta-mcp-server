@@ -71,6 +71,7 @@ from okta_mcp_server.utils.messages import (
     DELETE_ALL_EMAIL_CUSTOMIZATIONS,
     DELETE_EMAIL_CUSTOMIZATION,
 )
+from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
 from okta_mcp_server.utils.scope_guard import require_scopes
 from okta_mcp_server.utils.validation import validate_ids
 
@@ -157,8 +158,10 @@ async def list_email_templates(
     ctx: Context,
     brand_id: str,
     expand: Optional[List[str]] = None,
-) -> List[Dict[str, Any]]:
-    """List all email templates for a brand.
+    after: Optional[str] = None,
+    fetch_all: bool = False,
+) -> Dict[str, Any]:
+    """List all email templates for a brand with pagination support.
 
     Returns every Okta-managed email template available on the brand.  By
     default each entry contains only the template ``name`` and ``_links``.
@@ -170,26 +173,62 @@ async def list_email_templates(
             template object.  Valid values: ``"settings"`` (embed the
             recipients setting) and ``"customizationCount"`` (embed the
             number of active customizations).
+        after (str, optional): Pagination cursor for the next page.
+        fetch_all (bool, optional): If True, automatically fetch all pages. Default: False.
 
     Returns:
-        List of template dicts.  Each dict contains at minimum ``name`` and
-        ``_links``; when expanded, also ``_embedded`` with the requested data.
-        Returns a dict with an ``error`` key on failure.
+        Dict containing:
+        - items (List[Dict]): Template dicts (``name``, ``_links``, optionally ``_embedded``).
+        - total_fetched (int): Number of templates returned.
+        - has_more (bool): Whether more results are available.
+        - next_cursor (str | None): Cursor for the next page.
+        - fetch_all_used (bool): Whether fetch_all was used.
+        - pagination_info (Dict): Detailed metadata (when fetch_all=True).
+        - error (str): Present only when the operation fails.
     """
     logger.info(f"Listing email templates for brand: {brand_id}")
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
     try:
         client = await get_okta_client(manager)
-        templates, _, err = await client.list_email_templates(brand_id, expand=expand)
+        kwargs: Dict[str, Any] = {}
+        if expand:
+            kwargs["expand"] = expand
+        if after:
+            kwargs["after"] = after
+
+        templates, response, err = await client.list_email_templates(brand_id, **kwargs)
 
         if err:
             logger.error(f"Okta API error listing email templates for brand {brand_id}: {err}")
             return {"error": str(err)}
 
-        result = _serialize(templates) or []
-        logger.info(f"Successfully listed {len(result)} email templates for brand: {brand_id}")
-        return result
+        if not templates:
+            logger.info(f"No email templates found for brand: {brand_id}")
+            return create_paginated_response([], response, fetch_all_used=fetch_all)
+
+        _has_more = (hasattr(response, "has_next") and response.has_next()) or bool(extract_after_cursor(response))
+        if fetch_all and response and _has_more:
+            logger.info(f"fetch_all=True, auto-paginating from initial {len(templates)} templates")
+
+            async def _next_page(cursor):
+                p = {k: v for k, v in kwargs.items() if k != "after"}
+                p["after"] = cursor
+                return await client.list_email_templates(brand_id, **p)
+
+            async def _on_page(pages, total):
+                logger.info(f"[list_email_templates] Page {pages} fetched — {total} templates so far")
+
+            all_templates, pagination_info = await paginate_all_results(
+                response, templates, next_page_fn=_next_page, on_page=_on_page
+            )
+            serialized = _serialize(all_templates) or []
+            logger.info(f"Successfully listed {len(serialized)} email templates across {pagination_info['pages_fetched']} pages")
+            return create_paginated_response(serialized, response, fetch_all_used=True, pagination_info=pagination_info)
+
+        serialized = _serialize(templates) or []
+        logger.info(f"Successfully listed {len(serialized)} email templates for brand: {brand_id}")
+        return create_paginated_response(serialized, response, fetch_all_used=fetch_all)
 
     except Exception as e:
         logger.error(f"Exception listing email templates for brand {brand_id}: {type(e).__name__}: {e}")
@@ -252,8 +291,10 @@ async def list_email_customizations(
     ctx: Context,
     brand_id: str,
     template_name: str,
-) -> List[Dict[str, Any]]:
-    """List all customizations for an email template.
+    after: Optional[str] = None,
+    fetch_all: bool = False,
+) -> Dict[str, Any]:
+    """List all customizations for an email template with pagination support.
 
     Returns every language variant that has been created for the specified
     email template.  Each entry includes the full customization body,
@@ -263,25 +304,58 @@ async def list_email_customizations(
         brand_id (str, required): The unique identifier of the brand.
         template_name (str, required): The Okta template name, e.g.
             ``"UserActivation"``, ``"ForgotPassword"``.
+        after (str, optional): Pagination cursor for the next page.
+        fetch_all (bool, optional): If True, automatically fetch all pages. Default: False.
 
     Returns:
-        List of customization dicts (may be empty if no customizations exist),
-        or a dict with an ``error`` key on failure.
+        Dict containing:
+        - items (List[Dict]): Customization dicts (may be empty if none exist).
+        - total_fetched (int): Number of customizations returned.
+        - has_more (bool): Whether more results are available.
+        - next_cursor (str | None): Cursor for the next page.
+        - fetch_all_used (bool): Whether fetch_all was used.
+        - pagination_info (Dict): Detailed metadata (when fetch_all=True).
+        - error (str): Present only when the operation fails.
     """
     logger.info(f"Listing customizations for template '{template_name}' on brand: {brand_id}")
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
     try:
         client = await get_okta_client(manager)
-        customizations, _, err = await client.list_email_customizations(brand_id, template_name)
+        kwargs: Dict[str, Any] = {}
+        if after:
+            kwargs["after"] = after
+
+        customizations, response, err = await client.list_email_customizations(brand_id, template_name, **kwargs)
 
         if err:
             logger.error(f"Okta API error listing customizations for template '{template_name}' on brand {brand_id}: {err}")
             return {"error": str(err)}
 
-        result = _serialize(customizations) or []
-        logger.info(f"Successfully listed {len(result)} customizations for template '{template_name}' on brand: {brand_id}")
-        return result
+        if not customizations:
+            logger.info(f"No customizations found for template '{template_name}' on brand: {brand_id}")
+            return create_paginated_response([], response, fetch_all_used=fetch_all)
+
+        _has_more = (hasattr(response, "has_next") and response.has_next()) or bool(extract_after_cursor(response))
+        if fetch_all and response and _has_more:
+            logger.info(f"fetch_all=True, auto-paginating from initial {len(customizations)} customizations")
+
+            async def _next_page(cursor):
+                return await client.list_email_customizations(brand_id, template_name, after=cursor)
+
+            async def _on_page(pages, total):
+                logger.info(f"[list_email_customizations] Page {pages} fetched — {total} customizations so far")
+
+            all_customizations, pagination_info = await paginate_all_results(
+                response, customizations, next_page_fn=_next_page, on_page=_on_page
+            )
+            serialized = _serialize(all_customizations) or []
+            logger.info(f"Successfully listed {len(serialized)} customizations across {pagination_info['pages_fetched']} pages")
+            return create_paginated_response(serialized, response, fetch_all_used=True, pagination_info=pagination_info)
+
+        serialized = _serialize(customizations) or []
+        logger.info(f"Successfully listed {len(serialized)} customizations for template '{template_name}' on brand: {brand_id}")
+        return create_paginated_response(serialized, response, fetch_all_used=fetch_all)
 
     except Exception as e:
         logger.error(f"Exception listing customizations for template '{template_name}' on brand {brand_id}: {type(e).__name__}: {e}")
@@ -339,22 +413,34 @@ async def create_email_customization(
         client = await get_okta_client(manager)
 
         # Check if a customization for this language already exists before creating.
-        existing, _, list_err = await client.list_email_customizations(brand_id, template_name)
-        if not list_err and existing:
-            for ex in existing:
-                if getattr(ex, "language", None) == language:
-                    ex_id = getattr(ex, "id", "unknown")
-                    logger.warning(
+        # Paginate through ALL customizations — templates with >20 language variants
+        # would otherwise have duplicates missed on subsequent pages.
+        all_existing_cx: list = []
+        _cx_page, _cx_resp, _cx_err = await client.list_email_customizations(brand_id, template_name)
+        if not _cx_err and _cx_page:
+            all_existing_cx.extend(_cx_page)
+            while _cx_resp and extract_after_cursor(_cx_resp):
+                _cx_cursor = extract_after_cursor(_cx_resp)
+                _cx_page, _cx_resp, _cx_err = await client.list_email_customizations(
+                    brand_id, template_name, after=_cx_cursor
+                )
+                if _cx_err or not _cx_page:
+                    break
+                all_existing_cx.extend(_cx_page)
+        for ex in all_existing_cx:
+            if getattr(ex, "language", None) == language:
+                ex_id = getattr(ex, "id", "unknown")
+                logger.warning(
+                    f"A '{language}' customization already exists for template "
+                    f"'{template_name}' on brand {brand_id!r} (id: {ex_id})"
+                )
+                return {
+                    "error": (
                         f"A '{language}' customization already exists for template "
-                        f"'{template_name}' on brand {brand_id!r} (id: {ex_id})"
+                        f"'{template_name}' (id: {ex_id!r}). "
+                        "Use replace_email_customization() to update it."
                     )
-                    return {
-                        "error": (
-                            f"A '{language}' customization already exists for template "
-                            f"'{template_name}' (id: {ex_id!r}). "
-                            "Use replace_email_customization() to update it."
-                        )
-                    }
+                }
 
         instance = EmailCustomization(
             language=language,
