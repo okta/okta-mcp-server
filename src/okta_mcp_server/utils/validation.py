@@ -1,5 +1,5 @@
 # The Okta software accompanied by this notice is provided pursuant to the following terms:
-# Copyright © 2026-Present, Okta, Inc.
+# Copyright © 2025-Present, Okta, Inc.
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0.
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -138,6 +138,10 @@ ALLOWED_KEY_DIRS_ENV = "OKTA_MCP_ALLOWED_KEY_DIRS"
 
 # Built-in defaults: only /tmp and /var/tmp are permitted unless the operator
 # explicitly extends the list via the environment variable.
+# NOTE: These defaults are Unix-only.  Windows is not a supported deployment
+# platform for this server; on Windows the defaults will be non-functional and
+# operators MUST set OKTA_MCP_ALLOWED_KEY_DIRS to a valid Windows path
+# (e.g. "C:\\Users\\<user>\\AppData\\Local\\Temp").
 _DEFAULT_ALLOWED_KEY_DIRS: tuple = ("/tmp", "/var/tmp")
 
 

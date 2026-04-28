@@ -1,5 +1,5 @@
 # The Okta software accompanied by this notice is provided pursuant to the following terms:
-# Copyright © 2026-Present, Okta, Inc.
+# Copyright © 2025-Present, Okta, Inc.
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0.
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -86,8 +86,10 @@ TOOL_SCOPE_REGISTRY: dict[str, str] = {
     "delete_device_assurance_policy":       "okta.deviceAssurance.manage",
     # ------------------------------------------------------------------
     # System Logs  (src/okta_mcp_server/tools/system_logs/system_logs.py)
+    #              (src/okta_mcp_server/tools/system_logs/login_failures.py)
     # ------------------------------------------------------------------
     "get_logs":                             "okta.logs.read",
+    "get_login_failures":                   "okta.logs.read",
     # ------------------------------------------------------------------
     # Brands  (src/okta_mcp_server/tools/customization/brands/brands.py)
     # ------------------------------------------------------------------

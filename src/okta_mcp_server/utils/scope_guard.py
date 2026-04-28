@@ -1,5 +1,5 @@
 # The Okta software accompanied by this notice is provided pursuant to the following terms:
-# Copyright © 2026-Present, Okta, Inc.
+# Copyright © 2025-Present, Okta, Inc.
 # Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0.
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
@@ -229,10 +229,18 @@ def prune_tools_by_scope(server: Any, manager: Any) -> None:
         )
         return
 
-    # Persist startup state so get_scope_status tool can surface it to the LLM
+    # Persist startup state so get_scope_status tool can surface it to the LLM.
+    # Reset both dicts first so repeated calls (e.g. in tests) don't accumulate
+    # stale state from a previous invocation.
     global _DISABLED_TOOLS, _CONFIGURED_SCOPES
+    _DISABLED_TOOLS = {}
     _CONFIGURED_SCOPES = set(configured)
 
+    # NOTE: FastMCP does not expose a public API for removing tools from the
+    # registry at runtime.  We use the private ``_tool_manager`` attribute here
+    # as the only available mechanism.  If FastMCP adds a public ``remove_tool``
+    # API in a future release this should be updated.
+    # Tracked in: https://github.com/jlowin/fastmcp (watch for public API)
     registered_names = {t.name for t in server._tool_manager.list_tools()}
     disabled: list[str] = []
     enabled: list[str] = []

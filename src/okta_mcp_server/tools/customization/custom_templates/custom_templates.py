@@ -999,13 +999,18 @@ async def send_test_email(
             logger.error(f"Okta API error sending test email for template '{template_name}' on brand {brand_id}: {err_str}")
             # Okta's send_test_email endpoint sends to the user associated with the
             # current OAuth token.  Client Credentials / service tokens have no 'uid'
-            # claim — there is no real user — so Okta returns 404 E0000007 or an
-            # empty-body 403.  Surface a clear, actionable message.
+            # claim — there is no real user — so Okta returns 404 E0000007 or 403.
+            # Surface a clear, actionable message.
             if "E0000007" in err_str or "Not found" in err_str or "HTTP 403" in err_str:
                 return {
                     "error": (
-                        "This tool does not support Private Key JWT authentication. "
-                        "Please switch to Device Authorization Grant and try again."
+                        "send_test_email is not supported when using an OAuth 2.0 service token "
+                        "(Client Credentials / Private Key JWT flow). Okta requires a real user "
+                        "identity to deliver the test email, but service tokens are not associated "
+                        "with a human user.\n\n"
+                        "Suggested alternative:\n"
+                        "  Configure the MCP server with an SSWS API token tied to a real Okta "
+                        "user to enable this feature."
                     )
                 }
             return {"error": err_str}

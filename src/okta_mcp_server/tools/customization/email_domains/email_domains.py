@@ -41,6 +41,7 @@ from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DELETE_EMAIL_DOMAIN
+from okta_mcp_server.utils.pagination import extract_after_cursor
 from okta_mcp_server.utils.scope_guard import require_scopes
 from okta_mcp_server.utils.validation import validate_ids
 
@@ -189,20 +190,30 @@ async def create_email_domain(
         client = await get_okta_client(manager)
 
         # Check for an existing email domain with the same name before creating.
-        existing_list, _, list_err = await client.list_email_domains()
-        if not list_err and existing_list:
-            for existing in existing_list:
-                if getattr(existing, "domain", None) == domain:
-                    existing_id = getattr(existing, "id", "unknown")
-                    logger.warning(
-                        f"Email domain '{domain}' already exists (id: {existing_id})"
+        # Paginate through ALL pages — orgs with many domains could have duplicates
+        # beyond the first page if only the first response were checked.
+        all_existing: list = []
+        _page, _resp, _list_err = await client.list_email_domains()
+        if not _list_err and _page:
+            all_existing.extend(_page)
+            while _resp and extract_after_cursor(_resp):
+                _cursor = extract_after_cursor(_resp)
+                _page, _resp, _list_err = await client.list_email_domains(after=_cursor)
+                if _list_err or not _page:
+                    break
+                all_existing.extend(_page)
+        for existing in all_existing:
+            if getattr(existing, "domain", None) == domain:
+                existing_id = getattr(existing, "id", "unknown")
+                logger.warning(
+                    f"Email domain '{domain}' already exists (id: {existing_id})"
+                )
+                return {
+                    "error": (
+                        f"An email domain '{domain}' already exists (id: {existing_id!r}). "
+                        "Use list_email_domains() to find it or choose a different domain."
                     )
-                    return {
-                        "error": (
-                            f"An email domain '{domain}' already exists (id: {existing_id!r}). "
-                            "Use list_email_domains() to find it or choose a different domain."
-                        )
-                    }
+                }
 
         req = EmailDomain(
             brand_id=brand_id,

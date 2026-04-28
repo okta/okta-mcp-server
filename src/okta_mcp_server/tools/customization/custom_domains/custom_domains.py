@@ -264,9 +264,8 @@ async def replace_custom_domain(
     Constraints:
     - The default brand (``isDefault: true``) cannot be mapped to a custom
       domain (API returns 409).
-    - The domain must have ``validationStatus`` of ``NOT_STARTED`` (before
-      verification) for the PUT to be allowed. Once verification has been
-      attempted (even if failed), the link may be removed.
+    - The PUT is allowed regardless of the domain's ``validationStatus``;
+      the brand association can be changed at any point in the domain lifecycle.
 
     Parameters:
         domain_id (str, required): Unique ID of the domain to update.

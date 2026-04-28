@@ -113,7 +113,10 @@ def _build_sign_in_page(
     csp: Optional[ContentSecurityPolicySetting],
 ) -> SignInPage:
     """Assemble a SignInPage model from the individual tool parameters."""
-    wc = SignInPageAllOfWidgetCustomizations(**(widget_customizations or {}))
+    # Only construct the widget-customizations object when the caller actually
+    # provided values.  Passing an empty dict would create an all-None SDK
+    # model that Okta may interpret as an explicit reset of every widget field.
+    wc = SignInPageAllOfWidgetCustomizations(**widget_customizations) if widget_customizations else None
     return SignInPage(
         page_content=page_content,
         widget_version=widget_version,
@@ -303,7 +306,7 @@ async def delete_customized_error_page(
         DELETE_CUSTOMIZED_ERROR_PAGE.format(brand_id=brand_id),
         DeleteConfirmation,
     )
-    if not outcome.confirmed:
+    if not outcome or not outcome.confirmed:
         logger.info(f"Delete customized error page cancelled for brand: {brand_id}")
         return {"success": False, "message": "Delete customized error page cancelled."}
 
@@ -496,7 +499,7 @@ async def delete_preview_error_page(
         DELETE_PREVIEW_ERROR_PAGE.format(brand_id=brand_id),
         DeleteConfirmation,
     )
-    if not outcome.confirmed:
+    if not outcome or not outcome.confirmed:
         logger.info(f"Delete preview error page cancelled for brand: {brand_id}")
         return {"success": False, "message": "Delete preview error page cancelled."}
 
@@ -714,7 +717,7 @@ async def delete_customized_sign_in_page(
         DELETE_CUSTOMIZED_SIGN_IN_PAGE.format(brand_id=brand_id),
         DeleteConfirmation,
     )
-    if not outcome.confirmed:
+    if not outcome or not outcome.confirmed:
         logger.info(f"Delete customized sign-in page cancelled for brand: {brand_id}")
         return {"success": False, "message": "Delete customized sign-in page cancelled."}
 
@@ -918,7 +921,7 @@ async def delete_preview_sign_in_page(
         DELETE_PREVIEW_SIGN_IN_PAGE.format(brand_id=brand_id),
         DeleteConfirmation,
     )
-    if not outcome.confirmed:
+    if not outcome or not outcome.confirmed:
         logger.info(f"Delete preview sign-in page cancelled for brand: {brand_id}")
         return {"success": False, "message": "Delete preview sign-in page cancelled."}
 
