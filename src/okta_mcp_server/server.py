@@ -28,18 +28,21 @@ class OktaAppContext:
 async def okta_authorisation_flow(server: FastMCP) -> AsyncIterator[OktaAppContext]:
     """
     Manages the application lifecycle. It initializes the OktaManager on startup,
-    performs authorization, and yields the context for use in tools.
+    re-using a cached token from the OS keyring when one is still valid, and yields
+    the context for use in tools.
     """
     logger.info("Starting Okta authorization flow")
     manager = OktaAuthManager()
-    await manager.authenticate()
-    logger.info("Okta authentication completed successfully")
 
-    try:
-        yield OktaAppContext(okta_auth_manager=manager)
-    finally:
-        logger.debug("Clearing Okta tokens")
-        manager.clear_tokens()
+    if await manager.is_valid_token():
+        logger.info("Re-using cached Okta token from keyring; skipping interactive auth")
+    else:
+        if not manager.has_token():
+            logger.error("Authentication failed: no token available after refresh and re-auth")
+            sys.exit(1)
+        logger.info("Okta authentication completed (refresh or new auth)")
+
+    yield OktaAppContext(okta_auth_manager=manager)
 
 
 mcp = FastMCP("Okta IDaaS MCP Server", lifespan=okta_authorisation_flow)
