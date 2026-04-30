@@ -24,10 +24,10 @@ def _okta_env(monkeypatch):
     monkeypatch.delenv("OKTA_KEY_ID", raising=False)
 
 
-def _make_manager_mock(*, is_valid: bool, has_token: bool = True) -> MagicMock:
+def _make_manager_mock(*, cached_valid: bool = True, auth_succeeds: bool = True) -> MagicMock:
     manager = MagicMock()
-    manager.is_valid_token = AsyncMock(return_value=is_valid)
-    manager.has_token = MagicMock(return_value=has_token)
+    manager.is_cached_token_valid = MagicMock(return_value=cached_valid)
+    manager.is_valid_token = AsyncMock(return_value=auth_succeeds)
     manager.authenticate = AsyncMock()
     manager.clear_tokens = MagicMock()
     return manager
@@ -36,29 +36,30 @@ def _make_manager_mock(*, is_valid: bool, has_token: bool = True) -> MagicMock:
 class TestOktaAuthorisationFlow:
     @pytest.mark.asyncio
     @patch("okta_mcp_server.server.OktaAuthManager")
-    async def test_skips_authenticate_when_token_is_valid(self, mock_cls):
-        manager = _make_manager_mock(is_valid=True)
+    async def test_skips_authenticate_when_cache_is_valid(self, mock_cls):
+        manager = _make_manager_mock(cached_valid=True)
         mock_cls.return_value = manager
         async with okta_authorisation_flow(MagicMock()) as ctx:
             assert isinstance(ctx, OktaAppContext)
             assert ctx.okta_auth_manager is manager
-        manager.is_valid_token.assert_awaited_once()
+        manager.is_cached_token_valid.assert_called_once()
+        manager.is_valid_token.assert_not_called()
         manager.authenticate.assert_not_called()
 
     @pytest.mark.asyncio
     @patch("okta_mcp_server.server.OktaAuthManager")
     async def test_yields_context_after_successful_reauth(self, mock_cls):
-        manager = _make_manager_mock(is_valid=False, has_token=True)
+        manager = _make_manager_mock(cached_valid=False, auth_succeeds=True)
         mock_cls.return_value = manager
         async with okta_authorisation_flow(MagicMock()) as ctx:
             assert ctx.okta_auth_manager is manager
+        manager.is_cached_token_valid.assert_called_once()
         manager.is_valid_token.assert_awaited_once()
-        manager.has_token.assert_called_once()
 
     @pytest.mark.asyncio
     @patch("okta_mcp_server.server.OktaAuthManager")
     async def test_does_not_clear_tokens_on_teardown(self, mock_cls):
-        manager = _make_manager_mock(is_valid=True)
+        manager = _make_manager_mock(cached_valid=True)
         mock_cls.return_value = manager
         async with okta_authorisation_flow(MagicMock()):
             pass
@@ -67,11 +68,11 @@ class TestOktaAuthorisationFlow:
     @pytest.mark.asyncio
     @patch("okta_mcp_server.server.OktaAuthManager")
     async def test_exits_with_code_1_when_auth_fails(self, mock_cls):
-        manager = _make_manager_mock(is_valid=False, has_token=False)
+        manager = _make_manager_mock(cached_valid=False, auth_succeeds=False)
         mock_cls.return_value = manager
         with pytest.raises(SystemExit) as exc_info:
             async with okta_authorisation_flow(MagicMock()):
                 pytest.fail("Lifespan must not yield when no token is available")
         assert exc_info.value.code == 1
+        manager.is_cached_token_valid.assert_called_once()
         manager.is_valid_token.assert_awaited_once()
-        manager.has_token.assert_called_once()

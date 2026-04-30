@@ -210,6 +210,28 @@ class TestTokenIsUnexpired:
         assert OktaAuthManager._token_is_unexpired("") is False
 
 
+class TestIsCachedTokenValid:
+    @patch("okta_mcp_server.utils.auth.auth_manager.keyring")
+    def test_returns_true_for_valid_cached_jwt(self, mock_keyring):
+        mock_keyring.get_password.return_value = _jwt_with_exp(3600)
+        assert OktaAuthManager().is_cached_token_valid() is True
+
+    @patch("okta_mcp_server.utils.auth.auth_manager.keyring")
+    def test_returns_false_when_no_token_cached(self, mock_keyring):
+        mock_keyring.get_password.return_value = None
+        assert OktaAuthManager().is_cached_token_valid() is False
+
+    @patch("okta_mcp_server.utils.auth.auth_manager.keyring")
+    def test_returns_false_for_expired_jwt(self, mock_keyring):
+        mock_keyring.get_password.return_value = _jwt_with_exp(-60)
+        assert OktaAuthManager().is_cached_token_valid() is False
+
+    @patch("okta_mcp_server.utils.auth.auth_manager.keyring")
+    def test_returns_false_for_opaque_token(self, mock_keyring):
+        mock_keyring.get_password.return_value = "opaque-not-a-jwt"
+        assert OktaAuthManager().is_cached_token_valid() is False
+
+
 class TestClearTokens:
     @patch("okta_mcp_server.utils.auth.auth_manager.keyring")
     def test_swallows_password_delete_errors(self, mock_keyring):

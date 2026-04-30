@@ -368,9 +368,15 @@ class OktaAuthManager:
         logger.debug(f"JWT expires in {seconds_remaining:.0f}s, within safety margin; treating as expired")
         return False
 
-    def has_token(self) -> bool:
-        """Return True if an api_token entry currently exists in the keyring."""
-        return keyring.get_password(SERVICE_NAME, "api_token") is not None
+    def is_cached_token_valid(self) -> bool:
+        """Return True if a valid (unexpired) JWT api_token is cached in the keyring.
+
+        Pure check with no side effects — does not run refresh or re-authentication.
+        Distinguishes a true cache hit from a refresh/re-auth that just minted a token,
+        so callers (e.g. the lifespan handler) can log accurately.
+        """
+        api_token = keyring.get_password(SERVICE_NAME, "api_token")
+        return bool(api_token and self._token_is_unexpired(api_token))
 
     def clear_tokens(self):
         """Clear all stored tokens from keyring."""

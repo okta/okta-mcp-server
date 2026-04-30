@@ -34,10 +34,10 @@ async def okta_authorisation_flow(server: FastMCP) -> AsyncIterator[OktaAppConte
     logger.info("Starting Okta authorization flow")
     manager = OktaAuthManager()
 
-    if await manager.is_valid_token():
+    if manager.is_cached_token_valid():
         logger.info("Re-using cached Okta token from keyring; skipping interactive auth")
     else:
-        if not manager.has_token():
+        if not await manager.is_valid_token():
             logger.error("Authentication failed: no token available after refresh and re-auth")
             sys.exit(1)
         logger.info("Okta authentication completed (refresh or new auth)")
