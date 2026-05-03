@@ -20,10 +20,12 @@ from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DEACTIVATE_USER, DELETE_USER
 from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
+from okta_mcp_server.utils.scope_guard import require_scopes
 from okta_mcp_server.utils.validation import validate_ids
 
 
 @mcp.tool()
+@require_scopes("okta.users.read", error_return_type="list")
 async def list_users(
     ctx: Context,
     search: str = "",
@@ -193,6 +195,7 @@ async def list_users(
 
 
 @mcp.tool()
+@require_scopes("okta.users.read", error_return_type="list")
 async def get_user_profile_attributes(ctx: Context = None) -> list:
     """List all user profile attributes supported by your Okta org.
     This is helpful in case you need to check if the user profile attribute is valid.
@@ -230,6 +233,7 @@ async def get_user_profile_attributes(ctx: Context = None) -> list:
 
 
 @mcp.tool()
+@require_scopes("okta.users.read", error_return_type="list")
 @validate_ids("user_id")
 async def get_user(user_id: str, ctx: Context = None) -> list:
     """Get a user by ID from the Okta organization
@@ -264,6 +268,7 @@ async def get_user(user_id: str, ctx: Context = None) -> list:
 
 
 @mcp.tool()
+@require_scopes("okta.users.manage", error_return_type="list")
 async def create_user(profile: dict, ctx: Context = None) -> list:
     """Create a user in the Okta organization.
 
@@ -302,6 +307,7 @@ async def create_user(profile: dict, ctx: Context = None) -> list:
 
 
 @mcp.tool()
+@require_scopes("okta.users.manage", error_return_type="list")
 @validate_ids("user_id")
 async def update_user(user_id: str, profile: dict, ctx: Context = None) -> list:
     """Update a user in the Okta organization.
@@ -339,6 +345,7 @@ async def update_user(user_id: str, profile: dict, ctx: Context = None) -> list:
 
 
 @mcp.tool()
+@require_scopes("okta.users.manage", error_return_type="list")
 @validate_ids("user_id")
 async def deactivate_user(user_id: str, ctx: Context = None) -> list:
     """Deactivates a user from the Okta organization.
@@ -387,6 +394,7 @@ async def deactivate_user(user_id: str, ctx: Context = None) -> list:
 
 
 @mcp.tool()
+@require_scopes("okta.users.manage", error_return_type="list")
 @validate_ids("user_id")
 async def delete_deactivated_user(user_id: str, ctx: Context = None) -> list:
     """Delete a user from the Okta organization who has already been deactivated or deprovisioned.

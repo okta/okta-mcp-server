@@ -18,6 +18,7 @@ from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DELETE_DEVICE_ASSURANCE_POLICY
+from okta_mcp_server.utils.scope_guard import require_scopes
 from okta_mcp_server.utils.validation import validate_ids, validate_os_version_params
 
 
@@ -334,6 +335,7 @@ def _get_implication(attr: str, before: Any, after: Any) -> str:
 
 
 @mcp.tool()
+@require_scopes("okta.deviceAssurance.read")
 @validate_os_version_params("version_threshold")
 async def list_device_assurance_policies(
     ctx: Context, version_threshold: Optional[str] = None
@@ -491,6 +493,7 @@ async def list_device_assurance_policies(
 
 
 @mcp.tool()
+@require_scopes("okta.deviceAssurance.read")
 @validate_ids("device_assurance_id", error_return_type="dict")
 async def get_device_assurance_policy(
     ctx: Context, device_assurance_id: str
@@ -555,6 +558,7 @@ async def get_device_assurance_policy(
 
 
 @mcp.tool()
+@require_scopes("okta.deviceAssurance.manage")
 @validate_os_version_params("user_stated_os_version")
 async def create_device_assurance_policy(
     ctx: Context, policy_data: PolicyDataInput, user_stated_os_version: Optional[str] = None
@@ -651,6 +655,7 @@ async def create_device_assurance_policy(
 
 
 @mcp.tool()
+@require_scopes("okta.deviceAssurance.manage")
 @validate_ids("device_assurance_id", error_return_type="dict")
 @validate_os_version_params("user_stated_os_version")
 async def replace_device_assurance_policy(
@@ -813,6 +818,7 @@ async def replace_device_assurance_policy(
 
 
 @mcp.tool()
+@require_scopes("okta.deviceAssurance.manage")
 @validate_ids("device_assurance_id", error_return_type="dict")
 async def delete_device_assurance_policy(
     ctx: Context, device_assurance_id: str

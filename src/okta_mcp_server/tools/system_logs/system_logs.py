@@ -14,6 +14,7 @@ from mcp.server.fastmcp import Context
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
+from okta_mcp_server.utils.scope_guard import require_scopes
 
 # Workaround for SDK v3.1.0 bug: when Behavior Detection is enabled the Okta API returns
 # `userBehaviors` as List[dict], but LogSecurityContext expects List[StrictStr], which
@@ -34,6 +35,7 @@ except Exception as _patch_err:
 
 
 @mcp.tool()
+@require_scopes("okta.logs.read")
 async def get_logs(
     ctx: Context = None,
     fetch_all: bool = False,
