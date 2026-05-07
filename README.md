@@ -26,9 +26,10 @@ This server is an [Model Context Protocol](https://modelcontextprotocol.io/intro
 * **Interactive Confirmation via Elicitation:** Destructive operations (deletes, deactivations) prompt the user for confirmation through the [MCP Elicitation API](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation) before proceeding, with automatic fallback for clients that do not yet support the feature.
 * **Integration with Okta Admin Management APIs:** Leverages the official Okta APIs to ensure secure and reliable interaction with your Okta org.
 * **Extensible Architecture:** Designed to be easily extended with new functionalities and support for additional Okta API endpoints.
-* **Comprehensive Tool Support:** Full CRUD operations for users, groups, applications, policies, and more.
+* **Comprehensive Tool Support:** Full CRUD operations for users, groups, applications, policies, device assurance policies, brands, themes, custom pages, email templates, custom domains, email domains, and more.
+* **Scope-Based Tool Loading:** Tools are automatically enabled or disabled at server startup based on the OAuth 2.0 scopes configured in `OKTA_SCOPES`. Only tools for which your application has been granted the required scope are registered and visible to the LLM — tools without a matching scope are silently removed before the first request.
 
-This MCP server utilizes [Okta's Python SDK](https://github.com/okta/okta-sdk-python) to communicate with the Okta APIs, ensuring a robust and well-supported integration.
+This MCP server utilizes [Okta's Python SDK v3.4.1](https://github.com/okta/okta-sdk-python) to communicate with the Okta APIs, ensuring a robust and well-supported integration.
 
 ## 🚀 Getting Started
 
@@ -445,6 +446,8 @@ The Okta MCP Server provides the following tools for LLMs to interact with your 
 
 ### Users
 
+> **Required scope:** `okta.users.read` (read) · `okta.users.manage` (write)
+
 | Tool                            | Description                                              | Usage Examples                                                                                                                                                |
 | ------------------------------- | -------------------------------------------------------- |---------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `list_users`                    | List all users in your Okta organization                | - `Show me the users in my Okta org` <br> - `Find users with 'john' in their name` <br> - `What users do I have in the Engineering department?`                 |
@@ -456,6 +459,8 @@ The Okta MCP Server provides the following tools for LLMs to interact with your 
 | `get_user_profile_attributes`   | Retrieve all supported user profile attributes          | - `What user profile fields are available?` <br> - `Show me all the custom attributes we can set` <br> - `List the standard Okta user attributes`             |
 
 ### Groups
+
+> **Required scope:** `okta.groups.read` (read) · `okta.groups.manage` (write)
 
 | Tool                    | Description                                       | Usage Examples                                                                                                                                                |
 | ----------------------- | ------------------------------------------------- |---------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -471,6 +476,8 @@ The Okta MCP Server provides the following tools for LLMs to interact with your 
 
 ### Applications
 
+> **Required scope:** `okta.apps.read` (read) · `okta.apps.manage` (write)
+
 | Tool                          | Description                                       | Usage Examples                                                                                                                                                |
 | ----------------------------- | ------------------------------------------------- |---------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `list_applications`           | List all applications in your Okta organization  | - `Show me the applications in my Okta org` <br> - `Find applications with 'API' in their name` <br> - `What SSO applications do we have configured?`         |
@@ -482,6 +489,8 @@ The Okta MCP Server provides the following tools for LLMs to interact with your 
 | `deactivate_application`      | Deactivate an application (prompts for confirmation) | - `Deactivate the legacy CRM application` <br> - `Temporarily disable the mobile app` <br> - `Turn off access to the test environment`                        |
 
 ### Policies
+
+> **Required scope:** `okta.policies.read` (read) · `okta.policies.manage` (write)
 
 | Tool                        | Description                                    | Usage Examples                                                                                                                                                |
 | --------------------------- | ---------------------------------------------- |---------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -500,20 +509,198 @@ The Okta MCP Server provides the following tools for LLMs to interact with your 
 | `activate_policy_rule`      | Activate a policy rule                         | - `Activate the new emergency access rule` <br> - `Enable the contractor restrictions` <br> - `Turn on the location-based access rule`                        |
 | `deactivate_policy_rule`    | Deactivate a policy rule (prompts for confirmation) | - `Deactivate the old emergency rule` <br> - `Temporarily disable location restrictions` <br> - `Turn off the device trust requirements for testing`          |
 
+### Device Assurance Policies
+
+> **Required scope:** `okta.deviceAssurance.read` (read) · `okta.deviceAssurance.manage` (write)
+
+| Tool                                  | Description                                                    | Usage Examples                                                                                                                                                                                   |
+| ------------------------------------- | -------------------------------------------------------------- |--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `list_device_assurance_policies`      | List all Device Assurance Policies in your Okta organization  | - `Show me all device assurance policies` <br> - `Which platforms have device compliance policies?` <br> - `Find policies that block jailbroken devices`                                          |
+| `get_device_assurance_policy`         | Get details of a specific Device Assurance Policy             | - `Show me the iOS device assurance policy` <br> - `What OS version does our MacOS policy require?` <br> - `Is jailbreak detection enabled in our Android policy?`                               |
+| `create_device_assurance_policy`      | Create a new Device Assurance Policy                          | - `Create a MacOS policy requiring OS 14.2 and disk encryption` <br> - `Set up an iOS policy that blocks jailbroken devices` <br> - `Add a Windows compliance policy requiring BitLocker`        |
+| `replace_device_assurance_policy`     | Fully replace an existing Device Assurance Policy             | - `Update the MacOS policy to require OS 14.5` <br> - `Enable secure hardware requirement for our Windows policy` <br> - `Change the minimum OS version for our iOS policy`                      |
+| `delete_device_assurance_policy`      | Delete a Device Assurance Policy (prompts for confirmation)   | - `Delete the old Windows compliance policy` <br> - `Remove the deprecated Android policy` <br> - `Clean up unused device assurance policies`                                                    |
+
 ### Logs
+
+> **Required scope:** `okta.logs.read`
 
 | Tool        | Description                              | Usage Examples                                                                                                                                             |
 | ----------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `get_logs`  | Retrieve system logs from your Okta org | - `Show me recent login attempts` <br> - `Find failed logins from the past 24 hours` <br> - `Get authentication logs for user john.doe@company.com`     |
 
+### Brands
+
+> **Required scope:** `okta.brands.read` (read) · `okta.brands.manage` (write)
+
+| Tool | Description | Usage Examples |
+| ---- | ----------- | -------------- |
+| `list_brands` | List all brands in your Okta org | - `Show me all brands` <br> - `Find the brand named Acme` |
+| `get_brand` | Get details of a specific brand | - `Show me the agrjatest brand` <br> - `What locale is set on this brand?` |
+| `list_brand_domains` | List all custom domains for a brand | - `What domains are attached to the agrjatest brand?` |
+| `create_brand` | Create a new brand | - `Create a new brand called Acme Corp` |
+| `replace_brand` | Fully update an existing brand | - `Update the agrjatest brand to use French locale` |
+| `delete_brand` | Delete a brand (prompts for confirmation) | - `Delete the old test brand` |
+
+### Themes
+
+> **Required scope:** `okta.brands.read` (read) · `okta.brands.manage` (write)
+
+| Tool | Description | Usage Examples |
+| ---- | ----------- | -------------- |
+| `list_brand_themes` | List all themes for a brand | - `Show me themes for the agrjatest brand` |
+| `get_brand_theme` | Get a specific theme | - `What colors are set in the agrjatest theme?` |
+| `replace_brand_theme` | Update theme colors and variants | - `Change the primary color of the theme to #FF5733` |
+| `upload_brand_theme_logo` | Upload a logo for a theme | - `Upload a new logo for the agrjatest brand` |
+| `delete_brand_theme_logo` | Revert to the default logo | - `Remove the custom logo from this theme` |
+| `upload_brand_theme_favicon` | Upload a favicon for a theme | - `Set a custom favicon for the agrjatest brand` |
+| `delete_brand_theme_favicon` | Revert to the default favicon | - `Remove the custom favicon from this theme` |
+| `upload_brand_theme_background_image` | Upload a background image | - `Upload a background image for the sign-in page` |
+| `delete_brand_theme_background_image` | Remove the background image | - `Clear the background image from the theme` |
+
+### Custom Pages
+
+> **Required scope:** `okta.brands.read` (read) · `okta.brands.manage` (write)
+
+| Tool | Description | Usage Examples |
+| ---- | ----------- | -------------- |
+| `get_sign_in_page_resources` | Get sign-in page resource links | - `Show me the sign-in page resources for agrjatest` |
+| `get_customized_sign_in_page` | Retrieve the live customized sign-in page | - `Show me the current sign-in page HTML` |
+| `get_default_sign_in_page` | Retrieve Okta's default sign-in page | - `What does the default sign-in page look like?` |
+| `get_preview_sign_in_page` | Retrieve the sign-in page preview | - `Show me the sign-in page preview` |
+| `replace_customized_sign_in_page` | Publish a new sign-in page | - `Update the sign-in page with this new HTML` |
+| `delete_customized_sign_in_page` | Revert to default sign-in page (prompts for confirmation) | - `Remove the custom sign-in page and use the default` |
+| `replace_preview_sign_in_page` | Update the sign-in page preview (sandbox) | - `Test this new sign-in page HTML in preview` |
+| `delete_preview_sign_in_page` | Clear the sign-in page preview | - `Reset the sign-in preview to default` |
+| `list_sign_in_widget_versions` | List available Sign-In Widget versions | - `What Sign-In Widget versions can I use?` |
+| `get_error_page_resources` | Get error page resource links | - `Show me the error page resources` |
+| `get_customized_error_page` | Retrieve the live customized error page | - `Show me the current error page HTML` |
+| `get_default_error_page` | Retrieve Okta's default error page | - `What does the default error page look like?` |
+| `get_preview_error_page` | Retrieve the error page preview | - `Show me the error page preview` |
+| `replace_customized_error_page` | Publish a new error page | - `Update the error page with this new HTML` |
+| `delete_customized_error_page` | Revert to default error page (prompts for confirmation) | - `Remove the custom error page` |
+| `replace_preview_error_page` | Update the error page preview | - `Test this error page HTML in preview` |
+| `delete_preview_error_page` | Clear the error page preview | - `Reset the error page preview` |
+| `get_sign_out_page_settings` | Get sign-out page settings | - `What is the sign-out redirect URL?` |
+| `replace_sign_out_page_settings` | Update sign-out page settings | - `Set the sign-out redirect to https://example.com` |
+
+### Email Templates & Customizations
+
+> **Required scope:** `okta.templates.read` (read) · `okta.templates.manage` (write)
+
+| Tool | Description | Usage Examples |
+| ---- | ----------- | -------------- |
+| `list_email_templates` | List all email templates for a brand | - `Show me all email templates for agrjatest` |
+| `get_email_template` | Get a specific email template | - `Show me the UserActivation template` |
+| `list_email_customizations` | List all language customizations for a template | - `List all customizations for UserActivation` |
+| `get_email_customization` | Get a specific customization | - `Show me the French UserActivation customization` |
+| `create_email_customization` | Create a new language customization | - `Create a German customization for ForgotPassword` |
+| `replace_email_customization` | Replace an existing customization | - `Update the English UserActivation email subject` |
+| `delete_email_customization` | Delete a customization (prompts for confirmation) | - `Delete the French UserActivation customization` |
+| `delete_all_email_customizations` | Delete all customizations for a template (prompts for confirmation) | - `Remove all customizations from UserActivation` |
+| `get_email_customization_preview` | Preview a rendered customization | - `Show me how the German ForgotPassword email will look` |
+| `get_email_default_content` | Get Okta's default template content | - `What is the default UserActivation email body?` |
+| `get_email_default_content_preview` | Preview Okta's default content with sample data | - `Preview the default ForgotPassword email` |
+| `get_email_settings` | Get the recipient settings for a template | - `Who receives the UserActivation email?` |
+| `replace_email_settings` | Update recipient settings | - `Set UserActivation emails to go to admins only` |
+| `send_test_email` | Send a test email to the current user | - `Send me a test UserActivation email` |
+
+### Custom Domains
+
+> **Required scope:** `okta.domains.read` (read) · `okta.domains.manage` (write)
+
+| Tool | Description | Usage Examples |
+| ---- | ----------- | -------------- |
+| `list_custom_domains` | List all custom domains | - `Show me all custom domains in my org` |
+| `get_custom_domain` | Get details of a custom domain | - `Show me the details for login.example.com` |
+| `create_custom_domain` | Create a new custom domain | - `Add login.example.com as a custom domain` |
+| `replace_custom_domain` | Update a custom domain | - `Update the custom domain name` |
+| `delete_custom_domain` | Delete a custom domain (prompts for confirmation) | - `Remove the old custom domain` |
+| `upsert_custom_domain_certificate` | Add or replace a TLS certificate | - `Upload a new TLS certificate for login.example.com` |
+| `verify_custom_domain` | Trigger domain DNS verification | - `Verify the DNS for login.example.com` |
+
+### Email Domains
+
+> **Required scope:** `okta.emailDomains.read` (read) · `okta.emailDomains.manage` (write)
+
+| Tool | Description | Usage Examples |
+| ---- | ----------- | -------------- |
+| `list_email_domains` | List all email domains | - `Show me all email sender domains` |
+| `get_email_domain` | Get details of an email domain | - `Show me the details for mail.example.com` |
+| `create_email_domain` | Create a new email domain | - `Add no-reply@mail.example.com as an email domain` |
+| `replace_email_domain` | Update an email domain | - `Update the display name for this email domain` |
+| `delete_email_domain` | Delete an email domain (prompts for confirmation) | - `Remove the old email domain` |
+| `verify_email_domain` | Trigger email domain DNS verification | - `Verify the DNS records for mail.example.com` |
+
 ### Confirmation for Destructive Operations
 
-All destructive operations (deleting groups, applications, policies, policy rules and deactivating/deleting users) use the **[MCP Elicitation API](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation)** to prompt the user for explicit confirmation before proceeding.
+All destructive operations (deleting groups, applications, policies, policy rules, device assurance policies, and deactivating/deleting users) use the **[MCP Elicitation API](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation)** to prompt the user for explicit confirmation before proceeding.
 
 - **Clients that support elicitation** (e.g., Claude Desktop with MCP SDK ≥ 1.26): The user sees a confirmation dialog directly in the chat UI. They can accept, decline, or cancel.
 - **Clients that do not yet support elicitation**: The tool returns a JSON payload describing the pending action so the LLM can relay the confirmation request to the user. The deprecated `confirm_delete_group` / `confirm_delete_application` tools remain available as a fallback for these clients.
 
-## 🔐 Authentication
+## � Scope-Based Tool Loading
+
+The Okta MCP Server uses a **scope-based tool loading** mechanism to ensure that only the tools your application is authorized to use are exposed to the LLM.
+
+### How it works
+
+1. **At startup**, after authentication completes, the server reads the scopes listed in your `OKTA_SCOPES` environment variable.
+2. Every tool in the server is mapped to a **minimum required OAuth 2.0 scope** (e.g. `okta.users.read`, `okta.brands.manage`). This mapping is defined in `scope_registry.py`.
+3. The server compares each tool's required scope against your configured scopes. Tools whose required scope is **not** present are **silently removed** from the tool registry — they will never appear in `tools/list` and the LLM will not be aware of them.
+4. At runtime, a `@require_scopes` decorator on each tool provides a second layer of enforcement: if a scope is missing at call time (e.g. token was refreshed with fewer scopes), the tool returns a clear error message instead of making an API call.
+
+### Scope → Tool mapping
+
+| Scope | Tools Unlocked |
+| ----- | -------------- |
+| `okta.users.read` | `list_users`, `get_user`, `get_user_profile_attributes` |
+| `okta.users.manage` | `create_user`, `update_user`, `deactivate_user`, `delete_deactivated_user` |
+| `okta.groups.read` | `list_groups`, `get_group`, `list_group_users`, `list_group_apps` |
+| `okta.groups.manage` | `create_group`, `update_group`, `delete_group`, `add_user_to_group`, `remove_user_from_group` |
+| `okta.apps.read` | `list_applications`, `get_application` |
+| `okta.apps.manage` | `create_application`, `update_application`, `delete_application`, `activate_application`, `deactivate_application` |
+| `okta.policies.read` | `list_policies`, `get_policy`, `list_policy_rules`, `get_policy_rule` |
+| `okta.policies.manage` | `create_policy`, `update_policy`, `delete_policy`, `activate_policy`, `deactivate_policy`, `create_policy_rule`, `update_policy_rule`, `delete_policy_rule`, `activate_policy_rule`, `deactivate_policy_rule` |
+| `okta.deviceAssurance.read` | `list_device_assurance_policies`, `get_device_assurance_policy` |
+| `okta.deviceAssurance.manage` | `create_device_assurance_policy`, `replace_device_assurance_policy`, `delete_device_assurance_policy` |
+| `okta.logs.read` | `get_logs` |
+| `okta.brands.read` | `list_brands`, `get_brand`, `list_brand_domains`, `list_brand_themes`, `get_brand_theme`, `get_sign_in_page_resources`, `get_customized_sign_in_page`, `get_default_sign_in_page`, `get_preview_sign_in_page`, `list_sign_in_widget_versions`, `get_error_page_resources`, `get_customized_error_page`, `get_default_error_page`, `get_preview_error_page`, `get_sign_out_page_settings` |
+| `okta.brands.manage` | `create_brand`, `replace_brand`, `delete_brand`, `replace_brand_theme`, `upload_brand_theme_logo`, `delete_brand_theme_logo`, `upload_brand_theme_favicon`, `delete_brand_theme_favicon`, `upload_brand_theme_background_image`, `delete_brand_theme_background_image`, `replace_customized_sign_in_page`, `delete_customized_sign_in_page`, `replace_preview_sign_in_page`, `delete_preview_sign_in_page`, `replace_customized_error_page`, `delete_customized_error_page`, `replace_preview_error_page`, `delete_preview_error_page`, `replace_sign_out_page_settings` |
+| `okta.templates.read` | `list_email_templates`, `get_email_template`, `list_email_customizations`, `get_email_customization`, `get_email_customization_preview`, `get_email_default_content`, `get_email_default_content_preview`, `get_email_settings` |
+| `okta.templates.manage` | `create_email_customization`, `replace_email_customization`, `delete_email_customization`, `delete_all_email_customizations`, `replace_email_settings`, `send_test_email` |
+| `okta.domains.read` | `list_custom_domains`, `get_custom_domain` |
+| `okta.domains.manage` | `create_custom_domain`, `replace_custom_domain`, `delete_custom_domain`, `upsert_custom_domain_certificate`, `verify_custom_domain` |
+| `okta.emailDomains.read` | `list_email_domains`, `get_email_domain` |
+| `okta.emailDomains.manage` | `create_email_domain`, `replace_email_domain`, `delete_email_domain`, `verify_email_domain` |
+
+### What you need to do
+
+To enable a group of tools, you must do **two things**:
+
+**1. Grant the scope to your Okta application**
+
+In your Okta Admin Console, open the App Integration you created for the MCP server:
+- Go to the **Okta API Scopes** tab.
+- Click **Grant** next to each scope you want to enable.
+
+**2. Add the scope to `OKTA_SCOPES` in your MCP client configuration**
+
+Update the `OKTA_SCOPES` value in your `mcp.json` / `settings.json` to include the required scopes as a **space-separated string**:
+
+```json
+"OKTA_SCOPES": "okta.users.read okta.groups.read okta.brands.read okta.templates.read"
+```
+
+Then restart your MCP client so the server picks up the new scope list.
+
+> [!TIP]
+> Start with the minimum set of scopes your use-case requires. For example, if you only need to read users and brands, use `okta.users.read okta.brands.read`. Adding `okta.*.manage` scopes enables write operations — only grant those if needed.
+
+> [!NOTE]
+> Scopes follow the pattern `okta.<resource>.read` for read-only access and `okta.<resource>.manage` for full read+write access. You do **not** need both — `okta.users.manage` implicitly enables all read operations on users.
+
+## �🔐 Authentication
 
 The Okta MCP Server uses the Okta Management API and requires authentication to access your Okta tenant.
 
