@@ -14,7 +14,12 @@ path traversal and injection attacks while allowing valid Okta IDs.
 
 import pytest
 
-from okta_mcp_server.utils.validation import InvalidOktaIdError, validate_okta_id
+from okta_mcp_server.utils.validation import (
+    InvalidOktaIdError,
+    _validate_os_version_string,
+    validate_okta_id,
+    validate_os_version_params,
+)
 
 
 class TestValidateOktaId:
@@ -159,3 +164,225 @@ class TestValidateOktaId:
         with pytest.raises(InvalidOktaIdError) as exc_info:
             validate_okta_id(malicious_id, "user_id")
         assert "forbidden" in str(exc_info.value).lower()
+
+
+# ===========================================================================
+# _validate_os_version_string
+# ===========================================================================
+
+class TestValidateOsVersionString:
+    """Tests for the _validate_os_version_string helper in validation.py."""
+
+    # --- Valid versions ---
+
+    def test_valid_xyz_returns_none(self):
+        assert _validate_os_version_string("14.2.1") is None
+
+    def test_valid_xyzw_returns_none(self):
+        assert _validate_os_version_string("14.2.1.0") is None
+
+    def test_empty_string_returns_none(self):
+        assert _validate_os_version_string("") is None
+
+    def test_android_single_component_accepted(self):
+        assert _validate_os_version_string("12", "ANDROID") is None
+
+    def test_android_single_component_zero_accepted(self):
+        assert _validate_os_version_string("9", "ANDROID") is None
+
+    def test_android_platform_case_insensitive(self):
+        assert _validate_os_version_string("12", "android") is None
+
+    # --- Two-component X.Y — must be rejected ---
+
+    def test_xy_returns_error(self):
+        error = _validate_os_version_string("14.2")
+        assert error is not None
+        assert "Incomplete" in error
+        assert "14.2" in error
+        assert "14.2.0" in error
+
+    def test_xy_error_warns_not_to_assume_patch(self):
+        error = _validate_os_version_string("14.2")
+        assert "Do NOT assume" in error
+
+    def test_xy_rejected_for_non_android_platform(self):
+        error = _validate_os_version_string("14.2", "MACOS")
+        assert error is not None
+        assert "Incomplete" in error
+
+    def test_xy_rejected_even_for_android(self):
+        # Two-component versions are not accepted for Android either —
+        # Android uses single major version only.
+        error = _validate_os_version_string("12.0", "ANDROID")
+        assert error is not None
+        assert "Incomplete" in error
+
+    def test_snake_case_not_applicable_to_string_helper(self):
+        # The string helper does not deal with dict keys; just validates the value.
+        assert _validate_os_version_string("14.2.1") is None
+
+    # --- Single-component for non-Android ---
+
+    def test_single_component_rejected_without_platform(self):
+        error = _validate_os_version_string("14")
+        assert error is not None
+        assert "Invalid" in error
+        assert "14" in error
+
+    def test_single_component_rejected_for_macos(self):
+        error = _validate_os_version_string("14", "MACOS")
+        assert error is not None
+        assert "Invalid" in error
+
+    # --- Garbage / alpha versions ---
+
+    def test_alpha_component_returns_error(self):
+        error = _validate_os_version_string("14.2.alpha")
+        assert error is not None
+
+    def test_leading_dot_returns_error(self):
+        error = _validate_os_version_string(".14.2.1")
+        assert error is not None
+
+    def test_completely_non_numeric_returns_error(self):
+        error = _validate_os_version_string("notaversion")
+        assert error is not None
+
+    def test_error_message_contains_xyz_format_hint(self):
+        error = _validate_os_version_string("abc")
+        assert error is not None
+        assert "X.Y.Z" in error
+
+    def test_error_message_mentions_android_exception(self):
+        error = _validate_os_version_string("14", "MACOS")
+        assert error is not None
+        assert "Android" in error
+
+
+# ===========================================================================
+# validate_os_version_params (decorator)
+# ===========================================================================
+
+class TestValidateOsVersionParams:
+    """Tests for the validate_os_version_params decorator in validation.py."""
+
+    # --- Direct string parameter ---
+
+    @pytest.mark.asyncio
+    async def test_valid_xyz_string_param_passes(self):
+        @validate_os_version_params("ver")
+        async def tool(ver=None):
+            return {"ok": True}
+        result = await tool(ver="14.2.1")
+        assert result == {"ok": True}
+
+    @pytest.mark.asyncio
+    async def test_xy_string_param_rejected(self):
+        @validate_os_version_params("ver")
+        async def tool(ver=None):
+            return {"ok": True}
+        result = await tool(ver="14.2")
+        assert "error" in result
+        assert "Incomplete" in result["error"]
+        assert "14.2.0" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_none_string_param_skipped(self):
+        @validate_os_version_params("ver")
+        async def tool(ver=None):
+            return {"ok": True}
+        result = await tool(ver=None)
+        assert result == {"ok": True}
+
+    @pytest.mark.asyncio
+    async def test_invalid_string_param_rejected(self):
+        @validate_os_version_params("ver")
+        async def tool(ver=None):
+            return {"ok": True}
+        result = await tool(ver="notaversion")
+        assert "error" in result
+
+    # --- Dict / policy_data parameter ---
+
+    @pytest.mark.asyncio
+    async def test_valid_policy_data_version_passes(self):
+        @validate_os_version_params("policy_data")
+        async def tool(policy_data):
+            return {"ok": True}
+        result = await tool(policy_data={"platform": "MACOS", "osVersion": {"minimum": "14.2.1"}})
+        assert result == {"ok": True}
+
+    @pytest.mark.asyncio
+    async def test_xy_policy_data_version_rejected(self):
+        @validate_os_version_params("policy_data")
+        async def tool(policy_data):
+            return {"ok": True}
+        result = await tool(policy_data={"platform": "MACOS", "osVersion": {"minimum": "14.2"}})
+        assert "error" in result
+        assert "Incomplete" in result["error"]
+        assert "Do NOT assume" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_snake_case_os_version_key_in_dict_rejected(self):
+        @validate_os_version_params("policy_data")
+        async def tool(policy_data):
+            return {"ok": True}
+        result = await tool(policy_data={"platform": "MACOS", "os_version": {"minimum": "17.0"}})
+        assert "error" in result
+        assert "Incomplete" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_policy_data_without_os_version_passes(self):
+        @validate_os_version_params("policy_data")
+        async def tool(policy_data):
+            return {"ok": True}
+        result = await tool(policy_data={"platform": "MACOS", "name": "My Policy"})
+        assert result == {"ok": True}
+
+    @pytest.mark.asyncio
+    async def test_android_single_component_in_policy_data_passes(self):
+        @validate_os_version_params("policy_data")
+        async def tool(policy_data):
+            return {"ok": True}
+        result = await tool(policy_data={"platform": "ANDROID", "osVersion": {"minimum": "12"}})
+        assert result == {"ok": True}
+
+    # --- error_return_type="list" ---
+
+    @pytest.mark.asyncio
+    async def test_list_return_type_on_error(self):
+        @validate_os_version_params("ver", error_return_type="list")
+        async def tool(ver=None):
+            return ["ok"]
+        result = await tool(ver="14.2")
+        assert isinstance(result, list)
+        assert result[0].startswith("Error:")
+
+    # --- Sync function support ---
+
+    def test_sync_function_xy_rejected(self):
+        @validate_os_version_params("ver")
+        def tool(ver=None):
+            return {"ok": True}
+        result = tool(ver="14.2")
+        assert "error" in result
+        assert "Incomplete" in result["error"]
+
+    def test_sync_function_valid_version_passes(self):
+        @validate_os_version_params("ver")
+        def tool(ver=None):
+            return {"ok": True}
+        result = tool(ver="14.2.1")
+        assert result == {"ok": True}
+
+    # --- Parameter not present in call ---
+
+    @pytest.mark.asyncio
+    async def test_missing_param_name_skipped(self):
+        @validate_os_version_params("nonexistent")
+        async def tool(ver=None):
+            return {"ok": True}
+        result = await tool(ver="14.2")
+        assert result == {"ok": True}
+
