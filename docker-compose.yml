@@ -29,5 +29,5 @@ services:
     # restart: "no"
 
     volumes:
-      - okta-keyring:/root/.local/share/python_keyring
+      - ./keyring:/root/.local/share/python_keyring
       - ./logs:/app/logs
