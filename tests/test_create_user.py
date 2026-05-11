@@ -12,6 +12,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from okta.models import CreateUserRequest
 
 from okta_mcp_server.tools.users.users import create_user
 
@@ -59,10 +60,10 @@ class TestCreateUserActivateParam:
 
         result = await create_user(profile=PROFILE, ctx=_make_ctx())
 
-        client.create_user.assert_awaited_once_with(
-            {"profile": PROFILE},
-            {"activate": "true"},
-        )
+        call_args = client.create_user.call_args[0]
+        assert isinstance(call_args[0], CreateUserRequest)
+        assert call_args[0].profile.email == PROFILE["email"]
+        assert call_args[1] == {"activate": "true"}
         assert result[0].status == "PROVISIONED"
 
     @pytest.mark.asyncio
@@ -75,10 +76,10 @@ class TestCreateUserActivateParam:
 
         result = await create_user(profile=PROFILE, activate=True, ctx=_make_ctx())
 
-        client.create_user.assert_awaited_once_with(
-            {"profile": PROFILE},
-            {"activate": "true"},
-        )
+        call_args = client.create_user.call_args[0]
+        assert isinstance(call_args[0], CreateUserRequest)
+        assert call_args[0].profile.email == PROFILE["email"]
+        assert call_args[1] == {"activate": "true"}
         assert result[0].status == "PROVISIONED"
 
     @pytest.mark.asyncio
@@ -91,10 +92,10 @@ class TestCreateUserActivateParam:
 
         result = await create_user(profile=PROFILE, activate=False, ctx=_make_ctx())
 
-        client.create_user.assert_awaited_once_with(
-            {"profile": PROFILE},
-            {"activate": "false"},
-        )
+        call_args = client.create_user.call_args[0]
+        assert isinstance(call_args[0], CreateUserRequest)
+        assert call_args[0].profile.email == PROFILE["email"]
+        assert call_args[1] == {"activate": "false"}
         assert result[0].status == "STAGED"
 
     @pytest.mark.asyncio
