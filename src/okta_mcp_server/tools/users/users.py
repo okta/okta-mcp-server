@@ -291,6 +291,16 @@ async def create_user(profile: dict, activate: bool = True, ctx: Context = None)
         List containing the created user details.
     """
     logger.info("Creating new user in Okta organization")
+
+    if not isinstance(activate, bool):
+        msg = (
+            f"Invalid value for 'activate': expected a boolean (true/false), "
+            f"got {type(activate).__name__!r} with value {activate!r}. "
+            "Pass activate=true to create an active user or activate=false to create a STAGED user."
+        )
+        logger.error(msg)
+        return [f"Error: {msg}"]
+
     logger.debug(
         f"User profile: email={profile.get('email', 'N/A')}, login={profile.get('login', 'N/A')}, activate={activate}"
     )

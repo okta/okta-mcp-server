@@ -119,3 +119,13 @@ class TestCreateUserActivateParam:
         result = await create_user(profile=PROFILE, ctx=_make_ctx())
 
         assert "Exception" in result[0]
+
+    @pytest.mark.asyncio
+    async def test_invalid_activate_type_returns_descriptive_error(self):
+        """Passing a non-boolean for activate should return a clear error before hitting the API."""
+        result = await create_user(profile=PROFILE, activate="false", ctx=_make_ctx())  # type: ignore[arg-type]
+
+        assert len(result) == 1
+        assert result[0].startswith("Error:")
+        assert "activate" in result[0]
+        assert "bool" in result[0]
