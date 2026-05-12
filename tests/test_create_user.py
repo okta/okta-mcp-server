@@ -63,7 +63,7 @@ class TestCreateUserActivateParam:
         call_args = client.create_user.call_args[0]
         assert isinstance(call_args[0], CreateUserRequest)
         assert call_args[0].profile.email == PROFILE["email"]
-        assert call_args[1] == {"activate": "true"}
+        assert call_args[1] == True
         assert result[0].status == "PROVISIONED"
 
     @pytest.mark.asyncio
@@ -79,7 +79,7 @@ class TestCreateUserActivateParam:
         call_args = client.create_user.call_args[0]
         assert isinstance(call_args[0], CreateUserRequest)
         assert call_args[0].profile.email == PROFILE["email"]
-        assert call_args[1] == {"activate": "true"}
+        assert call_args[1] == True
         assert result[0].status == "PROVISIONED"
 
     @pytest.mark.asyncio
@@ -95,7 +95,7 @@ class TestCreateUserActivateParam:
         call_args = client.create_user.call_args[0]
         assert isinstance(call_args[0], CreateUserRequest)
         assert call_args[0].profile.email == PROFILE["email"]
-        assert call_args[1] == {"activate": "false"}
+        assert call_args[1] == False
         assert result[0].status == "STAGED"
 
     @pytest.mark.asyncio

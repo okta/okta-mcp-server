@@ -301,10 +301,9 @@ async def create_user(profile: dict, activate: bool = True, ctx: Context = None)
         client = await get_okta_client(manager)
         # Wrap the profile in a CreateUserRequest model as required by Okta SDK v3
         user_data = CreateUserRequest.from_dict({"profile": profile})
-        query_params = {"activate": str(activate).lower()}
-        logger.debug(f"Calling Okta API to create user with query_params={query_params}")
+        logger.debug(f"Calling Okta API to create user with activate={activate}")
 
-        user, _, err = await client.create_user(user_data, query_params)
+        user, _, err = await client.create_user(user_data, activate)
 
         if err:
             logger.error(f"Okta API error while creating user: {err}")
