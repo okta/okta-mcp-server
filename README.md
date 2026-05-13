@@ -521,6 +521,13 @@ The Okta MCP Server provides the following tools for LLMs to interact with your 
 | `replace_device_assurance_policy`     | Fully replace an existing Device Assurance Policy             | - `Update the MacOS policy to require OS 14.5` <br> - `Enable secure hardware requirement for our Windows policy` <br> - `Change the minimum OS version for our iOS policy`                      |
 | `delete_device_assurance_policy`      | Delete a Device Assurance Policy (prompts for confirmation)   | - `Delete the old Windows compliance policy` <br> - `Remove the deprecated Android policy` <br> - `Clean up unused device assurance policies`                                                    |
 
+### Profile Mappings
+
+| Tool                      | Description                                          | Usage Examples                                                                                                                                                |
+| ------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list_profile_mappings`   | List profile mappings with optional source/target filter | - `Show me the profile mappings for the Salesforce application` <br> - `What mappings target the Okta user profile?` <br> - `List all mappings where this app is the source` |
+| `get_profile_mapping`     | Get a specific profile mapping with property expressions | - `Show me the attribute mapping details for this mapping` <br> - `What expression is used to map the department field?` <br> - `How is the email attribute transformed between the app and Okta?` |
+
 ### Logs
 
 > **Required scope:** `okta.logs.read`
