@@ -1,6 +1,6 @@
 FROM python:3.13-slim
 
-LABEL Title="Okta MCP Server" \
+LABEL Title="Clover - Okta MCP Server" \
       Description="Model Context Protocol server for Okta API integration" \
       Authors="Okta" \
       Licenses="Apache-2.0" \
