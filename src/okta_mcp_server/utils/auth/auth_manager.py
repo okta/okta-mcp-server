@@ -20,7 +20,7 @@ import keyring.backend
 import requests
 from loguru import logger
 
-SERVICE_NAME = "OktaAuthManager"
+SERVICE_NAME = os.environ.get("OKTA_SERVICE_NAME", "OktaAuthManager")
 
 
 @dataclass
