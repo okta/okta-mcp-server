@@ -269,19 +269,41 @@ async def get_user(user_id: str, ctx: Context = None) -> list:
 
 @mcp.tool()
 @require_scopes("okta.users.manage", error_return_type="list")
-async def create_user(profile: dict, ctx: Context = None) -> list:
+async def create_user(profile: dict, activate: bool = True, ctx: Context = None) -> list:
     """Create a user in the Okta organization.
 
     This tool creates a new user in the Okta organization with the provided profile.
 
     Parameters:
         profile (dict, required): The profile of the user to create.
+        activate (bool, optional): Whether to activate the user immediately after creation.
+            Set to False to create the user in STAGED status (no activation email sent).
+            Default: True.
+
+    Examples:
+        # Create user with immediate activation (default)
+        result = await create_user(profile=user_profile)
+
+        # Create user in STAGED status (no activation email)
+        result = await create_user(profile=user_profile, activate=False)
 
     Returns:
         List containing the created user details.
     """
     logger.info("Creating new user in Okta organization")
-    logger.debug(f"User profile: email={profile.get('email', 'N/A')}, login={profile.get('login', 'N/A')}")
+
+    if not isinstance(activate, bool):
+        msg = (
+            f"Invalid value for 'activate': expected a boolean (true/false), "
+            f"got {type(activate).__name__!r} with value {activate!r}. "
+            "Pass activate=true to create an active user or activate=false to create a STAGED user."
+        )
+        logger.error(msg)
+        return [f"Error: {msg}"]
+
+    logger.debug(
+        f"User profile: email={profile.get('email', 'N/A')}, login={profile.get('login', 'N/A')}, activate={activate}"
+    )
 
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
@@ -289,9 +311,9 @@ async def create_user(profile: dict, ctx: Context = None) -> list:
         client = await get_okta_client(manager)
         # Wrap the profile in a CreateUserRequest model as required by Okta SDK v3
         user_data = CreateUserRequest.from_dict({"profile": profile})
-        logger.debug("Calling Okta API to create user")
+        logger.debug(f"Calling Okta API to create user with activate={activate}")
 
-        user, _, err = await client.create_user(user_data)
+        user, _, err = await client.create_user(user_data, activate)
 
         if err:
             logger.error(f"Okta API error while creating user: {err}")
