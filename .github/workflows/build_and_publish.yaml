@@ -1,195 +1,66 @@
-name: Build and publish docker image(s)
+name: Build and publish docker image
 
 on:
   pull_request:
-#    paths:
-#      - 'images/**'
+    branches:
+      - master
+      - main
   push:
     branches:
       - master
       - main
-#    paths:
-#      - 'images/**'
+  workflow_dispatch:
 
 jobs:
-  Get_Changed_Folders:
-    runs-on: ubuntu-latest
-    outputs:
-      dockerfiles: ${{ steps.set-matrix.outputs.dockerfiles }}
-      has_dockerfiles: ${{ steps.set-matrix.outputs.has_dockerfiles }}
-    permissions:
-      contents: read
-      id-token: write
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: ${{ github.event_name == 'pull_request' && 2 || 0 }}
-
-      - name: Install JQ
-        run: sudo apt update && sudo apt install -y jq
-
-      - name: Setup matrix from changed files
-        id: set-matrix
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          # Get changed files
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            # PR HEAD is typically a merge commit of base into PR branch
-            changed_files=$(git diff --name-only HEAD^1 HEAD)
-          else
-            # Push event uses before/after SHAs
-            changed_files=$(git diff --name-only "${{ github.event.before }}" "${{ github.event.after }}")
-          fi
-
-          echo "Changed files:"
-          echo "$changed_files"
-
-          # Dockerfiles directly changed
-          direct_dockerfiles=$(
-            echo "$changed_files" \
-              | grep -E '(^|/)(Dockerfile|[^/]+\.Dockerfile)$' \
-              | sort -u || true
-          )
-
-          # Get unique changed directories
-          mapfile -t directories < <(
-            echo "$changed_files" \
-              | xargs -r -n1 dirname \
-              | sort -u
-          )
-
-          echo "Changed directories:"
-          printf '%s\n' "${directories[@]:-}"
-
-          # Find Dockerfile(s) in changed directories and their ancestors
-          ancestor_dockerfiles=$(
-            {
-              shopt -s nullglob
-              for dir in "${directories[@]:-}"; do
-                while true; do
-                  for f in "$dir"/Dockerfile "$dir"/*.Dockerfile; do
-                    [[ -e "$f" ]] && echo "$f"
-                  done
-
-                  [[ "$dir" == "." || "$dir" != */* ]] && break
-                  dir=${dir%/*}
-                done
-              done
-            } | sort -u
-          )
-
-          dockerfiles=$(
-            {
-              echo "$direct_dockerfiles"
-              echo "$ancestor_dockerfiles"
-            } | sed '/^$/d' | sort -u | jq -R -s -c 'split("\n") | map(select(length > 0))'
-          )
-
-          if [[ "$dockerfiles" == "[]" ]]; then
-            echo "has_dockerfiles=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_dockerfiles=true" >> "$GITHUB_OUTPUT"
-          fi
-
-          echo "dockerfiles=$dockerfiles" >> "$GITHUB_OUTPUT"
-          echo "Dockerfiles JSON: $dockerfiles"
-
-  Build_Images:
-    needs: Get_Changed_Folders
-    if: needs.Get_Changed_Folders.outputs.has_dockerfiles == 'true'
+  Build_and_Push:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
 
-    strategy:
-      fail-fast: false
-      matrix:
-        dockerfiles: ${{ fromJson(needs.Get_Changed_Folders.outputs.dockerfiles) }}
-
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      - uses: google-github-actions/auth@v1
+      - name: Google Auth
+        uses: google-github-actions/auth@v1
         with:
           workload_identity_provider: projects/1042430885196/locations/global/workloadIdentityPools/github-pool/providers/github-pool-provider
+          # Use your existing service account logic
           service_account: ${{ github.event_name == 'pull_request' && vars.GCP_SERVICE_ACCOUNT_GAR_PUBLISHER_DEV || vars.GCP_SERVICE_ACCOUNT_GAR_PUBLISHER }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-        with:
-          driver: docker
-          platforms: linux/amd64
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
-        with:
-          version: '>= 450.0.0'
 
-      - name: Configure docker
-        run: gcloud auth configure-docker gcr.io,us-docker.pkg.dev
+      - name: Configure Docker for GCR
+        run: gcloud auth configure-docker gcr.io
 
-      # Require tests to pass before publishing an image
-      - name: Run CI tests
-        shell: bash
+      - name: Build and Push
         run: |
-          dockerfile="${{ matrix.dockerfiles }}"
-          path=$(dirname "$dockerfile")
-
-          if [ -f "$path/Makefile" ]; then
-            cd "$path"
-
-            # Use `ci` target rather than `test` because some Makefiles assume local/mac usage
-            echo "detected makefile, checking if supports ci target"
-            set +e
-            make -q ci 2>/dev/null
-            if test $? -le 1; then
-              echo "Makefile supports ci target, running tests"
-              make ci || exit 1
-            fi
-          fi
-
-      - name: Build image
-        shell: bash
-        run: |
-          set -ex
-          dockerpath="${{ matrix.dockerfiles }}"
-          dockerfile=$(basename "$dockerpath")
-          path=$(dirname "$dockerpath")
-
-          # Keep existing behavior for images/ paths, otherwise use directory name as image name
-          if [[ "$path" == images/* ]]; then
-            name=${path#images/}
+          # 1. Define the Image Name
+          IMAGE_NAME="okta-mcp-server"
+          PROJECT_ID="clover-sre-001"
+          
+          # 2. Determine if this is a PR or a Merge to Main
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            REPO="gcr.io/$PROJECT_ID/$IMAGE_NAME-dev"
           else
-            name=$(basename "$path")
+            REPO="gcr.io/$PROJECT_ID/$IMAGE_NAME"
           fi
 
-          cd "$path"
+          # 3. Define Tags
+          SHA=$(echo $GITHUB_SHA | cut -c1-7)
+          
+          echo "Building and pushing to $REPO"
 
-          echo "-------- ${dockerpath} ---------"
-
-          tag=${dockerfile%".Dockerfile"}
-          if [[ "$tag" == "Dockerfile" ]]; then
-            tag="latest"
-          fi
-
-          sha=${GITHUB_SHA:0:7}
-
-          if [ -n "${GITHUB_BASE_REF:-}" ]; then
-            base="gcr.io/clover-sre-001/$name-dev"
-            echo "This is a PR - Pushing images to dev repository $base"
-          else
-            base="gcr.io/clover-sre-001/$name"
-            echo "Pushing images to $base:$tag $base:$sha"
-          fi
-
+          # 4. Build and Push using Buildx
+          # This assumes Dockerfile is in the root (./Dockerfile)
           docker buildx build \
             --platform linux/amd64 \
             --push \
-            --tag "$base:$tag" \
-            --tag "$base:$tag-$sha" \
-            --tag "$base:$sha" \
-            -f "$dockerfile" .
+            --tag "$REPO:latest" \
+            --tag "$REPO:$SHA" \
+            --file ./Dockerfile .
