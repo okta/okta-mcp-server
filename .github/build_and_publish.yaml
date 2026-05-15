@@ -182,7 +182,7 @@ jobs:
             base="gcr.io/clover-sre-001/$name-dev"
             echo "This is a PR - Pushing images to dev repository $base"
           else
-            base="gcr.io/clover-sre-001/$name"
+            base="gcr.io/clover-sre-001/okta-mcp-server"
             echo "Pushing images to $base:$tag $base:$sha"
           fi
 
