@@ -255,6 +255,43 @@ async def update_user(user_id: str, profile: dict, ctx: Context = None) -> list:
 
 
 @mcp.tool()
+async def list_user_groups(user_id: str, ctx: Context = None) -> list:
+    """List all groups that a user belongs to in the Okta organization.
+
+    This tool retrieves all groups of which the specified user is a member.
+
+    Parameters:
+        user_id (str, required): The ID of the user whose groups to retrieve.
+
+    Returns:
+        List of group objects the user is a member of.
+    """
+    logger.info(f"Listing groups for user: {user_id}")
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        logger.debug(f"Calling Okta API to list groups for user {user_id}")
+
+        groups, response, err = await client.list_user_groups(user_id)
+
+        if err:
+            logger.error(f"Okta API error while listing groups for user {user_id}: {err}")
+            return [f"Error: {err}"]
+
+        if not groups:
+            logger.info(f"No groups found for user {user_id}")
+            return []
+
+        logger.info(f"Successfully retrieved {len(groups)} groups for user {user_id}")
+        return [group.as_dict() for group in groups]
+    except Exception as e:
+        logger.error(f"Exception while listing groups for user {user_id}: {type(e).__name__}: {e}")
+        return [f"Exception: {e}"]
+
+
+@mcp.tool()
 async def deactivate_user(user_id: str, ctx: Context = None) -> list:
     """Deactivates a user from the Okta organization.
 
