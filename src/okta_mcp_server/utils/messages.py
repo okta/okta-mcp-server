@@ -73,3 +73,96 @@ DEACTIVATE_POLICY_RULE = (
     "Are you sure you want to deactivate rule {rule_id} "
     "in policy {policy_id}?"
 )
+
+# ---------------------------------------------------------------------------
+# Device Assurance
+# ---------------------------------------------------------------------------
+
+DELETE_DEVICE_ASSURANCE_POLICY = (
+    "Are you sure you want to delete device assurance policy {policy_id}? "
+    "This action cannot be undone."
+)
+
+# ---------------------------------------------------------------------------
+# Brands (Customization)
+# ---------------------------------------------------------------------------
+
+DELETE_BRAND = (
+    "Are you sure you want to delete brand {brand_id}? "
+    "This action cannot be undone."
+)
+
+# ---------------------------------------------------------------------------
+# Custom Domains (Customization)
+# ---------------------------------------------------------------------------
+
+DELETE_CUSTOM_DOMAIN = (
+    "Are you sure you want to delete custom domain {domain_id}? "
+    "This action cannot be undone."
+)
+
+# ---------------------------------------------------------------------------
+# Themes (Customization)
+# ---------------------------------------------------------------------------
+
+DELETE_THEME_LOGO = (
+    "Are you sure you want to delete the custom logo for theme {theme_id}? "
+    "The theme will revert to the default Okta logo."
+)
+
+DELETE_THEME_FAVICON = (
+    "Are you sure you want to delete the custom favicon for theme {theme_id}? "
+    "The theme will revert to the default Okta favicon."
+)
+
+DELETE_THEME_BACKGROUND_IMAGE = (
+    "Are you sure you want to delete the background image for theme {theme_id}? "
+    "Touchpoint variants that use BACKGROUND_IMAGE will fall back to their default appearance."
+)
+
+# ---------------------------------------------------------------------------
+# Custom Pages (Customization)
+# ---------------------------------------------------------------------------
+DELETE_CUSTOMIZED_ERROR_PAGE = (
+    "Are you sure you want to delete the customized error page for brand {brand_id}? "
+    "The default error page will appear in your live environment."
+)
+
+DELETE_PREVIEW_ERROR_PAGE = (
+    "Are you sure you want to delete the preview error page for brand {brand_id}?"
+)
+
+DELETE_CUSTOMIZED_SIGN_IN_PAGE = (
+    "Are you sure you want to delete the customized sign-in page for brand {brand_id}? "
+    "The default sign-in page will appear in your live environment."
+)
+
+DELETE_PREVIEW_SIGN_IN_PAGE = (
+    "Are you sure you want to delete the preview sign-in page for brand {brand_id}?"
+)
+
+# ---------------------------------------------------------------------------
+# Custom Email Templates (Customization)
+# ---------------------------------------------------------------------------
+
+DELETE_EMAIL_CUSTOMIZATION = (
+    "Are you sure you want to delete the {language} customization "
+    "(ID: {customization_id}) for the {template_name} email template? "
+    "This action cannot be undone."
+)
+
+DELETE_ALL_EMAIL_CUSTOMIZATIONS = (
+    "Are you sure you want to delete ALL customizations for the {template_name} "
+    "email template on brand {brand_id}? "
+    "Every language variant will be removed and cannot be recovered."
+)
+
+# ---------------------------------------------------------------------------
+# Email Domains
+# ---------------------------------------------------------------------------
+
+DELETE_EMAIL_DOMAIN = (
+    "Are you sure you want to delete the email domain {domain!r} (ID: {email_domain_id})? "
+    "Any brands using this domain will revert to the default Okta sender address. "
+    "This action cannot be undone."
+)
