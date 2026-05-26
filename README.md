@@ -458,6 +458,14 @@ The Okta MCP Server provides the following tools for LLMs to interact with your 
 | `delete_deactivated_user`       | Permanently delete a deactivated user (prompts for confirmation) | - `Delete the deactivated user john.doe@company.com` <br> - `Remove former employee Jane Smith permanently` <br> - `Clean up old contractor accounts`         |
 | `get_user_profile_attributes`   | Retrieve all supported user profile attributes          | - `What user profile fields are available?` <br> - `Show me all the custom attributes we can set` <br> - `List the standard Okta user attributes`             |
 
+### User Resources
+
+> **Required scope:** `okta.users.read`
+
+| Tool                  | Description                                             | Usage Examples                                                                                                                                             |
+| --------------------- | ------------------------------------------------------- |------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `list_user_groups`    | List all groups that a specific user is a member of    | - `What groups is john.doe@company.com in?` <br> - `Show me all group memberships for user ID 00u1234567890` <br> - `Which teams does Jane Smith belong to?` |
+
 ### Groups
 
 > **Required scope:** `okta.groups.read` (read) · `okta.groups.manage` (write)
@@ -654,7 +662,7 @@ The Okta MCP Server uses a **scope-based tool loading** mechanism to ensure that
 
 | Scope | Tools Unlocked |
 | ----- | -------------- |
-| `okta.users.read` | `list_users`, `get_user`, `get_user_profile_attributes` |
+| `okta.users.read` | `list_users`, `get_user`, `get_user_profile_attributes`, `list_user_groups` |
 | `okta.users.manage` | `create_user`, `update_user`, `deactivate_user`, `delete_deactivated_user` |
 | `okta.groups.read` | `list_groups`, `get_group`, `list_group_users`, `list_group_apps` |
 | `okta.groups.manage` | `create_group`, `update_group`, `delete_group`, `add_user_to_group`, `remove_user_from_group` |
