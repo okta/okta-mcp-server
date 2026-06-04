@@ -619,7 +619,7 @@ wheels = [
 
 [[package]]
 name = "okta-mcp-server"
-version = "0.1.0"
+version = "1.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "flatdict" },
@@ -1130,14 +1130,14 @@ wheels = [
 
 [[package]]
 name = "starlette"
-version = "0.47.0"
+version = "1.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8b/d0/0332bd8a25779a0e2082b0e179805ad39afad642938b371ae0882e7f880d/starlette-0.47.0.tar.gz", hash = "sha256:1f64887e94a447fed5f23309fb6890ef23349b7e478faa7b24a851cd4eb844af", size = 2582856, upload-time = "2025-05-29T15:45:27.628Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/08/a3/84e821cc54b4ab50ae6dbc6ac3800a651b65ec35f045cc73785380654057/starlette-1.0.1.tar.gz", hash = "sha256:512399c5f1de7fac99c88572212ded9ddeddef2fb32afa82d724000e88b38f4f", size = 2659596, upload-time = "2026-05-21T21:58:58.433Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e3/81/c60b35fe9674f63b38a8feafc414fca0da378a9dbd5fa1e0b8d23fcc7a9b/starlette-0.47.0-py3-none-any.whl", hash = "sha256:9d052d4933683af40ffd47c7465433570b4949dc937e20ad1d73b34e72f10c37", size = 72796, upload-time = "2025-05-29T15:45:26.305Z" },
+    { url = "https://files.pythonhosted.org/packages/ec/e1/b2df4bc09a1e51ff664c1e17018a4274b42e5e9352e4a478ea540512dc88/starlette-1.0.1-py3-none-any.whl", hash = "sha256:7c0e69b2ee1c848bd54669d908500117a3ee13de603a21427e5c6fc1adf98dcd", size = 72802, upload-time = "2026-05-21T21:58:56.551Z" },
 ]
 
 [[package]]
