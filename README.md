@@ -697,8 +697,8 @@ Then restart your MCP client so the server picks up the new scope list.
 > [!TIP]
 > Start with the minimum set of scopes your use-case requires. For example, if you only need to read users and brands, use `okta.users.read okta.brands.read`. Adding `okta.*.manage` scopes enables write operations — only grant those if needed.
 
-> [!NOTE]
-> Scopes follow the pattern `okta.<resource>.read` for read-only access and `okta.<resource>.manage` for full read+write access. You do **not** need both — `okta.users.manage` implicitly enables all read operations on users.
+> [!IMPORTANT]
+> `.read` and `.manage` are independent — **`.manage` does not imply `.read`**. Each tool requires exactly one scope (see the table above): read and list tools need `okta.<resource>.read`, write tools need `okta.<resource>.manage`. If you grant only `okta.apps.manage`, the write tools load but `list_applications` and `get_application` stay disabled because they require `okta.apps.read`. To get both read and write tools for a resource, include **both** scopes, e.g. `okta.apps.read okta.apps.manage`.
 
 ## �🔐 Authentication
 
