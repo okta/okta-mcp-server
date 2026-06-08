@@ -444,3 +444,74 @@ async def deactivate_application(ctx: Context, app_id: str) -> list:
     except Exception as e:
         logger.error(f"Exception while deactivating application {app_id}: {type(e).__name__}: {e}")
         return [f"Exception: {e}"]
+
+
+@mcp.tool()
+@require_scopes("okta.apps.manage", error_return_type="list")
+@validate_ids("app_id", "user_id")
+async def assign_user_to_app(ctx: Context, app_id: str, user_id: str) -> list:
+    """Assign a user to an application in the Okta organization.
+
+    Parameters:
+        app_id (str, required): The ID of the application to assign the user to
+        user_id (str, required): The ID of the user to assign
+
+    Returns:
+        List containing the assigned application-user object, or error information.
+    """
+    logger.info(f"Assigning user {user_id} to application {app_id}")
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        app_user = okta_models.AppUserAssignRequest(id=user_id, scope="USER")
+        logger.debug(f"Calling Okta API to assign user {user_id} to application {app_id}")
+
+        assignment, _, err = await client.assign_user_to_application(app_id, app_user)
+
+        if err:
+            logger.error(f"Okta API error while assigning user {user_id} to application {app_id}: {err}")
+            return [f"Error: {err}"]
+
+        logger.info(f"Successfully assigned user {user_id} to application {app_id}")
+        return [assignment]
+    except Exception as e:
+        logger.error(f"Exception while assigning user {user_id} to application {app_id}: {type(e).__name__}: {e}")
+        return [f"Exception: {e}"]
+
+
+@mcp.tool()
+@require_scopes("okta.apps.manage", error_return_type="list")
+@validate_ids("app_id", "group_id")
+async def assign_group_to_app(ctx: Context, app_id: str, group_id: str) -> list:
+    """Assign a group to an application in the Okta organization.
+
+    All users in the group gain access to the application.
+
+    Parameters:
+        app_id (str, required): The ID of the application to assign the group to
+        group_id (str, required): The ID of the group to assign
+
+    Returns:
+        List containing the application-group assignment object, or error information.
+    """
+    logger.info(f"Assigning group {group_id} to application {app_id}")
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        logger.debug(f"Calling Okta API to assign group {group_id} to application {app_id}")
+
+        assignment, _, err = await client.assign_group_to_application(app_id, group_id)
+
+        if err:
+            logger.error(f"Okta API error while assigning group {group_id} to application {app_id}: {err}")
+            return [f"Error: {err}"]
+
+        logger.info(f"Successfully assigned group {group_id} to application {app_id}")
+        return [assignment]
+    except Exception as e:
+        logger.error(f"Exception while assigning group {group_id} to application {app_id}: {type(e).__name__}: {e}")
+        return [f"Exception: {e}"]
