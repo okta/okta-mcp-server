@@ -215,7 +215,16 @@ async def create_application(ctx: Context, app_config: Dict[str, Any], activate:
             logger.error(f"Okta API error while creating application: {err}")
             return {"error": str(err)}
 
-        logger.info(f"Successfully created application")
+        if not app:
+            logger.error("Okta returned no application and no error while creating application")
+            return {
+                "error": (
+                    "Application creation returned an empty response with no error. "
+                    "The configuration may have been rejected by Okta."
+                )
+            }
+
+        logger.info("Successfully created application")
         return app
     except Exception as e:
         logger.error(f"Exception while creating application: {type(e).__name__}: {e}")
