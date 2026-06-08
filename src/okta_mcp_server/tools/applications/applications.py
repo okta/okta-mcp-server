@@ -33,11 +33,18 @@ def _build_application_model(app_config: Dict[str, Any]) -> Any:
     The SDK v3 requires typed model objects, not plain dicts. Without this,
     subclass-specific fields like `name`, `settings`, and `visibility` are
     silently dropped by the base Application model, causing API validation errors.
+
+    We deserialize via the model's ``from_dict`` rather than the ``Model(**dict)``
+    constructor because nested ``anyOf`` unions — notably SAML
+    ``settings.signOn.attributeStatements`` (``SamlAttributeStatement``) — are only
+    bound to their concrete member type by ``from_dict``. The plain constructor
+    leaves the union's ``actual_instance`` as ``None``, so every attribute
+    statement serializes to ``null`` and never reaches Okta.
     """
     sign_on_mode = app_config.get("signOnMode") or app_config.get("sign_on_mode", "")
     model_cls = _SIGN_ON_MODE_MODEL_MAP.get(str(sign_on_mode).upper(), okta_models.Application)
     logger.debug(f"Using model class '{model_cls.__name__}' for signOnMode '{sign_on_mode}'")
-    return model_cls(**app_config)
+    return model_cls.from_dict(app_config)
 
 
 from okta_mcp_server.utils.client import get_okta_client
