@@ -43,6 +43,9 @@ class OktaAuthManager:
         self.org_url = os.environ.get("OKTA_ORG_URL")
         self.client_id = os.environ.get("OKTA_CLIENT_ID")
         self.scopes = f"{self.scopes} {os.environ.get('OKTA_SCOPES', '').strip()}"
+        # Guards against re-prompting for auth on every call when a configured
+        # scope can never be satisfied (see is_valid_token).
+        self._scope_reauth_attempted = False
 
         # Check for browserless auth configuration
         self.private_key = os.environ.get("OKTA_PRIVATE_KEY")
@@ -316,6 +319,44 @@ class OktaAuthManager:
             else:
                 logger.error("Authentication failed")
 
+    def _token_has_required_scopes(self, api_token: str) -> bool:
+        """Return True if the cached access token already grants every requested API scope.
+
+        Okta access tokens are JWTs whose granted scopes live in the ``scp`` claim
+        (an array) or, for some authorization servers, a space-delimited ``scope``
+        string. The token is decoded WITHOUT signature verification because we are
+        only reading the scopes that were already issued to us, not authenticating
+        the token for trust.
+
+        Only ``okta.*`` API scopes are compared. The OIDC/base scopes (openid,
+        profile, email, offline_access) are requested for the ID token and offline
+        access but are not echoed in the access token's scope claim, so including
+        them in the comparison would always report them missing and loop into
+        endless re-authentication.
+
+        If the token cannot be decoded (for example an opaque, non-JWT token), this
+        returns True and the caller falls back to the age check and API 401/403
+        handling.
+        """
+        requested = {scope for scope in self.scopes.split() if scope.startswith("okta.")}
+        if not requested:
+            return True
+
+        try:
+            claims = jwt.decode(api_token, options={"verify_signature": False})
+        except Exception as e:
+            logger.debug(f"Could not decode token to read scopes ({e}); skipping scope check")
+            return True
+
+        scope_claim = claims.get("scp") or claims.get("scope") or []
+        granted = set(scope_claim.split()) if isinstance(scope_claim, str) else set(scope_claim)
+
+        missing = requested - granted
+        if missing:
+            logger.info(f"Cached token is missing requested scope(s): {sorted(missing)}; re-authentication required")
+            return False
+        return True
+
     async def is_valid_token(self, expiry_duration: int = 3600) -> bool:
         """Ensure that a valid token is available. Refresh or re-authenticate if needed."""
         logger.debug(f"Checking token validity (expiry duration: {expiry_duration}s)")
@@ -323,14 +364,34 @@ class OktaAuthManager:
         api_token = keyring.get_password(SERVICE_NAME, "api_token")
         token_age = time.time() - self.token_timestamp
 
-        if api_token and token_age < expiry_duration:
+        # The cached token is stale on scope grounds when it lacks a requested
+        # okta.* scope. We act on that at most once per process: if a fresh grant
+        # still lacks the scope — e.g. it was never granted to the Okta app — we
+        # stop forcing re-authentication and let the API 401/403 path surface it,
+        # rather than re-prompting on every call.
+        scope_stale = (
+            bool(api_token)
+            and not self._scope_reauth_attempted
+            and not self._token_has_required_scopes(api_token)
+        )
+
+        if api_token and token_age < expiry_duration and not scope_stale:
             logger.debug(f"Token is valid (age: {token_age:.0f}s)")
             return True
 
-        logger.info(f"Token is expired or missing (age: {token_age:.0f}s)")
+        if scope_stale:
+            self._scope_reauth_attempted = True
+            logger.info("Requested scopes exceed the cached token; a fresh grant is required")
+        else:
+            logger.info(f"Token is expired or missing (age: {token_age:.0f}s)")
+
         if self.use_browserless_auth:
             # For browserless auth, we can't refresh, so re-authenticate
             logger.info("Re-authenticating using browserless flow")
+            await self.authenticate()
+        elif scope_stale:
+            # A refresh exchange cannot widen scopes (no re-consent), so run a
+            # fresh device grant, which re-requests self.scopes.
             await self.authenticate()
         else:
             # For device flow, try to refresh first
