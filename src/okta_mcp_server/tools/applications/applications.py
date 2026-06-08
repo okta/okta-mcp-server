@@ -5,6 +5,7 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
 
+import json
 from typing import Any, Dict, Optional
 
 import okta.models as okta_models
@@ -444,3 +445,128 @@ async def deactivate_application(ctx: Context, app_id: str) -> list:
     except Exception as e:
         logger.error(f"Exception while deactivating application {app_id}: {type(e).__name__}: {e}")
         return [f"Exception: {e}"]
+
+
+# ---------------------------------------------------------------------------
+# App user-profile schema (Profile Editor)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+@require_scopes("okta.schemas.read")
+@validate_ids("app_id", error_return_type="dict")
+async def get_app_user_schema(ctx: Context, app_id: str) -> Any:
+    """Get the default app user-profile schema for an application.
+
+    Returns the base and custom property definitions — the schema shown in Okta's
+    Profile Editor for the app. Use it to see which custom attributes already exist
+    before adding one.
+
+    Parameters:
+        app_id (str, required): The ID of the application
+
+    Returns:
+        Dict with the app user schema, or error information.
+    """
+    logger.info(f"Getting app user schema for application: {app_id}")
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        schema, _, err = await client.get_application_user_schema(app_id)
+
+        if err:
+            logger.error(f"Okta API error while getting app user schema for {app_id}: {err}")
+            return {"error": str(err)}
+
+        logger.info(f"Successfully retrieved app user schema for application: {app_id}")
+        return schema.to_dict() if schema else {}
+    except Exception as e:
+        logger.error(f"Exception while getting app user schema for {app_id}: {type(e).__name__}: {e}")
+        return {"error": str(e)}
+
+
+@mcp.tool()
+@require_scopes("okta.schemas.manage")
+@validate_ids("app_id", error_return_type="dict")
+async def add_app_user_schema_attribute(
+    ctx: Context,
+    app_id: str,
+    variable_name: str,
+    title: str,
+    attribute_type: str = "string",
+    description: Optional[str] = None,
+    attribute_definition: Optional[Dict[str, Any]] = None,
+) -> Any:
+    """Add or update a custom attribute on an application's default user-profile schema.
+
+    This is the API equivalent of the Profile Editor "Add Attribute" step. After
+    adding, for example, ``employeeNumber``, it can be referenced in a SAML
+    attribute statement as ``user.employeeNumber``.
+
+    The Okta schemas endpoint has no typed SDK wrapper, so this issues the request
+    directly. The post is a partial update: only the named property is added or
+    updated; existing custom properties are left intact.
+
+    Parameters:
+        app_id (str, required): The ID of the application
+        variable_name (str, required): The custom property key (e.g. ``employeeNumber``)
+        title (str, required): Human-readable display name
+        attribute_type (str, optional): JSON schema type — ``string`` (default),
+            ``integer``, ``number``, ``boolean``, or ``array``
+        description (str, optional): Description for the attribute
+        attribute_definition (dict, optional): Extra Okta schema property fields to
+            merge into the property, e.g.
+            ``{"maxLength": 50, "permissions": [{"principal": "SELF", "action": "READ_WRITE"}]}``
+
+    Returns:
+        Dict with the updated app user schema, or error information.
+    """
+    logger.info(f"Adding custom attribute '{variable_name}' to app user schema for application: {app_id}")
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+
+        property_definition: Dict[str, Any] = {"title": title, "type": attribute_type}
+        if description:
+            property_definition["description"] = description
+        if attribute_definition:
+            property_definition.update(attribute_definition)
+
+        body = {
+            "definitions": {
+                "custom": {
+                    "id": "#custom",
+                    "type": "object",
+                    "properties": {variable_name: property_definition},
+                    "required": [],
+                }
+            }
+        }
+
+        executor = client.get_request_executor()
+        request, err = await executor.create_request(
+            method="POST",
+            url=f"/api/v1/meta/schemas/apps/{app_id}/default",
+            body=body,
+            headers={},
+            oauth=False,
+            keep_empty_params=True,
+        )
+        if err:
+            logger.error(f"Error building app user schema request for {app_id}: {err}")
+            return {"error": str(err)}
+
+        _, response_body, err = await executor.execute(request)
+        if err:
+            logger.error(f"Okta API error while updating app user schema for {app_id}: {err}")
+            return {"error": str(err)}
+
+        logger.info(f"Successfully added custom attribute '{variable_name}' for application: {app_id}")
+        return json.loads(response_body) if response_body else {}
+    except Exception as e:
+        logger.error(f"Exception while updating app user schema for {app_id}: {type(e).__name__}: {e}")
+        return {"error": str(e)}
