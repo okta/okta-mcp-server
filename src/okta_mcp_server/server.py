@@ -33,15 +33,21 @@ async def okta_authorisation_flow(server: FastMCP) -> AsyncIterator[OktaAppConte
     """
     logger.info("Starting Okta authorization flow")
     manager = OktaAuthManager()
-    await manager.authenticate()
+    # Reuse a cached or refreshable token when one is available; only fall back
+    # to an interactive device grant when no valid token can be obtained.
+    # is_valid_token() silently refreshes via the stored refresh token, so a
+    # restart or reconnect no longer re-prompts for device authorization now
+    # that tokens persist across shutdowns.
+    if not await manager.is_valid_token():
+        await manager.authenticate()
     logger.info("Okta authentication completed successfully")
     prune_tools_by_scope(server, manager)
 
-    try:
-        yield OktaAppContext(okta_auth_manager=manager)
-    finally:
-        logger.debug("Clearing Okta tokens")
-        manager.clear_tokens()
+    # Tokens are intentionally left in the keyring on shutdown so a restart can
+    # reuse the cached access token (and silently refresh it via the refresh
+    # token) without forcing another device-authorization prompt. Clearing only
+    # happens on an explicit logout via OktaAuthManager.clear_tokens().
+    yield OktaAppContext(okta_auth_manager=manager)
 
 
 mcp = FastMCP("Okta IDaaS MCP Server", lifespan=okta_authorisation_flow)
