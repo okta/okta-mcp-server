@@ -444,3 +444,279 @@ async def deactivate_application(ctx: Context, app_id: str) -> list:
     except Exception as e:
         logger.error(f"Exception while deactivating application {app_id}: {type(e).__name__}: {e}")
         return [f"Exception: {e}"]
+
+
+# ---------------------------------------------------------------------------
+# Provisioning (outbound SCIM / directory sync)
+# ---------------------------------------------------------------------------
+
+
+def _provisioning_unsupported_error(connection: Dict[str, Any], app_id: str) -> Optional[Dict[str, Any]]:
+    """Detect Okta's "provisioning not supported" sentinel.
+
+    When an app does not support outbound provisioning, Okta returns HTTP 200
+    (no error) with the connection ``status`` and ``profile.authScheme`` both set
+    to ``UNKNOWN`` instead of a 4xx. Without this guard the tool returns that body
+    as if the connection were configured. Returns an error dict when the sentinel
+    is detected, otherwise None.
+    """
+    status = connection.get("status")
+    auth_scheme = (connection.get("profile") or {}).get("authScheme")
+    if status == "UNKNOWN" and auth_scheme == "UNKNOWN":
+        return {
+            "error": (
+                f"Provisioning is not enabled or supported on application {app_id} "
+                f"(Okta returned status=UNKNOWN). Outbound SCIM provisioning only works "
+                f"on a provisioning-capable app; a plain custom SAML/OIDC app cannot be "
+                f"pointed at a SCIM endpoint."
+            )
+        }
+    return None
+
+
+@mcp.tool()
+@require_scopes("okta.apps.read")
+@validate_ids("app_id", error_return_type="dict")
+async def get_app_provisioning_connection(ctx: Context, app_id: str) -> Any:
+    """Get the provisioning (SCIM) connection configuration for an application.
+
+    Returns the connection's base URL, auth scheme, and status (the bearer token
+    itself is never returned by Okta).
+
+    Parameters:
+        app_id (str, required): The ID of the application
+
+    Returns:
+        Dict with the provisioning connection details, or error information.
+    """
+    logger.info(f"Getting provisioning connection for application: {app_id}")
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        connection, _, err = await client.get_default_provisioning_connection_for_application(app_id)
+
+        if err:
+            logger.error(f"Okta API error while getting provisioning connection for {app_id}: {err}")
+            return {"error": str(err)}
+
+        if not connection:
+            return {}
+        conn_dict = connection.to_dict()
+        unsupported = _provisioning_unsupported_error(conn_dict, app_id)
+        if unsupported:
+            return unsupported
+
+        logger.info(f"Successfully retrieved provisioning connection for application: {app_id}")
+        return conn_dict
+    except Exception as e:
+        logger.error(f"Exception while getting provisioning connection for {app_id}: {type(e).__name__}: {e}")
+        return {"error": str(e)}
+
+
+@mcp.tool()
+@require_scopes("okta.apps.manage")
+@validate_ids("app_id", error_return_type="dict")
+async def set_app_provisioning_connection(
+    ctx: Context, app_id: str, base_url: str, token: str, activate: bool = True
+) -> Any:
+    """Configure the outbound SCIM provisioning connection for an application.
+
+    Points the application at an external SCIM endpoint using bearer-token (HEADER)
+    authentication, which is the common directory-sync setup.
+
+    Parameters:
+        app_id (str, required): The ID of the application
+        base_url (str, required): The SCIM connector base URL of the external endpoint
+        token (str, required): The bearer token used to authenticate to the SCIM endpoint
+        activate (bool, optional): Activate the provisioning connection. Defaults to True.
+
+    Returns:
+        Dict with the updated provisioning connection details, or error information.
+    """
+    logger.info(f"Setting provisioning connection for application {app_id} (base_url={base_url})")
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        # Build the request via from_dict so the oneOf union binds to the
+        # token-auth variant; the plain constructor would drop base_url/token.
+        request = okta_models.UpdateDefaultProvisioningConnectionForApplicationRequest.from_dict(
+            {"baseUrl": base_url, "profile": {"authScheme": "TOKEN", "token": token}}
+        )
+        logger.debug(f"Calling Okta API to set provisioning connection for {app_id} (activate={activate})")
+
+        connection, _, err = await client.update_default_provisioning_connection_for_application(
+            app_id, request, activate
+        )
+
+        if err:
+            logger.error(f"Okta API error while setting provisioning connection for {app_id}: {err}")
+            return {"error": str(err)}
+
+        if not connection:
+            return {}
+        conn_dict = connection.to_dict()
+        unsupported = _provisioning_unsupported_error(conn_dict, app_id)
+        if unsupported:
+            logger.warning(f"Provisioning is not supported on application {app_id} (status=UNKNOWN)")
+            return unsupported
+
+        logger.info(f"Successfully set provisioning connection for application: {app_id}")
+        return conn_dict
+    except Exception as e:
+        logger.error(f"Exception while setting provisioning connection for {app_id}: {type(e).__name__}: {e}")
+        return {"error": str(e)}
+
+
+@mcp.tool()
+@require_scopes("okta.apps.manage")
+@validate_ids("app_id", error_return_type="dict")
+async def activate_app_provisioning_connection(ctx: Context, app_id: str) -> Any:
+    """Activate the provisioning (SCIM) connection for an application.
+
+    Parameters:
+        app_id (str, required): The ID of the application
+
+    Returns:
+        Dict with the connection status or a success message, or error information.
+    """
+    logger.info(f"Activating provisioning connection for application: {app_id}")
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        connection, _, err = await client.activate_default_provisioning_connection_for_application(app_id)
+
+        if err:
+            logger.error(f"Okta API error while activating provisioning connection for {app_id}: {err}")
+            return {"error": str(err)}
+
+        logger.info(f"Successfully activated provisioning connection for application: {app_id}")
+        if connection:
+            return connection.to_dict()
+        return {"message": f"Provisioning connection activated for application {app_id}"}
+    except Exception as e:
+        logger.error(f"Exception while activating provisioning connection for {app_id}: {type(e).__name__}: {e}")
+        return {"error": str(e)}
+
+
+@mcp.tool()
+@require_scopes("okta.apps.manage")
+@validate_ids("app_id", error_return_type="dict")
+async def deactivate_app_provisioning_connection(ctx: Context, app_id: str) -> Any:
+    """Deactivate the provisioning (SCIM) connection for an application.
+
+    Parameters:
+        app_id (str, required): The ID of the application
+
+    Returns:
+        Dict with the connection status or a success message, or error information.
+    """
+    logger.info(f"Deactivating provisioning connection for application: {app_id}")
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        connection, _, err = await client.deactivate_default_provisioning_connection_for_application(app_id)
+
+        if err:
+            logger.error(f"Okta API error while deactivating provisioning connection for {app_id}: {err}")
+            return {"error": str(err)}
+
+        logger.info(f"Successfully deactivated provisioning connection for application: {app_id}")
+        if connection:
+            return connection.to_dict()
+        return {"message": f"Provisioning connection deactivated for application {app_id}"}
+    except Exception as e:
+        logger.error(f"Exception while deactivating provisioning connection for {app_id}: {type(e).__name__}: {e}")
+        return {"error": str(e)}
+
+
+@mcp.tool()
+@require_scopes("okta.apps.read")
+@validate_ids("app_id", error_return_type="dict")
+async def list_app_features(ctx: Context, app_id: str) -> Any:
+    """List the provisioning features and their capabilities for an application.
+
+    Features include ``USER_PROVISIONING`` (outbound to a SCIM target) and
+    ``INBOUND_PROVISIONING``. Each entry reports its status and configured
+    capabilities (create / update / deactivate users, group push).
+
+    Parameters:
+        app_id (str, required): The ID of the application
+
+    Returns:
+        Dict with a ``features`` list, or error information.
+    """
+    logger.info(f"Listing features for application: {app_id}")
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        features, _, err = await client.list_features_for_application(app_id)
+
+        if err:
+            logger.error(f"Okta API error while listing features for {app_id}: {err}")
+            return {"error": str(err)}
+
+        logger.info(f"Successfully listed features for application: {app_id}")
+        return {"features": [f.to_dict() for f in features] if features else []}
+    except Exception as e:
+        logger.error(f"Exception while listing features for {app_id}: {type(e).__name__}: {e}")
+        return {"error": str(e)}
+
+
+@mcp.tool()
+@require_scopes("okta.apps.manage")
+@validate_ids("app_id", error_return_type="dict")
+async def update_app_feature(ctx: Context, app_id: str, feature_name: str, capabilities: Dict[str, Any]) -> Any:
+    """Configure a provisioning feature's capabilities for an application.
+
+    Use this to enable the provisioning actions for outbound SCIM directory sync.
+
+    Parameters:
+        app_id (str, required): The ID of the application
+        feature_name (str, required): The feature to configure — ``USER_PROVISIONING``
+            or ``INBOUND_PROVISIONING``.
+        capabilities (dict, required): The capabilities object, e.g.
+            ``{"create": {"lifecycleCreate": {"status": "ENABLED"}},
+            "update": {"profile": {"status": "ENABLED"},
+            "lifecycleDeactivate": {"status": "ENABLED"}}}``.
+
+    Returns:
+        Dict with the updated feature, or error information.
+    """
+    logger.info(f"Updating feature '{feature_name}' for application: {app_id}")
+
+    try:
+        feature_type = okta_models.ApplicationFeatureType(feature_name)
+    except ValueError:
+        valid = ", ".join(e.value for e in okta_models.ApplicationFeatureType)
+        return {"error": f"Invalid feature_name '{feature_name}'. Must be one of: {valid}."}
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        # from_dict binds the oneOf capabilities union; the plain constructor would
+        # serialize an empty body and silently no-op the configuration.
+        request = okta_models.UpdateFeatureForApplicationRequest.from_dict(capabilities)
+        logger.debug(f"Calling Okta API to update feature '{feature_name}' for {app_id}")
+
+        feature, _, err = await client.update_feature_for_application(app_id, feature_type, request)
+
+        if err:
+            logger.error(f"Okta API error while updating feature '{feature_name}' for {app_id}: {err}")
+            return {"error": str(err)}
+
+        logger.info(f"Successfully updated feature '{feature_name}' for application: {app_id}")
+        return feature.to_dict() if feature else {}
+    except Exception as e:
+        logger.error(f"Exception while updating feature '{feature_name}' for {app_id}: {type(e).__name__}: {e}")
+        return {"error": str(e)}

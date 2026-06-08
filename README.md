@@ -487,6 +487,12 @@ The Okta MCP Server provides the following tools for LLMs to interact with your 
 | `delete_application`          | Delete an application (prompts for confirmation)  | - `Delete the old legacy application` <br> - `Remove the unused test application` <br> - `Clean up deprecated integrations`                                   |
 | `activate_application`        | Activate an application                           | - `Activate the new HR application` <br> - `Enable the Salesforce integration` <br> - `Turn on the mobile app for users`                                      |
 | `deactivate_application`      | Deactivate an application (prompts for confirmation) | - `Deactivate the legacy CRM application` <br> - `Temporarily disable the mobile app` <br> - `Turn off access to the test environment`                        |
+| `get_app_provisioning_connection` | Read an app's SCIM provisioning connection (base URL, auth scheme, status) | - `What SCIM endpoint is this app provisioning to?` <br> - `Is provisioning enabled for the HR app?`                                                         |
+| `set_app_provisioning_connection` | Point an app at an external SCIM endpoint (base URL + bearer token) | - `Configure SCIM provisioning for this app to https://scim.vendor.com/v2` <br> - `Set up directory sync to our SCIM endpoint`                               |
+| `activate_app_provisioning_connection` | Activate an app's provisioning connection | - `Enable provisioning for the HR app`                                                                                                                       |
+| `deactivate_app_provisioning_connection` | Deactivate an app's provisioning connection | - `Turn off provisioning for the HR app`                                                                                                                     |
+| `list_app_features`           | List an app's provisioning features and capabilities | - `What provisioning actions are enabled for this app?` <br> - `Show the SCIM capabilities for the HR app`                                                   |
+| `update_app_feature`          | Configure a provisioning feature's actions (create/update/deactivate users, push groups) | - `Enable create and deactivate users for this app's provisioning` <br> - `Turn on user provisioning push for the HR app`                                    |
 
 ### Policies
 
@@ -658,8 +664,8 @@ The Okta MCP Server uses a **scope-based tool loading** mechanism to ensure that
 | `okta.users.manage` | `create_user`, `update_user`, `deactivate_user`, `delete_deactivated_user` |
 | `okta.groups.read` | `list_groups`, `get_group`, `list_group_users`, `list_group_apps` |
 | `okta.groups.manage` | `create_group`, `update_group`, `delete_group`, `add_user_to_group`, `remove_user_from_group` |
-| `okta.apps.read` | `list_applications`, `get_application` |
-| `okta.apps.manage` | `create_application`, `update_application`, `delete_application`, `activate_application`, `deactivate_application` |
+| `okta.apps.read` | `list_applications`, `get_application`, `get_app_provisioning_connection`, `list_app_features` |
+| `okta.apps.manage` | `create_application`, `update_application`, `delete_application`, `activate_application`, `deactivate_application`, `set_app_provisioning_connection`, `activate_app_provisioning_connection`, `deactivate_app_provisioning_connection`, `update_app_feature` |
 | `okta.policies.read` | `list_policies`, `get_policy`, `list_policy_rules`, `get_policy_rule` |
 | `okta.policies.manage` | `create_policy`, `update_policy`, `delete_policy`, `activate_policy`, `deactivate_policy`, `create_policy_rule`, `update_policy_rule`, `delete_policy_rule`, `activate_policy_rule`, `deactivate_policy_rule` |
 | `okta.deviceAssurance.read` | `list_device_assurance_policies`, `get_device_assurance_policy` |
