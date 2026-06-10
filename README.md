@@ -72,6 +72,41 @@ Docker provides a consistent environment without needing to install Python or uv
 
 4. Configure your MCP Client to use the Docker container:
 
+**Claude Code with Docker (Private Key JWT - Recommended):**
+
+This method requires no browser interaction and is ideal for containerized environments. Add the following to your `~/.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "okta-mcp-server": {
+      "type": "stdio",
+      "command": "docker",
+      "args": [
+        "run", "-i", "--rm",
+        "-e", "OKTA_ORG_URL",
+        "-e", "OKTA_CLIENT_ID",
+        "-e", "OKTA_SCOPES",
+        "-e", "OKTA_PRIVATE_KEY",
+        "-e", "OKTA_KEY_ID",
+        "gcr.io/clover-sre-001/okta-mcp-server:latest"
+      ],
+      "env": {
+        "OKTA_ORG_URL": "https://your-org.okta.com",
+        "OKTA_CLIENT_ID": "your-client-id",
+        "OKTA_SCOPES": "okta.users.read okta.groups.read",
+        "OKTA_PRIVATE_KEY": "-----BEGIN PRIVATE KEY-----\nYour private key content here\n-----END PRIVATE KEY-----",
+        "OKTA_KEY_ID": "your-key-id"
+      }
+    }
+  }
+}
+```
+
+> **Note:** The `OKTA_ORG_URL` must be your Okta org's base URL (e.g. `https://your-org.okta.com`).
+
+After saving `~/.mcp.json`, run `/mcp` in Claude Code to connect the server.
+
 **Claude Desktop with Docker (Private Key JWT - Recommended for Docker):**
 
 This method requires no browser interaction and is ideal for containerized environments.
