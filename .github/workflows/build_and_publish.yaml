@@ -26,8 +26,10 @@ jobs:
         uses: google-github-actions/auth@v1
         with:
           workload_identity_provider: projects/1042430885196/locations/global/workloadIdentityPools/github-pool/providers/github-pool-provider
-          # Use your existing service account logic
           service_account: ${{ github.event_name == 'pull_request' && vars.GCP_SERVICE_ACCOUNT_GAR_PUBLISHER_DEV || vars.GCP_SERVICE_ACCOUNT_GAR_PUBLISHER }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -40,26 +42,21 @@ jobs:
 
       - name: Build and Push
         run: |
-          # 1. Define the Image Name
           IMAGE_NAME="okta-mcp-server"
           PROJECT_ID="clover-sre-001"
-          
-          # 2. Determine if this is a PR or a Merge to Main
+
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             REPO="gcr.io/$PROJECT_ID/$IMAGE_NAME-dev"
           else
             REPO="gcr.io/$PROJECT_ID/$IMAGE_NAME"
           fi
 
-          # 3. Define Tags
           SHA=$(echo $GITHUB_SHA | cut -c1-7)
-          
+
           echo "Building and pushing to $REPO"
 
-          # 4. Build and Push using Buildx
-          # This assumes Dockerfile is in the root (./Dockerfile)
           docker buildx build \
-            --platform linux/amd64 \
+            --platform linux/amd64,linux/arm64 \
             --push \
             --tag "$REPO:latest" \
             --tag "$REPO:$SHA" \
