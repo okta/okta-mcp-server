@@ -7,6 +7,9 @@
 
 </div>
 
+## :tada: __It's Official__ :tada:
+The Okta Open-Source MCP Server integrates with LLMs and AI agents, allowing you to perform various Okta management operations using natural language and is Generally Available (GA).
+
 [MCP (Model Context Protocol)](https://modelcontextprotocol.io/introduction) is an open protocol introduced by Anthropic that standardizes how large language models communicate with external tools, resources or remote services.
 
 The Okta MCP Server integrates with LLMs and AI agents, allowing you to perform various Okta management operations using natural language. For instance, you could simply ask Claude Desktop to perform Okta management operations:
