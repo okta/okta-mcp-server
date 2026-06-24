@@ -490,6 +490,8 @@ The Okta MCP Server provides the following tools for LLMs to interact with your 
 | `delete_application`          | Delete an application (prompts for confirmation)  | - `Delete the old legacy application` <br> - `Remove the unused test application` <br> - `Clean up deprecated integrations`                                   |
 | `activate_application`        | Activate an application                           | - `Activate the new HR application` <br> - `Enable the Salesforce integration` <br> - `Turn on the mobile app for users`                                      |
 | `deactivate_application`      | Deactivate an application (prompts for confirmation) | - `Deactivate the legacy CRM application` <br> - `Temporarily disable the mobile app` <br> - `Turn off access to the test environment`                        |
+| `assign_user_to_app`          | Assign a user to an application                   | - `Assign Jane to the Salesforce application` <br> - `Give this user access to the HR app`                                                                    |
+| `assign_group_to_app`         | Assign a group to an application                  | - `Assign the Engineering group to the GitHub app` <br> - `Give the Sales team access to Salesforce`                                                          |
 
 ### Policies
 
@@ -662,7 +664,7 @@ The Okta MCP Server uses a **scope-based tool loading** mechanism to ensure that
 | `okta.groups.read` | `list_groups`, `get_group`, `list_group_users`, `list_group_apps` |
 | `okta.groups.manage` | `create_group`, `update_group`, `delete_group`, `add_user_to_group`, `remove_user_from_group` |
 | `okta.apps.read` | `list_applications`, `get_application` |
-| `okta.apps.manage` | `create_application`, `update_application`, `delete_application`, `activate_application`, `deactivate_application` |
+| `okta.apps.manage` | `create_application`, `update_application`, `delete_application`, `activate_application`, `deactivate_application`, `assign_user_to_app`, `assign_group_to_app` |
 | `okta.policies.read` | `list_policies`, `get_policy`, `list_policy_rules`, `get_policy_rule` |
 | `okta.policies.manage` | `create_policy`, `update_policy`, `delete_policy`, `activate_policy`, `deactivate_policy`, `create_policy_rule`, `update_policy_rule`, `delete_policy_rule`, `activate_policy_rule`, `deactivate_policy_rule` |
 | `okta.deviceAssurance.read` | `list_device_assurance_policies`, `get_device_assurance_policy` |
