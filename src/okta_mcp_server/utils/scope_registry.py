@@ -36,6 +36,10 @@ TOOL_SCOPE_REGISTRY: dict[str, str] = {
     "deactivate_user":                      "okta.users.manage",
     "delete_deactivated_user":              "okta.users.manage",
     # ------------------------------------------------------------------
+    # User Resources  (src/okta_mcp_server/tools/user_resources/user_resources.py)
+    # ------------------------------------------------------------------
+    "list_user_groups":                      "okta.users.read",
+    # ------------------------------------------------------------------
     # Groups  (src/okta_mcp_server/tools/groups/groups.py)
     # ------------------------------------------------------------------
     "list_groups":                          "okta.groups.read",
