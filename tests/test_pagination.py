@@ -106,6 +106,43 @@ class TestExtractAfterCursorV3:
         }
         assert extract_after_cursor(response) == "cursor99"
 
+    def test_reads_link_from_okta_api_response_get_headers(self):
+        """OktaAPIResponse (request-executor result) exposes headers via
+        get_headers(), not a .headers attribute, and leaves _next unset — the
+        cursor must still be extracted from the Link header."""
+        response = MagicMock(spec=["get_headers"])
+        response.get_headers.return_value = {
+            "link": '<https://test.okta.com/api/v1/apps?after=execcursor1>; rel="next"'
+        }
+        assert extract_after_cursor(response) == "execcursor1"
+
+    def test_reads_link_from_resp_headers_attr(self):
+        """Fallback to the private _resp_headers mapping when neither .headers
+        nor get_headers() yields a usable header set."""
+        response = MagicMock(spec=["_resp_headers"])
+        response._resp_headers = {
+            "Link": '<https://test.okta.com/api/v1/apps?after=execcursor2>; rel="next"'
+        }
+        assert extract_after_cursor(response) == "execcursor2"
+
+    def test_reads_next_from_aiohttp_links(self):
+        """The request executor returns the raw aiohttp response, whose .links
+        is a rel-keyed mapping ({'next': {'url': <yarl URL>}}). Okta sends self
+        and next as separate Link headers, so this parsed mapping — not a raw
+        headers.get('Link') — is the reliable source of the next cursor."""
+        response = MagicMock(spec=["links"])
+        response.links = {
+            "self": {"url": "https://test.okta.com/api/v1/apps?limit=20"},
+            "next": {"url": "https://test.okta.com/api/v1/apps?after=aiocursor1&limit=20"},
+        }
+        assert extract_after_cursor(response) == "aiocursor1"
+
+    def test_no_next_in_aiohttp_links_returns_none(self):
+        """Only a self link (last page) → no cursor."""
+        response = MagicMock(spec=["links"])
+        response.links = {"self": {"url": "https://test.okta.com/api/v1/apps?limit=20"}}
+        assert extract_after_cursor(response) is None
+
 
 # ---------------------------------------------------------------------------
 # extract_after_cursor — SDK v2 path
