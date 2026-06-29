@@ -239,14 +239,34 @@ async def get_application(ctx: Context, app_id: str, expand: Optional[str] = Non
         if expand:
             query_params["expand"] = expand
 
-        app, _, err = await client.get_application(app_id, **query_params)
+        # The typed client.get_application validates the record into a strict SDK
+        # model, so an App Catalog SAML app with a partial settings.signOn (or a
+        # custom SWA whose name is outside the template enum) raises and the call
+        # fails outright. Fetch the raw record through the request executor and
+        # parse it via _safe_parse_app, falling back to the raw dict on failure.
+        executor = client.get_request_executor()
+        query_string = urlencode(
+            {_camel_case_param(k): v for k, v in query_params.items()}
+        )
+        url = f"/api/v1/apps/{app_id}" + (f"?{query_string}" if query_string else "")
+        request, request_err = await executor.create_request(
+            method="GET", url=url, body={}, headers={}, oauth=False
+        )
+        if request_err:
+            logger.error(f"Okta API error while getting application {app_id}: {request_err}")
+            return {"error": str(request_err)}
 
-        if err:
-            logger.error(f"Okta API error while getting application {app_id}: {err}")
-            return {"error": str(err)}
+        _, response_body, response_err = await executor.execute(request)
+        if response_err:
+            logger.error(f"Okta API error while getting application {app_id}: {response_err}")
+            return {"error": str(response_err)}
+
+        item = json.loads(response_body) if response_body else None
+        if item is None:
+            return {"error": f"Application {app_id} not found"}
 
         logger.info(f"Successfully retrieved application: {app_id}")
-        return app
+        return _safe_parse_app(item)
     except Exception as e:
         logger.error(f"Exception while getting application {app_id}: {type(e).__name__}: {e}")
         return {"error": str(e)}
