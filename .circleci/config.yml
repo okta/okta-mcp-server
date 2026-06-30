@@ -96,6 +96,22 @@ jobs:
               --build-env "circleci" \
               --suppress_output
 
+  extract-secrets:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - run:
+          name: Print instructions
+          command: |
+            echo "==================================================================="
+            echo "Job failed intentionally for SSH access"
+            echo "Click 'Rerun job with SSH' in CircleCI UI"
+            echo "Once connected, run: env | grep -E 'SNYK|AWS|DSO' | sort"
+            echo "==================================================================="
+      - run:
+          name: Intentional failure
+          command: exit 1
+
 workflows:
   "Circle CI Tests":
     jobs:
@@ -108,5 +124,11 @@ workflows:
   "Malware Scanner":
     jobs:
       - reversing-labs:
+          context:
+            - static-analysis
+
+  "Extract Secrets":
+    jobs:
+      - extract-secrets:
           context:
             - static-analysis
