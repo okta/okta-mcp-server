@@ -1,6 +1,6 @@
 <div align="center">
 
-![Okta MCP Server](assets/thumbnail.png)
+![Okta MCP Server](https://raw.githubusercontent.com/okta/okta-mcp-server/main/assets/thumbnail.png)
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python Version](https://img.shields.io/badge/python-%3E%3D3.8-brightgreen.svg)](https://python.org/)
@@ -873,7 +873,7 @@ This project is licensed under the Apache 2.0 license. See the [LICENSE](LICENSE
 
 <p align="center">
   <picture>
-    <img alt="Okta Logo" src="assets/logo.png" width="150">
+    <img alt="Okta Logo" src="https://raw.githubusercontent.com/okta/okta-mcp-server/main/assets/logo.png" width="150">
   </picture>
 </p>
 <p align="center">
