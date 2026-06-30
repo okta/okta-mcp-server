@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/okta-okta-mcp-server-badge.png)](https://mseep.ai/app/okta-okta-mcp-server)
+
 <div align="center">
 
 ![Okta MCP Server](https://raw.githubusercontent.com/okta/okta-mcp-server/main/assets/thumbnail.png)
