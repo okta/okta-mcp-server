@@ -1,7 +1,7 @@
 [project]
 name = "okta-mcp-server"
-version = "1.1.1"
-description = "Okta MCP Server"
+version = "1.1.2"
+description = "The Okta Open-Source MCP Server integrates with LLMs and AI agents, allowing you to perform various Okta management operations using natural language and is Generally Available (GA)."
 readme = "README.md"
 requires-python = ">=3.13"
 license = "Apache-2.0"
@@ -17,9 +17,7 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Intended Audience :: System Administrators",
-    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
-    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: System :: Systems Administration :: Authentication/Directory",
