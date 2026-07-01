@@ -3,7 +3,7 @@
 ![Okta MCP Server](https://raw.githubusercontent.com/okta/okta-mcp-server/main/assets/thumbnail.png)
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Python Version](https://img.shields.io/badge/python-%3E%3D3.8-brightgreen.svg)](https://python.org/)
+[![Python Version](https://img.shields.io/badge/python-%3E%3D3.13-brightgreen.svg)](https://python.org/)
 
 </div>
 
@@ -38,7 +38,7 @@ This MCP server utilizes [Okta's Python SDK v3.4.1](https://github.com/okta/okta
 
 **Prerequisites:**
 
-- [Python 3.8+](https://python.org/downloads) OR [Docker](https://docs.docker.com/get-docker/)
+- [Python 3.13+](https://python.org/downloads) OR [Docker](https://docs.docker.com/get-docker/)
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) package manager (if not using Docker)
 - [Claude Desktop](https://claude.ai/download) or any other [MCP Client](https://modelcontextprotocol.io/clients)
 - [Okta](https://okta.com/) account with appropriate permissions
@@ -301,6 +301,114 @@ docker run -i --rm \
      }
    }
    ```
+
+</details>
+
+<details>
+<summary><b> Option 3: PyPI (uvx / pipx / pip)</b></summary>
+
+The server is published to [PyPI as `okta-mcp-server`](https://pypi.org/project/okta-mcp-server/), so you can run it without cloning the repository. This is the easiest option if you only want to *use* the server (not modify it).
+
+**Prerequisite:** Python 3.13+ and either [`uv`](https://docs.astral.sh/uv/getting-started/installation/) (recommended, provides `uvx`) or [`pipx`](https://pipx.pypa.io/stable/installation/).
+
+**Quick smoke test (optional):**
+```bash
+# With uv — no install needed, runs in an ephemeral environment
+uvx okta-mcp-server --help
+
+# Or install globally with pipx
+pipx install okta-mcp-server
+okta-mcp-server --help
+```
+
+**Claude Desktop with PyPI (Device Authorization Grant):**
+
+Add the following to your `claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "okta-mcp-server": {
+      "command": "uvx",
+      "args": ["okta-mcp-server"],
+      "env": {
+        "OKTA_ORG_URL": "<OKTA_ORG_URL>",
+        "OKTA_CLIENT_ID": "<OKTA_CLIENT_ID>",
+        "OKTA_SCOPES": "<OKTA_SCOPES>"
+      }
+    }
+  }
+}
+```
+
+**Claude Desktop with PyPI (Private Key JWT — Browserless):**
+```json
+{
+  "mcpServers": {
+    "okta-mcp-server": {
+      "command": "uvx",
+      "args": ["okta-mcp-server"],
+      "env": {
+        "OKTA_ORG_URL": "<OKTA_ORG_URL>",
+        "OKTA_CLIENT_ID": "<OKTA_CLIENT_ID>",
+        "OKTA_SCOPES": "<OKTA_SCOPES>",
+        "OKTA_PRIVATE_KEY": "<PRIVATE_KEY_IF_NEEDED>",
+        "OKTA_KEY_ID": "<KEY_ID_IF_NEEDED>"
+      }
+    }
+  }
+}
+```
+
+**VS Code with PyPI:**
+```json
+{
+  "mcp": {
+    "inputs": [
+      {
+        "type": "promptString",
+        "description": "Okta Organization URL (e.g., https://dev-123456.okta.com)",
+        "id": "OKTA_ORG_URL"
+      },
+      {
+        "type": "promptString",
+        "description": "Okta Client ID",
+        "id": "OKTA_CLIENT_ID",
+        "password": true
+      },
+      {
+        "type": "promptString",
+        "description": "Okta Scopes (separated by whitespace)",
+        "id": "OKTA_SCOPES"
+      }
+    ],
+    "servers": {
+      "okta-mcp-server": {
+        "command": "uvx",
+        "args": ["okta-mcp-server"],
+        "env": {
+          "OKTA_ORG_URL": "${input:OKTA_ORG_URL}",
+          "OKTA_CLIENT_ID": "${input:OKTA_CLIENT_ID}",
+          "OKTA_SCOPES": "${input:OKTA_SCOPES}"
+        }
+      }
+    }
+  }
+}
+```
+
+**Pinning a version (recommended for production):**
+
+`uvx okta-mcp-server` always resolves to the latest published release. To pin a specific version, use the `package@version` form:
+```json
+"args": ["okta-mcp-server@1.1.2"]
+```
+
+**Upgrading:**
+- `uvx` — no action needed for unpinned installs; use `uv cache clean` to force a refresh, or bump the pinned version.
+- `pipx` — run `pipx upgrade okta-mcp-server`.
+
+> [!TIP]
+> Prefer Option 1 (Docker) or Option 2 (uv from source) if you need to modify the server code or run in a locked-down container environment. Choose Option 3 when you just want the released server on your workstation with minimal setup.
 
 </details>
 
@@ -823,7 +931,7 @@ uv pip install -e .
 ```
 
 > [!NOTE]
-> This server requires [Python 3.8 or higher](https://python.org/downloads) and [uv](https://docs.astral.sh/uv/).
+> This server requires [Python 3.13 or higher](https://python.org/downloads) and [uv](https://docs.astral.sh/uv/).
 
 ## 🔒 Security
 
