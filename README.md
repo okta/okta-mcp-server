@@ -305,7 +305,7 @@ docker run -i --rm \
 </details>
 
 <details>
-<summary><b>🐍 Option 3: PyPI (uvx / pipx / pip)</b></summary>
+<summary><b> Option 3: PyPI (uvx / pipx / pip)</b></summary>
 
 The server is published to [PyPI as `okta-mcp-server`](https://pypi.org/project/okta-mcp-server/), so you can run it without cloning the repository. This is the easiest option if you only want to *use* the server (not modify it).
 
