@@ -5,12 +5,15 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
 
+import json
 from typing import Optional
+from urllib.parse import urlencode
 
 from loguru import logger
 from mcp.server.fastmcp import Context
 
 from okta_mcp_server.server import mcp
+from okta_mcp_server.tools.applications.applications import _camel_case_param, _safe_parse_app
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DELETE_GROUP
@@ -484,7 +487,39 @@ async def list_group_apps(
         query_params = build_query_params(after=after, limit=effective_limit)
         logger.debug(f"Calling Okta API to list applications for group {group_id}")
 
-        apps, response, err = await client.list_assigned_applications_for_group(group_id, **query_params)
+        async def _fetch_group_apps_page(params):
+            """Fetch one page of /api/v1/groups/{id}/apps and parse each app permissively.
+
+            The typed ``client.list_assigned_applications_for_group`` validates the whole
+            page into strict SDK models in one pass, so a single non-conforming app — a
+            SAML app with a partial ``settings.signOn`` or a custom SWA whose ``name`` is
+            outside the SDK enum — aborts the entire response. Fetching the raw page
+            through the request executor and parsing per item via ``_safe_parse_app``
+            avoids that. Mirrors the resilient path in ``list_applications``.
+            """
+            executor = client.get_request_executor()
+            query_string = urlencode(
+                {
+                    _camel_case_param(k): ("true" if v is True else "false" if v is False else v)
+                    for k, v in params.items()
+                }
+            )
+            url = f"/api/v1/groups/{group_id}/apps" + (f"?{query_string}" if query_string else "")
+            request, request_err = await executor.create_request(
+                method="GET", url=url, body={}, headers={}, oauth=False
+            )
+            if request_err:
+                return None, None, request_err
+
+            page_response, response_body, response_err = await executor.execute(request)
+            if response_err:
+                return None, page_response, response_err
+
+            raw_items = json.loads(response_body) if response_body else []
+            parsed_items = [_safe_parse_app(item) for item in raw_items]
+            return parsed_items, page_response, None
+
+        apps, response, err = await _fetch_group_apps_page(query_params)
 
         if err:
             logger.error(f"Okta API error while listing applications for group {group_id}: {err}")
@@ -501,7 +536,7 @@ async def list_group_apps(
             async def _next_page(cursor):
                 p = {k: v for k, v in query_params.items() if k != "after"}
                 p["after"] = cursor
-                return await client.list_assigned_applications_for_group(group_id, **p)
+                return await _fetch_group_apps_page(p)
 
             async def _on_page(pages, total):
                 logger.info(f"[list_group_apps] Page {pages} fetched — {total} apps so far")

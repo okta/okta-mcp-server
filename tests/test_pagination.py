@@ -14,6 +14,7 @@ ApiResponse objects correctly via the Link-header cursor loop.
 
 from __future__ import annotations
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -104,6 +105,43 @@ class TestExtractAfterCursorV3:
             )
         }
         assert extract_after_cursor(response) == "cursor99"
+
+    def test_reads_link_from_okta_api_response_get_headers(self):
+        """OktaAPIResponse (request-executor result) exposes headers via
+        get_headers(), not a .headers attribute, and leaves _next unset — the
+        cursor must still be extracted from the Link header."""
+        response = MagicMock(spec=["get_headers"])
+        response.get_headers.return_value = {
+            "link": '<https://test.okta.com/api/v1/apps?after=execcursor1>; rel="next"'
+        }
+        assert extract_after_cursor(response) == "execcursor1"
+
+    def test_reads_link_from_resp_headers_attr(self):
+        """Fallback to the private _resp_headers mapping when neither .headers
+        nor get_headers() yields a usable header set."""
+        response = MagicMock(spec=["_resp_headers"])
+        response._resp_headers = {
+            "Link": '<https://test.okta.com/api/v1/apps?after=execcursor2>; rel="next"'
+        }
+        assert extract_after_cursor(response) == "execcursor2"
+
+    def test_reads_next_from_aiohttp_links(self):
+        """The request executor returns the raw aiohttp response, whose .links
+        is a rel-keyed mapping ({'next': {'url': <yarl URL>}}). Okta sends self
+        and next as separate Link headers, so this parsed mapping — not a raw
+        headers.get('Link') — is the reliable source of the next cursor."""
+        response = MagicMock(spec=["links"])
+        response.links = {
+            "self": {"url": "https://test.okta.com/api/v1/apps?limit=20"},
+            "next": {"url": "https://test.okta.com/api/v1/apps?after=aiocursor1&limit=20"},
+        }
+        assert extract_after_cursor(response) == "aiocursor1"
+
+    def test_no_next_in_aiohttp_links_returns_none(self):
+        """Only a self link (last page) → no cursor."""
+        response = MagicMock(spec=["links"])
+        response.links = {"self": {"url": "https://test.okta.com/api/v1/apps?limit=20"}}
+        assert extract_after_cursor(response) is None
 
 
 # ---------------------------------------------------------------------------
@@ -1021,23 +1059,51 @@ class TestListPolicyRulesFetchAll:
         assert result["total_fetched"] == 0
 
 
+def _app_dicts(n: int, prefix: str = "app") -> list:
+    """Minimal bookmark-app JSON records the resilient parser accepts."""
+    return [
+        {
+            "id": f"{prefix}{i}",
+            "label": f"{prefix}_{i}",
+            "name": "bookmark",
+            "signOnMode": "BOOKMARK",
+            "settings": {"app": {"url": "https://example.test"}},
+        }
+        for i in range(n)
+    ]
+
+
+def _executor_client(pages):
+    """Build a MagicMock Okta client whose request executor yields the given pages.
+
+    list_group_apps now fetches /api/v1/groups/{id}/apps through the request executor
+    and parses each record individually (PR #64 pattern), so tests mock the executor
+    rather than the strict ``list_assigned_applications_for_group`` SDK method.
+
+    Args:
+        pages: list of (items, response) tuples. Each executor.execute call returns
+            ``(response, json.dumps(items), None)``. ``create_request`` always succeeds.
+    """
+    executor = MagicMock()
+    executor.create_request = AsyncMock(return_value=({"method": "GET"}, None))
+    executor.execute = AsyncMock(
+        side_effect=[(resp, json.dumps(items), None) for items, resp in pages]
+    )
+    client = MagicMock()
+    client.get_request_executor = MagicMock(return_value=executor)
+    return client
+
+
 class TestListGroupAppsFetchAll:
     @pytest.mark.asyncio
     async def test_fetch_all_true_paginates_all_pages(self):
         """list_group_apps with fetch_all=True stitches multiple pages together."""
         from okta_mcp_server.tools.groups.groups import list_group_apps
 
-        page1 = _make_items(3, "app")
-        page2 = _make_items(2, "app")
-
-        resp1 = _make_v3_response(after_cursor="a2")
-        resp2 = _make_v3_response(after_cursor=None)
-
-        client = AsyncMock()
-        client.list_assigned_applications_for_group.side_effect = [
-            (page1, resp1, None),
-            (page2, resp2, None),
-        ]
+        client = _executor_client([
+            (_app_dicts(3), _make_v3_response(after_cursor="a2")),
+            (_app_dicts(2), _make_v3_response(after_cursor=None)),
+        ])
 
         ctx, _ = _make_ctx_with_client(client)
 
@@ -1054,11 +1120,7 @@ class TestListGroupAppsFetchAll:
         """list_group_apps with fetch_all=False returns cursor."""
         from okta_mcp_server.tools.groups.groups import list_group_apps
 
-        apps = _make_items(4, "app")
-        resp = _make_v3_response(after_cursor="ac")
-
-        client = AsyncMock()
-        client.list_assigned_applications_for_group.return_value = (apps, resp, None)
+        client = _executor_client([(_app_dicts(4), _make_v3_response(after_cursor="ac"))])
 
         ctx, _ = _make_ctx_with_client(client)
 
@@ -1069,25 +1131,21 @@ class TestListGroupAppsFetchAll:
         assert result["total_fetched"] == 4
         assert result["has_more"] is True
         assert result["next_cursor"] == "ac"
-        assert client.list_assigned_applications_for_group.call_count == 1
+        assert client.get_request_executor.return_value.execute.call_count == 1
 
     @pytest.mark.asyncio
     async def test_fetch_all_true_single_page_no_cursor(self):
         """fetch_all=True on a single-page result: no extra requests."""
         from okta_mcp_server.tools.groups.groups import list_group_apps
 
-        apps = _make_items(2, "app")
-        resp = _make_v3_response(after_cursor=None)
-
-        client = AsyncMock()
-        client.list_assigned_applications_for_group.return_value = (apps, resp, None)
+        client = _executor_client([(_app_dicts(2), _make_v3_response(after_cursor=None))])
 
         ctx, _ = _make_ctx_with_client(client)
 
         with patch("okta_mcp_server.tools.groups.groups.get_okta_client", return_value=client):
             result = await list_group_apps("grp1", ctx, fetch_all=True)
 
-        assert client.list_assigned_applications_for_group.call_count == 1
+        assert client.get_request_executor.return_value.execute.call_count == 1
         assert result["total_fetched"] == 2
 
     @pytest.mark.asyncio
@@ -1095,9 +1153,7 @@ class TestListGroupAppsFetchAll:
         """Empty app list returns a valid paginated response."""
         from okta_mcp_server.tools.groups.groups import list_group_apps
 
-        resp = _make_v3_response(after_cursor=None)
-        client = AsyncMock()
-        client.list_assigned_applications_for_group.return_value = ([], resp, None)
+        client = _executor_client([([], _make_v3_response(after_cursor=None))])
 
         ctx, _ = _make_ctx_with_client(client)
 
@@ -1109,11 +1165,14 @@ class TestListGroupAppsFetchAll:
 
     @pytest.mark.asyncio
     async def test_api_error_returns_error_dict(self):
-        """An Okta API error is surfaced as an error key."""
+        """An Okta API error from the executor is surfaced as an error key."""
         from okta_mcp_server.tools.groups.groups import list_group_apps
 
-        client = AsyncMock()
-        client.list_assigned_applications_for_group.return_value = (None, None, "API error")
+        executor = MagicMock()
+        executor.create_request = AsyncMock(return_value=({"method": "GET"}, None))
+        executor.execute = AsyncMock(return_value=(None, None, "API error"))
+        client = MagicMock()
+        client.get_request_executor = MagicMock(return_value=executor)
 
         ctx, _ = _make_ctx_with_client(client)
 
@@ -1121,6 +1180,35 @@ class TestListGroupAppsFetchAll:
             result = await list_group_apps("grp1", ctx)
 
         assert "error" in result
+
+    @pytest.mark.asyncio
+    async def test_one_bad_app_does_not_abort_listing(self):
+        """A non-conforming app (sparse SAML) is returned as a raw dict, not fatal."""
+        from okta_mcp_server.tools.groups.groups import list_group_apps
+
+        bad_saml = {
+            "id": "0oaSAML0001",
+            "label": "Sparse SAML",
+            "name": "sparsesaml",
+            "signOnMode": "SAML_2_0",
+            "settings": {"signOn": {"defaultRelayState": ""}},
+        }
+        client = _executor_client([
+            (_app_dicts(1) + [bad_saml], _make_v3_response(after_cursor=None)),
+        ])
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.groups.groups.get_okta_client", return_value=client):
+            result = await list_group_apps("grp1", ctx)
+
+        assert result["total_fetched"] == 2
+        flagged = [
+            i for i in result["items"]
+            if isinstance(i, dict) and "_deserialization_warning" in i
+        ]
+        assert len(flagged) == 1
+        assert flagged[0]["id"] == "0oaSAML0001"
 
 
 class TestListEmailTemplatesFetchAll:
