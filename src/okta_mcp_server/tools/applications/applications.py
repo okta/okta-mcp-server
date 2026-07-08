@@ -5,6 +5,7 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
 
+import json
 from typing import Any, Dict, Optional
 
 import okta.models as okta_models
@@ -444,3 +445,100 @@ async def deactivate_application(ctx: Context, app_id: str) -> list:
     except Exception as e:
         logger.error(f"Exception while deactivating application {app_id}: {type(e).__name__}: {e}")
         return [f"Exception: {e}"]
+
+
+# ---------------------------------------------------------------------------
+# App-user profile (per-assignment attribute values)
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+@require_scopes("okta.apps.read")
+@validate_ids("app_id", "user_id", error_return_type="dict")
+async def get_app_user(ctx: Context, app_id: str, user_id: str) -> Any:
+    """Get a user's assignment on an application, including their app-specific profile.
+
+    Shows the values of the app's user-profile attributes for this user (e.g.
+    ``employeeNumber``), plus the assignment scope and status.
+
+    Parameters:
+        app_id (str, required): The ID of the application
+        user_id (str, required): The ID of the assigned user
+
+    Returns:
+        Dict with the application-user assignment (incl. profile), or error information.
+    """
+    logger.info(f"Getting app-user {user_id} for application: {app_id}")
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        executor = client.get_request_executor()
+        request, err = await executor.create_request(
+            method="GET", url=f"/api/v1/apps/{app_id}/users/{user_id}", body={}, headers={}, oauth=False
+        )
+        if err:
+            logger.error(f"Error building get-app-user request for {app_id}/{user_id}: {err}")
+            return {"error": str(err)}
+
+        _, response_body, err = await executor.execute(request)
+        if err:
+            logger.error(f"Okta API error while getting app-user {user_id} for {app_id}: {err}")
+            return {"error": str(err)}
+
+        logger.info(f"Successfully retrieved app-user {user_id} for application: {app_id}")
+        return json.loads(response_body) if response_body else {}
+    except Exception as e:
+        logger.error(f"Exception while getting app-user {user_id} for {app_id}: {type(e).__name__}: {e}")
+        return {"error": str(e)}
+
+
+@mcp.tool()
+@require_scopes("okta.apps.manage")
+@validate_ids("app_id", "user_id", error_return_type="dict")
+async def update_app_user_profile(ctx: Context, app_id: str, user_id: str, profile: Dict[str, Any]) -> Any:
+    """Set a user's app-specific profile attribute values on an application.
+
+    Use this to populate the per-user values of attributes defined on the app's
+    user-profile schema — for example ``{"employeeNumber": "E-12345"}`` after the
+    ``employeeNumber`` attribute has been added with add_app_user_schema_attribute.
+    The user must already be assigned to the application.
+
+    Parameters:
+        app_id (str, required): The ID of the application
+        user_id (str, required): The ID of the assigned user
+        profile (dict, required): App-user profile attribute values to set, e.g.
+            ``{"employeeNumber": "E-12345", "employmentStartDate": "2026-01-01"}``
+
+    Returns:
+        Dict with the updated application-user assignment, or error information.
+    """
+    logger.info(f"Updating app-user profile for {user_id} on application: {app_id}")
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        executor = client.get_request_executor()
+        request, err = await executor.create_request(
+            method="POST",
+            url=f"/api/v1/apps/{app_id}/users/{user_id}",
+            body={"profile": profile},
+            headers={},
+            oauth=False,
+        )
+        if err:
+            logger.error(f"Error building update-app-user request for {app_id}/{user_id}: {err}")
+            return {"error": str(err)}
+
+        _, response_body, err = await executor.execute(request)
+        if err:
+            logger.error(f"Okta API error while updating app-user {user_id} for {app_id}: {err}")
+            return {"error": str(err)}
+
+        logger.info(f"Successfully updated app-user profile for {user_id} on application: {app_id}")
+        return json.loads(response_body) if response_body else {}
+    except Exception as e:
+        logger.error(f"Exception while updating app-user {user_id} for {app_id}: {type(e).__name__}: {e}")
+        return {"error": str(e)}
