@@ -59,6 +59,8 @@ TOOL_SCOPE_REGISTRY: dict[str, str] = {
     "confirm_delete_application":           "okta.apps.manage",
     "activate_application":                 "okta.apps.manage",
     "deactivate_application":               "okta.apps.manage",
+    "assign_user_to_app":                   "okta.apps.manage",
+    "assign_group_to_app":                  "okta.apps.manage",
     # ------------------------------------------------------------------
     # Policies  (src/okta_mcp_server/tools/policies/policies.py)
     # ------------------------------------------------------------------
