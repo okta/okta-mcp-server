@@ -5,7 +5,9 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
 
+import json
 from typing import Any, Dict, Optional
+from urllib.parse import urlencode
 
 import okta.models as okta_models
 from loguru import logger
@@ -444,3 +446,159 @@ async def deactivate_application(ctx: Context, app_id: str) -> list:
     except Exception as e:
         logger.error(f"Exception while deactivating application {app_id}: {type(e).__name__}: {e}")
         return [f"Exception: {e}"]
+
+
+# ---------------------------------------------------------------------------
+# OIN catalog & app installation
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+@require_scopes("okta.apps.read")
+async def list_catalog_apps(ctx: Context, q: Optional[str] = None, limit: Optional[int] = None) -> Any:
+    """Browse the Okta Integration Network (OIN) app catalog.
+
+    Use this to discover an app's ``name`` (the catalog key) to pass to
+    install_oin_app. Apps that support outbound provisioning list a provisioning
+    capability in their ``features`` (e.g. a SCIM 2.0 test app). A plain custom
+    SAML/OIDC app created with create_application cannot do provisioning; you need
+    an installed instance of a provisioning-capable catalog app.
+
+    Parameters:
+        q (str, optional): Filters the catalog by app name/keyword (e.g. "scim")
+        limit (int, optional): Maximum number of catalog entries to return
+
+    Returns:
+        Dict with a ``catalog_apps`` list (each has ``name``, ``displayName``,
+        ``features``, ``signOnModes``), or error information.
+    """
+    logger.info(f"Browsing OIN catalog (q='{q}', limit={limit})")
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        params: Dict[str, Any] = {}
+        if q:
+            params["q"] = q
+        if limit:
+            params["limit"] = limit
+        query_string = urlencode(params)
+        url = "/api/v1/catalog/apps" + (f"?{query_string}" if query_string else "")
+
+        executor = client.get_request_executor()
+        request, err = await executor.create_request(method="GET", url=url, body={}, headers={}, oauth=False)
+        if err:
+            logger.error(f"Error building catalog request: {err}")
+            return {"error": str(err)}
+
+        _, response_body, err = await executor.execute(request)
+        if err:
+            logger.error(f"Okta API error while browsing catalog: {err}")
+            return {"error": str(err)}
+
+        logger.info("Successfully retrieved OIN catalog page")
+        return {"catalog_apps": json.loads(response_body) if response_body else []}
+    except Exception as e:
+        logger.error(f"Exception while browsing OIN catalog: {type(e).__name__}: {e}")
+        return {"error": str(e)}
+
+
+@mcp.tool()
+@require_scopes("okta.apps.read")
+@validate_ids("app_name", error_return_type="dict")
+async def get_catalog_app(ctx: Context, app_name: str) -> Any:
+    """Get a single OIN catalog app definition (including its provisioning schema).
+
+    Parameters:
+        app_name (str, required): The catalog app key (from list_catalog_apps)
+
+    Returns:
+        Dict with the catalog app definition, or error information.
+    """
+    logger.info(f"Getting OIN catalog app: {app_name}")
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        url = f"/api/v1/catalog/apps/{app_name}?expand=schema"
+
+        executor = client.get_request_executor()
+        request, err = await executor.create_request(method="GET", url=url, body={}, headers={}, oauth=False)
+        if err:
+            logger.error(f"Error building catalog-app request for {app_name}: {err}")
+            return {"error": str(err)}
+
+        _, response_body, err = await executor.execute(request)
+        if err:
+            logger.error(f"Okta API error while getting catalog app {app_name}: {err}")
+            return {"error": str(err)}
+
+        logger.info(f"Successfully retrieved OIN catalog app: {app_name}")
+        return json.loads(response_body) if response_body else {}
+    except Exception as e:
+        logger.error(f"Exception while getting catalog app {app_name}: {type(e).__name__}: {e}")
+        return {"error": str(e)}
+
+
+@mcp.tool()
+@require_scopes("okta.apps.manage")
+async def install_oin_app(
+    ctx: Context,
+    name: str,
+    label: str,
+    sign_on_mode: str,
+    settings: Optional[Dict[str, Any]] = None,
+    activate: bool = True,
+) -> Any:
+    """Install an instance of an OIN catalog app (e.g. a provisioning-capable SCIM app).
+
+    Unlike create_application (which builds custom apps), this preserves the
+    catalog ``name`` key. The typed SDK create path strips ``name`` from the
+    request body, so a catalog/OIN app can't be installed through create_application;
+    this issues the request directly. Provisioning capability is determined by the
+    catalog app definition at install time — it cannot be added to a custom app
+    afterwards. Discover ``name`` and the allowed ``signOnMode`` values via
+    list_catalog_apps / get_catalog_app.
+
+    Parameters:
+        name (str, required): The OIN catalog app key (e.g. from list_catalog_apps)
+        label (str, required): Display label for the installed instance
+        sign_on_mode (str, required): A sign-on mode the catalog app supports
+            (e.g. SAML_2_0, OPENID_CONNECT, SECURE_PASSWORD_STORE, BOOKMARK)
+        settings (dict, optional): Additional app settings/profile some OIN apps require
+        activate (bool, optional): Activate the app on creation. Defaults to True.
+
+    Returns:
+        Dict with the installed application, or error information.
+    """
+    logger.info(f"Installing OIN app '{name}' (label='{label}', signOnMode='{sign_on_mode}')")
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        app_body: Dict[str, Any] = {"name": name, "label": label, "signOnMode": sign_on_mode}
+        if settings:
+            app_body["settings"] = settings
+
+        query_string = urlencode({"activate": "true" if activate else "false"})
+        url = f"/api/v1/apps?{query_string}"
+
+        executor = client.get_request_executor()
+        request, err = await executor.create_request(method="POST", url=url, body=app_body, headers={}, oauth=False)
+        if err:
+            logger.error(f"Error building OIN install request for '{name}': {err}")
+            return {"error": str(err)}
+
+        _, response_body, err = await executor.execute(request)
+        if err:
+            logger.error(f"Okta API error while installing OIN app '{name}': {err}")
+            return {"error": str(err)}
+
+        logger.info(f"Successfully installed OIN app '{name}'")
+        return json.loads(response_body) if response_body else {}
+    except Exception as e:
+        logger.error(f"Exception while installing OIN app '{name}': {type(e).__name__}: {e}")
+        return {"error": str(e)}

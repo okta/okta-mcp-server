@@ -598,6 +598,9 @@ The Okta MCP Server provides the following tools for LLMs to interact with your 
 | `delete_application`          | Delete an application (prompts for confirmation)  | - `Delete the old legacy application` <br> - `Remove the unused test application` <br> - `Clean up deprecated integrations`                                   |
 | `activate_application`        | Activate an application                           | - `Activate the new HR application` <br> - `Enable the Salesforce integration` <br> - `Turn on the mobile app for users`                                      |
 | `deactivate_application`      | Deactivate an application (prompts for confirmation) | - `Deactivate the legacy CRM application` <br> - `Temporarily disable the mobile app` <br> - `Turn off access to the test environment`                        |
+| `list_catalog_apps`           | Browse the OIN app catalog (find an app's `name` + features) | - `Find a SCIM 2.0 test app in the catalog` <br> - `Search the OIN catalog for Slack`                                                                        |
+| `get_catalog_app`             | Get a single OIN catalog app definition (incl. schema) | - `Show the catalog definition for the SCIM 2.0 test app`                                                                                                    |
+| `install_oin_app`             | Install an instance of an OIN catalog app (e.g. a provisioning-capable SCIM app) | - `Install the SCIM 2.0 test app as "HR Directory Sync"` <br> - `Add the Slack OIN app to my org`                                                            |
 
 ### Policies
 
@@ -769,8 +772,8 @@ The Okta MCP Server uses a **scope-based tool loading** mechanism to ensure that
 | `okta.users.manage` | `create_user`, `update_user`, `deactivate_user`, `delete_deactivated_user` |
 | `okta.groups.read` | `list_groups`, `get_group`, `list_group_users`, `list_group_apps` |
 | `okta.groups.manage` | `create_group`, `update_group`, `delete_group`, `add_user_to_group`, `remove_user_from_group` |
-| `okta.apps.read` | `list_applications`, `get_application` |
-| `okta.apps.manage` | `create_application`, `update_application`, `delete_application`, `activate_application`, `deactivate_application` |
+| `okta.apps.read` | `list_applications`, `get_application`, `list_catalog_apps`, `get_catalog_app` |
+| `okta.apps.manage` | `create_application`, `update_application`, `delete_application`, `activate_application`, `deactivate_application`, `install_oin_app` |
 | `okta.policies.read` | `list_policies`, `get_policy`, `list_policy_rules`, `get_policy_rule` |
 | `okta.policies.manage` | `create_policy`, `update_policy`, `delete_policy`, `activate_policy`, `deactivate_policy`, `create_policy_rule`, `update_policy_rule`, `delete_policy_rule`, `activate_policy_rule`, `deactivate_policy_rule` |
 | `okta.deviceAssurance.read` | `list_device_assurance_policies`, `get_device_assurance_policy` |
