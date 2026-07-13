@@ -16,11 +16,13 @@ from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fall
 from okta_mcp_server.utils.messages import DELETE_GROUP
 from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
 from okta_mcp_server.utils.scope_guard import require_scopes
+from okta_mcp_server.utils.serialization import json_response
 from okta_mcp_server.utils.validation import validate_ids
 
 
 @mcp.tool()
 @require_scopes("okta.groups.read", error_return_type="list")
+@json_response
 async def list_groups(
     ctx: Context,
     search: str = "",
@@ -125,6 +127,7 @@ async def list_groups(
 @mcp.tool()
 @require_scopes("okta.groups.read", error_return_type="list")
 @validate_ids("group_id")
+@json_response
 async def get_group(group_id: str, ctx: Context = None) -> list:
     """Get a group by ID from the Okta organization
 
@@ -159,6 +162,7 @@ async def get_group(group_id: str, ctx: Context = None) -> list:
 
 @mcp.tool()
 @require_scopes("okta.groups.manage", error_return_type="list")
+@json_response
 async def create_group(profile: dict, ctx: Context = None) -> list:
     """Create a group in the Okta organization.
 
@@ -198,6 +202,7 @@ async def create_group(profile: dict, ctx: Context = None) -> list:
 @mcp.tool()
 @require_scopes("okta.groups.manage", error_return_type="list")
 @validate_ids("group_id")
+@json_response
 async def delete_group(group_id: str, ctx: Context = None) -> list:
     """Delete a group by ID from the Okta organization.
 
@@ -261,6 +266,7 @@ async def delete_group(group_id: str, ctx: Context = None) -> list:
 @mcp.tool()
 @require_scopes("okta.groups.manage", error_return_type="list")
 @validate_ids("group_id")
+@json_response
 async def confirm_delete_group(group_id: str, confirmation: str, ctx: Context = None) -> list:
     """Confirm and execute group deletion after receiving confirmation.
 
@@ -308,6 +314,7 @@ async def confirm_delete_group(group_id: str, confirmation: str, ctx: Context = 
 @mcp.tool()
 @require_scopes("okta.groups.manage", error_return_type="list")
 @validate_ids("group_id")
+@json_response
 async def update_group(group_id: str, profile: dict, ctx: Context = None) -> list:
     """Update a group by ID in the Okta organization.
 
@@ -346,6 +353,7 @@ async def update_group(group_id: str, profile: dict, ctx: Context = None) -> lis
 @mcp.tool()
 @require_scopes("okta.groups.read", error_return_type="list")
 @validate_ids("group_id", error_return_type="dict")
+@json_response
 async def list_group_users(
     group_id: str,
     ctx: Context = None,
@@ -443,6 +451,7 @@ async def list_group_users(
 @mcp.tool()
 @require_scopes("okta.groups.read", error_return_type="dict")
 @validate_ids("group_id", error_return_type="dict")
+@json_response
 async def list_group_apps(
     group_id: str,
     ctx: Context = None,
@@ -522,6 +531,7 @@ async def list_group_apps(
 @mcp.tool()
 @require_scopes("okta.groups.manage", error_return_type="list")
 @validate_ids("group_id", "user_id")
+@json_response
 async def add_user_to_group(group_id: str, user_id: str, ctx: Context = None) -> list:
     """Add a user to a group by ID in the Okta organization.
 
@@ -573,6 +583,7 @@ async def add_user_to_group(group_id: str, user_id: str, ctx: Context = None) ->
 @mcp.tool()
 @require_scopes("okta.groups.manage", error_return_type="list")
 @validate_ids("group_id", "user_id")
+@json_response
 async def remove_user_from_group(group_id: str, user_id: str, ctx: Context = None) -> list:
     """Remove a user from a group by ID in the Okta organization.
 

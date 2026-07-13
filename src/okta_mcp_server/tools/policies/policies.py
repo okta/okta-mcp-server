@@ -24,6 +24,7 @@ from okta_mcp_server.utils.messages import (
     DELETE_POLICY_RULE,
 )
 from okta_mcp_server.utils.scope_guard import require_scopes
+from okta_mcp_server.utils.serialization import json_response
 from okta_mcp_server.utils.validation import validate_ids
 
 
@@ -59,6 +60,7 @@ def _build_policy_rule_model(rule_data: Dict[str, Any]) -> Any:
 
 @mcp.tool()
 @require_scopes("okta.policies.read")
+@json_response
 async def list_policies(
     ctx: Context,
     type: str,
@@ -142,14 +144,11 @@ async def list_policies(
             all_policies, pagination_info = await paginate_all_results(
                 response, policies, next_page_fn=_next_page, on_page=_on_page
             )
-            serialized = [p.to_dict() for p in all_policies]
             logger.info(f"Successfully retrieved {len(all_policies)} policies across {pagination_info['pages_fetched']} pages")
-            return create_paginated_response(serialized, response, fetch_all_used=True, pagination_info=pagination_info)
+            return create_paginated_response(all_policies, response, fetch_all_used=True, pagination_info=pagination_info)
 
-        serialized = [p.to_dict() for p in policies]
         logger.info(f"Successfully retrieved {len(policies)} policies")
-        result = create_paginated_response(serialized, response, fetch_all_used=fetch_all)
-        return result
+        return create_paginated_response(policies, response, fetch_all_used=fetch_all)
 
     except Exception as e:
         logger.error(f"Exception listing policies: {e}")
@@ -159,6 +158,7 @@ async def list_policies(
 @mcp.tool()
 @require_scopes("okta.policies.read")
 @validate_ids("policy_id", error_return_type="dict")
+@json_response
 async def get_policy(ctx: Context, policy_id: str) -> Optional[Dict[str, Any]]:
     """Retrieve a specific policy by ID.
 
@@ -178,7 +178,7 @@ async def get_policy(ctx: Context, policy_id: str) -> Optional[Dict[str, Any]]:
             logger.error(f"Error getting policy {policy_id}: {err}")
             return {"error": str(err)}
 
-        return policy.to_dict() if policy else None
+        return policy
 
     except Exception as e:
         logger.error(f"Exception getting policy: {e}")
@@ -187,6 +187,7 @@ async def get_policy(ctx: Context, policy_id: str) -> Optional[Dict[str, Any]]:
 
 @mcp.tool()
 @require_scopes("okta.policies.manage")
+@json_response
 async def create_policy(ctx: Context, policy_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Create a new policy.
 
@@ -214,7 +215,7 @@ async def create_policy(ctx: Context, policy_data: Dict[str, Any]) -> Optional[D
             logger.error(f"Error creating policy: {err}")
             return {"error": str(err)}
 
-        return policy.to_dict() if policy else None
+        return policy
 
     except Exception as e:
         logger.error(f"Exception creating policy: {e}")
@@ -224,6 +225,7 @@ async def create_policy(ctx: Context, policy_data: Dict[str, Any]) -> Optional[D
 @mcp.tool()
 @require_scopes("okta.policies.manage")
 @validate_ids("policy_id", error_return_type="dict")
+@json_response
 async def update_policy(ctx: Context, policy_id: str, policy_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Update an existing policy.
 
@@ -244,7 +246,7 @@ async def update_policy(ctx: Context, policy_id: str, policy_data: Dict[str, Any
             logger.error(f"Error updating policy {policy_id}: {err}")
             return {"error": str(err)}
 
-        return policy.to_dict() if policy else None
+        return policy
 
     except Exception as e:
         logger.error(f"Exception updating policy: {e}")
@@ -254,6 +256,7 @@ async def update_policy(ctx: Context, policy_id: str, policy_data: Dict[str, Any
 @mcp.tool()
 @require_scopes("okta.policies.manage")
 @validate_ids("policy_id", error_return_type="dict")
+@json_response
 async def delete_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
     """Delete a policy.
 
@@ -299,6 +302,7 @@ async def delete_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
 @mcp.tool()
 @require_scopes("okta.policies.manage")
 @validate_ids("policy_id", error_return_type="dict")
+@json_response
 async def activate_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
     """Activate a policy.
 
@@ -329,6 +333,7 @@ async def activate_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
 @mcp.tool()
 @require_scopes("okta.policies.manage")
 @validate_ids("policy_id", error_return_type="dict")
+@json_response
 async def deactivate_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
     """Deactivate a policy.
 
@@ -374,6 +379,7 @@ async def deactivate_policy(ctx: Context, policy_id: str) -> Dict[str, Any]:
 @mcp.tool()
 @require_scopes("okta.policies.read")
 @validate_ids("policy_id", error_return_type="dict")
+@json_response
 async def list_policy_rules(
     ctx: Context,
     policy_id: str,
@@ -428,13 +434,11 @@ async def list_policy_rules(
             all_rules, pagination_info = await paginate_all_results(
                 resp, rules, next_page_fn=_next_page, on_page=_on_page
             )
-            serialized = [r.to_dict() for r in all_rules]
             logger.info(f"Successfully retrieved {len(all_rules)} rules across {pagination_info['pages_fetched']} pages")
-            return create_paginated_response(serialized, resp, fetch_all_used=True, pagination_info=pagination_info)
+            return create_paginated_response(all_rules, resp, fetch_all_used=True, pagination_info=pagination_info)
 
-        serialized = [r.to_dict() for r in rules]
         logger.info(f"Successfully retrieved {len(rules)} policy rules")
-        return create_paginated_response(serialized, resp, fetch_all_used=fetch_all)
+        return create_paginated_response(rules, resp, fetch_all_used=fetch_all)
 
     except Exception as e:
         logger.error(f"Exception listing policy rules: {e}")
@@ -444,6 +448,7 @@ async def list_policy_rules(
 @mcp.tool()
 @require_scopes("okta.policies.read")
 @validate_ids("policy_id", "rule_id", error_return_type="dict")
+@json_response
 async def get_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Optional[Dict[str, Any]]:
     """Retrieve a specific policy rule.
 
@@ -464,7 +469,7 @@ async def get_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Optiona
             logger.error(f"Error getting policy rule: {err}")
             return {"error": str(err)}
 
-        return rule.to_dict() if rule else None
+        return rule
 
     except Exception as e:
         logger.error(f"Exception getting policy rule: {e}")
@@ -474,6 +479,7 @@ async def get_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Optiona
 @mcp.tool()
 @require_scopes("okta.policies.manage")
 @validate_ids("policy_id", error_return_type="dict")
+@json_response
 async def create_policy_rule(ctx: Context, policy_id: str, rule_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Create a new rule for a policy.
 
@@ -500,7 +506,7 @@ async def create_policy_rule(ctx: Context, policy_id: str, rule_data: Dict[str, 
             logger.error(f"Error creating policy rule: {err}")
             return {"error": str(err)}
 
-        return rule.to_dict() if rule else None
+        return rule
 
     except Exception as e:
         logger.error(f"Exception creating policy rule: {e}")
@@ -510,6 +516,7 @@ async def create_policy_rule(ctx: Context, policy_id: str, rule_data: Dict[str, 
 @mcp.tool()
 @require_scopes("okta.policies.manage")
 @validate_ids("policy_id", "rule_id", error_return_type="dict")
+@json_response
 async def update_policy_rule(
     ctx: Context, policy_id: str, rule_id: str, rule_data: Dict[str, Any]
 ) -> Optional[Dict[str, Any]]:
@@ -534,7 +541,7 @@ async def update_policy_rule(
             logger.error(f"Error updating policy rule: {err}")
             return {"error": str(err)}
 
-        return rule.to_dict() if rule else None
+        return rule
 
     except Exception as e:
         logger.error(f"Exception updating policy rule: {e}")
@@ -544,6 +551,7 @@ async def update_policy_rule(
 @mcp.tool()
 @require_scopes("okta.policies.manage")
 @validate_ids("policy_id", "rule_id", error_return_type="dict")
+@json_response
 async def delete_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Dict[str, Any]:
     """Delete a policy rule.
 
@@ -590,6 +598,7 @@ async def delete_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Dict
 @mcp.tool()
 @require_scopes("okta.policies.manage")
 @validate_ids("policy_id", "rule_id", error_return_type="dict")
+@json_response
 async def activate_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Dict[str, Any]:
     """Activate a policy rule.
 
@@ -621,6 +630,7 @@ async def activate_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Di
 @mcp.tool()
 @require_scopes("okta.policies.manage")
 @validate_ids("policy_id", "rule_id", error_return_type="dict")
+@json_response
 async def deactivate_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Dict[str, Any]:
     """Deactivate a policy rule.
 

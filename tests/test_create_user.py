@@ -44,6 +44,11 @@ def _make_user_mock(status: str = "PROVISIONED"):
     user.status = status
     user.profile = MagicMock()
     user.profile.email = PROFILE["email"]
+    user.to_dict.return_value = {
+        "id": "00uTESTUSER0000001",
+        "status": status,
+        "profile": {"email": PROFILE["email"]},
+    }
     return user
 
 
@@ -64,7 +69,7 @@ class TestCreateUserActivateParam:
         assert isinstance(call_args[0], CreateUserRequest)
         assert call_args[0].profile.email == PROFILE["email"]
         assert call_args[1] == True
-        assert result[0].status == "PROVISIONED"
+        assert result[0]["status"] == "PROVISIONED"
 
     @pytest.mark.asyncio
     @patch("okta_mcp_server.tools.users.users.get_okta_client")
@@ -80,7 +85,7 @@ class TestCreateUserActivateParam:
         assert isinstance(call_args[0], CreateUserRequest)
         assert call_args[0].profile.email == PROFILE["email"]
         assert call_args[1] == True
-        assert result[0].status == "PROVISIONED"
+        assert result[0]["status"] == "PROVISIONED"
 
     @pytest.mark.asyncio
     @patch("okta_mcp_server.tools.users.users.get_okta_client")
@@ -96,7 +101,7 @@ class TestCreateUserActivateParam:
         assert isinstance(call_args[0], CreateUserRequest)
         assert call_args[0].profile.email == PROFILE["email"]
         assert call_args[1] == False
-        assert result[0].status == "STAGED"
+        assert result[0]["status"] == "STAGED"
 
     @pytest.mark.asyncio
     @patch("okta_mcp_server.tools.users.users.get_okta_client")

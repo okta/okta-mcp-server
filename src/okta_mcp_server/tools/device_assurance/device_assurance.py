@@ -19,6 +19,7 @@ from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DELETE_DEVICE_ASSURANCE_POLICY
 from okta_mcp_server.utils.scope_guard import require_scopes
+from okta_mcp_server.utils.serialization import json_response
 from okta_mcp_server.utils.validation import validate_ids, validate_os_version_params
 
 
@@ -337,6 +338,7 @@ def _get_implication(attr: str, before: Any, after: Any) -> str:
 @mcp.tool()
 @require_scopes("okta.deviceAssurance.read")
 @validate_os_version_params("version_threshold")
+@json_response
 async def list_device_assurance_policies(
     ctx: Context, version_threshold: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -495,6 +497,7 @@ async def list_device_assurance_policies(
 @mcp.tool()
 @require_scopes("okta.deviceAssurance.read")
 @validate_ids("device_assurance_id", error_return_type="dict")
+@json_response
 async def get_device_assurance_policy(
     ctx: Context, device_assurance_id: str
 ) -> Optional[Dict[str, Any]]:
@@ -560,6 +563,7 @@ async def get_device_assurance_policy(
 @mcp.tool()
 @require_scopes("okta.deviceAssurance.manage")
 @validate_os_version_params("user_stated_os_version")
+@json_response
 async def create_device_assurance_policy(
     ctx: Context, policy_data: PolicyDataInput, user_stated_os_version: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
@@ -644,7 +648,7 @@ async def create_device_assurance_policy(
             return {"error": str(err)}
 
         logger.info(f"Successfully created device assurance policy {policy.id if policy else 'unknown'}")
-        return policy.to_dict() if policy else None
+        return policy
 
     except (ForbiddenException, UnauthorizedException) as e:
         logger.error(f"Access denied creating device assurance policy: {e}")
@@ -658,6 +662,7 @@ async def create_device_assurance_policy(
 @require_scopes("okta.deviceAssurance.manage")
 @validate_ids("device_assurance_id", error_return_type="dict")
 @validate_os_version_params("user_stated_os_version")
+@json_response
 async def replace_device_assurance_policy(
     ctx: Context, device_assurance_id: str, policy_data: PolicyDataInput,
     user_stated_os_version: Optional[str] = None,
@@ -820,6 +825,7 @@ async def replace_device_assurance_policy(
 @mcp.tool()
 @require_scopes("okta.deviceAssurance.manage")
 @validate_ids("device_assurance_id", error_return_type="dict")
+@json_response
 async def delete_device_assurance_policy(
     ctx: Context, device_assurance_id: str
 ) -> Dict[str, Any]:

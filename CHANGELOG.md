@@ -1,6 +1,18 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Bug Fixes
+- Standardized MCP tool responses to valid JSON per RFC 8259 across all 108 tools; fixes [#14](https://github.com/okta/okta-mcp-server/issues/14). Tool responses no longer leak raw Python `repr` for `ApplicationSignOnMode.SAML_2_0`, `OktaAPIResponse` objects, SDK tuples, or other non-JSON types.
+
+### Improvements
+- Added `okta_mcp_server.utils.serialization` as the single normalization boundary for tool returns. `to_jsonable()` flattens Pydantic v2 models (`model_dump(by_alias=True, exclude_none=True, mode="json")`), Okta SDK v2 models (`to_dict()`), `Enum` values (`.value`), and drops transport-only `OktaAPIResponse` / `ApiResponse` objects.
+- Added `@json_response` decorator, applied innermost on every `@mcp.tool` so every response passes through the canonical serializer exactly once.
+- Added a structured failure envelope (`{"ok": false, "error": {...}, "status_code": null, "raw": {"traceback_tail": "..."}}`) returned when serialization itself raises, so callers always receive valid JSON.
+- Centralized JSON normalization in `create_paginated_response()`, removing redundant per-tool serialization in `policies`, `device_assurance`, and `custom_domains`.
+- Added `tests/test_serialization.py` (32 tests) covering scalars, enums, Pydantic v2 flattening, transport-response drop, cycle handling, the fail-safe envelope, decorator metadata preservation, and the unittest.mock short-circuit.
+
 ## v1.1.3
 
 ### Bug Fixes

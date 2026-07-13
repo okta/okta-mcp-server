@@ -33,6 +33,7 @@ from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fall
 from okta_mcp_server.utils.messages import DELETE_BRAND
 from okta_mcp_server.utils.pagination import create_paginated_response, extract_after_cursor, paginate_all_results
 from okta_mcp_server.utils.scope_guard import require_scopes
+from okta_mcp_server.utils.serialization import json_response
 from okta_mcp_server.utils.validation import validate_ids
 
 
@@ -71,6 +72,7 @@ def _build_default_app(default_app_dict: Dict[str, Any]) -> DefaultApp:
 
 @mcp.tool()
 @require_scopes("okta.brands.read")
+@json_response
 async def list_brands(
     ctx: Context,
     expand: Optional[List[str]] = None,
@@ -187,6 +189,7 @@ async def list_brands(
 @mcp.tool()
 @require_scopes("okta.brands.read")
 @validate_ids("brand_id")
+@json_response
 async def get_brand(
     ctx: Context,
     brand_id: str,
@@ -233,6 +236,7 @@ async def get_brand(
 
 @mcp.tool()
 @require_scopes("okta.brands.manage")
+@json_response
 async def create_brand(
     ctx: Context,
     name: str,
@@ -305,6 +309,7 @@ async def create_brand(
 @mcp.tool()
 @require_scopes("okta.brands.manage")
 @validate_ids("brand_id")
+@json_response
 async def replace_brand(
     ctx: Context,
     brand_id: str,
@@ -396,6 +401,7 @@ async def replace_brand(
 @mcp.tool()
 @require_scopes("okta.brands.manage")
 @validate_ids("brand_id")
+@json_response
 async def delete_brand(
     ctx: Context,
     brand_id: str,
@@ -459,6 +465,7 @@ async def delete_brand(
 @mcp.tool()
 @require_scopes("okta.brands.read")
 @validate_ids("brand_id")
+@json_response
 async def list_brand_domains(
     ctx: Context,
     brand_id: str,

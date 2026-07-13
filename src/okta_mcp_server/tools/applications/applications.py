@@ -45,11 +45,13 @@ from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConf
 from okta_mcp_server.utils.messages import DEACTIVATE_APPLICATION, DELETE_APPLICATION
 from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
 from okta_mcp_server.utils.scope_guard import require_scopes
+from okta_mcp_server.utils.serialization import json_response
 from okta_mcp_server.utils.validation import validate_ids
 
 
 @mcp.tool()
 @require_scopes("okta.apps.read", error_return_type="list")
+@json_response
 async def list_applications(
     ctx: Context,
     q: Optional[str] = None,
@@ -152,6 +154,7 @@ async def list_applications(
 @mcp.tool()
 @require_scopes("okta.apps.read")
 @validate_ids("app_id", error_return_type="dict")
+@json_response
 async def get_application(ctx: Context, app_id: str, expand: Optional[str] = None) -> Any:
     """Get an application by ID from the Okta organization.
 
@@ -189,6 +192,7 @@ async def get_application(ctx: Context, app_id: str, expand: Optional[str] = Non
 
 @mcp.tool()
 @require_scopes("okta.apps.manage")
+@json_response
 async def create_application(ctx: Context, app_config: Dict[str, Any], activate: bool = True) -> Any:
     """Create a new application in the Okta organization.
 
@@ -225,6 +229,7 @@ async def create_application(ctx: Context, app_config: Dict[str, Any], activate:
 @mcp.tool()
 @require_scopes("okta.apps.manage")
 @validate_ids("app_id", error_return_type="dict")
+@json_response
 async def update_application(ctx: Context, app_id: str, app_config: Dict[str, Any]) -> Any:
     """Update an application by ID in the Okta organization.
 
@@ -260,6 +265,7 @@ async def update_application(ctx: Context, app_id: str, app_config: Dict[str, An
 @mcp.tool()
 @require_scopes("okta.apps.manage", error_return_type="list")
 @validate_ids("app_id")
+@json_response
 async def delete_application(ctx: Context, app_id: str) -> list:
     """Delete an application by ID from the Okta organization.
 
@@ -323,6 +329,7 @@ async def delete_application(ctx: Context, app_id: str) -> list:
 @mcp.tool()
 @require_scopes("okta.apps.manage", error_return_type="list")
 @validate_ids("app_id")
+@json_response
 async def confirm_delete_application(ctx: Context, app_id: str, confirmation: str) -> list:
     """Confirm and execute application deletion after receiving confirmation.
 
@@ -370,6 +377,7 @@ async def confirm_delete_application(ctx: Context, app_id: str, confirmation: st
 @mcp.tool()
 @require_scopes("okta.apps.manage", error_return_type="list")
 @validate_ids("app_id")
+@json_response
 async def activate_application(ctx: Context, app_id: str) -> list:
     """Activate an application in the Okta organization.
 
@@ -404,6 +412,7 @@ async def activate_application(ctx: Context, app_id: str) -> list:
 @mcp.tool()
 @require_scopes("okta.apps.manage", error_return_type="list")
 @validate_ids("app_id")
+@json_response
 async def deactivate_application(ctx: Context, app_id: str) -> list:
     """Deactivate an application in the Okta organization.
 

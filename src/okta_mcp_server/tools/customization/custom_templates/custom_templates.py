@@ -73,6 +73,7 @@ from okta_mcp_server.utils.messages import (
 )
 from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
 from okta_mcp_server.utils.scope_guard import require_scopes
+from okta_mcp_server.utils.serialization import json_response
 from okta_mcp_server.utils.validation import validate_ids
 
 
@@ -154,6 +155,7 @@ def _check_no_content_response(result) -> Optional[str]:
 @mcp.tool()
 @require_scopes("okta.templates.read")
 @validate_ids("brand_id")
+@json_response
 async def list_email_templates(
     ctx: Context,
     brand_id: str,
@@ -238,6 +240,7 @@ async def list_email_templates(
 @mcp.tool()
 @require_scopes("okta.templates.read")
 @validate_ids("brand_id")
+@json_response
 async def get_email_template(
     ctx: Context,
     brand_id: str,
@@ -287,6 +290,7 @@ async def get_email_template(
 @mcp.tool()
 @require_scopes("okta.templates.read")
 @validate_ids("brand_id")
+@json_response
 async def list_email_customizations(
     ctx: Context,
     brand_id: str,
@@ -365,6 +369,7 @@ async def list_email_customizations(
 @mcp.tool()
 @require_scopes("okta.templates.manage")
 @validate_ids("brand_id")
+@json_response
 async def create_email_customization(
     ctx: Context,
     brand_id: str,
@@ -465,6 +470,7 @@ async def create_email_customization(
 @mcp.tool()
 @require_scopes("okta.templates.read")
 @validate_ids("brand_id", "customization_id")
+@json_response
 async def get_email_customization(
     ctx: Context,
     brand_id: str,
@@ -510,6 +516,7 @@ async def get_email_customization(
 @mcp.tool()
 @require_scopes("okta.templates.manage")
 @validate_ids("brand_id", "customization_id")
+@json_response
 async def replace_email_customization(
     ctx: Context,
     brand_id: str,
@@ -578,6 +585,7 @@ async def replace_email_customization(
 @mcp.tool()
 @require_scopes("okta.templates.manage")
 @validate_ids("brand_id", "customization_id")
+@json_response
 async def delete_email_customization(
     ctx: Context,
     brand_id: str,
@@ -643,6 +651,7 @@ async def delete_email_customization(
 @mcp.tool()
 @require_scopes("okta.templates.manage")
 @validate_ids("brand_id")
+@json_response
 async def delete_all_email_customizations(
     ctx: Context,
     brand_id: str,
@@ -702,6 +711,7 @@ async def delete_all_email_customizations(
 @mcp.tool()
 @require_scopes("okta.templates.read")
 @validate_ids("brand_id", "customization_id")
+@json_response
 async def get_email_customization_preview(
     ctx: Context,
     brand_id: str,
@@ -751,6 +761,7 @@ async def get_email_customization_preview(
 @mcp.tool()
 @require_scopes("okta.templates.read")
 @validate_ids("brand_id")
+@json_response
 async def get_email_default_content(
     ctx: Context,
     brand_id: str,
@@ -798,6 +809,7 @@ async def get_email_default_content(
 @mcp.tool()
 @require_scopes("okta.templates.read")
 @validate_ids("brand_id")
+@json_response
 async def get_email_default_content_preview(
     ctx: Context,
     brand_id: str,
@@ -868,6 +880,7 @@ async def get_email_default_content_preview(
 @mcp.tool()
 @require_scopes("okta.templates.read")
 @validate_ids("brand_id")
+@json_response
 async def get_email_settings(
     ctx: Context,
     brand_id: str,
@@ -910,6 +923,7 @@ async def get_email_settings(
 @mcp.tool()
 @require_scopes("okta.templates.manage")
 @validate_ids("brand_id")
+@json_response
 async def replace_email_settings(
     ctx: Context,
     brand_id: str,
@@ -962,6 +976,7 @@ async def replace_email_settings(
 @mcp.tool()
 @require_scopes("okta.templates.manage")
 @validate_ids("brand_id")
+@json_response
 async def send_test_email(
     ctx: Context,
     brand_id: str,
