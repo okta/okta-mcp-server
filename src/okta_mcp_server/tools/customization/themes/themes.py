@@ -5,7 +5,7 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
 
-"""Themes tools for the Okta MCP server.
+"""Themes tools for the Okta Open Source MCP Server.
 
 Themes control the visual appearance of Okta-hosted pages and email templates,
 including colours, logo, favicon, and background image. This module exposes MCP

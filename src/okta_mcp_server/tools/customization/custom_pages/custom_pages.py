@@ -5,7 +5,7 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
 
-"""Custom Pages tools for the Okta MCP server.
+"""Custom Pages tools for the Okta Open Source MCP Server.
 
 Custom Pages allow you to customise the HTML content of Okta-hosted pages,
 the sign-in page widget behaviour, and the sign-out destination. This module

@@ -1,6 +1,6 @@
 <div align="center">
 
-![Okta MCP Server](https://raw.githubusercontent.com/okta/okta-mcp-server/main/assets/thumbnail.png)
+![Okta Open Source MCP Server](https://raw.githubusercontent.com/okta/okta-mcp-server/main/assets/thumbnail.png)
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python Version](https://img.shields.io/badge/python-%3E%3D3.13-brightgreen.svg)](https://python.org/)
@@ -12,7 +12,7 @@ The Okta Open-Source MCP Server integrates with LLMs and AI agents, allowing you
 
 [MCP (Model Context Protocol)](https://modelcontextprotocol.io/introduction) is an open protocol introduced by Anthropic that standardizes how large language models communicate with external tools, resources or remote services.
 
-The Okta MCP Server integrates with LLMs and AI agents, allowing you to perform various Okta management operations using natural language. For instance, you could simply ask Claude Desktop to perform Okta management operations:
+The Okta Open Source MCP Server integrates with LLMs and AI agents, allowing you to perform various Okta management operations using natural language. For instance, you could simply ask Claude Desktop to perform Okta management operations:
 
 - > Create a new user and add them to the Engineering group
 - > Show me all failed login attempts from the last 24 hours
@@ -45,9 +45,9 @@ This MCP server utilizes [Okta's Python SDK v3.4.1](https://github.com/okta/okta
 
 <br/>
 
-### Install the Okta MCP Server
+### Install the Okta Open Source MCP Server
 
-Install Okta MCP Server and configure it to work with your preferred MCP Client.
+Install Okta Open Source MCP Server and configure it to work with your preferred MCP Client.
 
 Choose one of the following installation methods:
 
@@ -478,7 +478,7 @@ Add the following to your VS Code `settings.json`:
 <details>
 <summary><b>Other MCP Clients</b></summary>
 
-To use Okta MCP Server with any other MCP Client, you can manually add this configuration to the client and restart for changes to take effect:
+To use Okta Open Source MCP Server with any other MCP Client, you can manually add this configuration to the client and restart for changes to take effect:
 
 ```json
 {
@@ -553,7 +553,7 @@ Restart your MCP Client (Claude Desktop, VS Code, etc.) and ask it to help you m
 
 ## 🛠️ Supported Tools
 
-The Okta MCP Server provides the following tools for LLMs to interact with your Okta tenant:
+The Okta Open Source MCP Server provides the following tools for LLMs to interact with your Okta tenant:
 
 ### Users
 
@@ -752,7 +752,7 @@ All destructive operations (deleting groups, applications, policies, policy rule
 
 ## � Scope-Based Tool Loading
 
-The Okta MCP Server uses a **scope-based tool loading** mechanism to ensure that only the tools your application is authorized to use are exposed to the LLM.
+The Okta Open Source MCP Server uses a **scope-based tool loading** mechanism to ensure that only the tools your application is authorized to use are exposed to the LLM.
 
 ### How it works
 
@@ -813,7 +813,7 @@ Then restart your MCP client so the server picks up the new scope list.
 
 ## �🔐 Authentication
 
-The Okta MCP Server uses the Okta Management API and requires authentication to access your Okta tenant.
+The Okta Open Source MCP Server uses the Okta Management API and requires authentication to access your Okta tenant.
 
 ### Authentication Flow
 
@@ -834,7 +834,7 @@ The MCP Server will automatically initiate the appropriate authentication flow b
 
 ## 🩺 Troubleshooting
 
-When encountering issues with the Okta MCP Server, several troubleshooting options are available to help diagnose and resolve problems.
+When encountering issues with the Okta Open Source MCP Server, several troubleshooting options are available to help diagnose and resolve problems.
 
 ### 🐞 Debug Mode
 
@@ -935,7 +935,7 @@ uv pip install -e .
 
 ## 🔒 Security
 
-The Okta MCP Server prioritizes security:
+The Okta Open Source MCP Server prioritizes security:
 
 - Credentials are managed through secure authentication flows
 - No sensitive information is stored in plain text  

@@ -5,7 +5,7 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
 
-"""Custom Domains tools for the Okta MCP server.
+"""Custom Domains tools for the Okta Open Source MCP Server.
 
 Custom Domains allow you to replace the default Okta subdomain with your own
 domain name on the hosted sign-in page, error pages and email templates.

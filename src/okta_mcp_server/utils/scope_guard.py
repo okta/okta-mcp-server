@@ -5,7 +5,7 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
 
-"""Centralized OAuth 2.0 scope guard utilities for the Okta MCP Server.
+"""Centralized OAuth 2.0 scope guard utilities for the Okta Open Source MCP Server.
 
 This module provides the canonical scope-enforcement layer that is shared by every tool.
 It has three responsibilities:

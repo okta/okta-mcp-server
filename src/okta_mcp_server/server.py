@@ -117,7 +117,7 @@ async def get_scope_status() -> dict:
 
 
 def main():
-    """Run the Okta MCP server."""
+    """Run the Okta Open Source MCP Server."""
     logger.remove()
 
     if LOG_FILE:
@@ -134,7 +134,7 @@ def main():
         sys.stderr, level=os.environ.get("OKTA_LOG_LEVEL", "INFO"), format="{time} {level} {message}", serialize=True
     )
 
-    logger.info("Starting Okta MCP Server")
+    logger.info("Starting Okta Open Source MCP Server")
     from okta_mcp_server.tools.applications import applications  # noqa: F401
     from okta_mcp_server.tools.customization.brands import brands  # noqa: F401
     from okta_mcp_server.tools.customization.custom_domains import custom_domains  # noqa: F401
