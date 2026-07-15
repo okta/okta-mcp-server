@@ -352,7 +352,7 @@ async def confirm_delete_application(ctx: Context, app_id: str, confirmation: st
 
     if confirmation != "DELETE":
         logger.warning(f"Application deletion cancelled for {app_id} - incorrect confirmation")
-        return ["Error: Deletion cancelled. Confirmation 'DELETE' was not provided correctly."]
+        return [{"error": "Deletion cancelled. Confirmation 'DELETE' was not provided correctly."}]
 
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
@@ -365,13 +365,13 @@ async def confirm_delete_application(ctx: Context, app_id: str, confirmation: st
 
         if err:
             logger.error(f"Okta API error while deleting application {app_id}: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
 
         logger.info(f"Successfully deleted application: {app_id}")
-        return [f"Application {app_id} deleted successfully"]
+        return [{"message": f"Application {app_id} deleted successfully"}]
     except Exception as e:
         logger.error(f"Exception while deleting application {app_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
 
 
 @mcp.tool()
@@ -400,13 +400,13 @@ async def activate_application(ctx: Context, app_id: str) -> list:
 
         if err:
             logger.error(f"Okta API error while activating application {app_id}: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
 
         logger.info(f"Successfully activated application: {app_id}")
-        return [f"Application {app_id} activated successfully"]
+        return [{"message": f"Application {app_id} activated successfully"}]
     except Exception as e:
         logger.error(f"Exception while activating application {app_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
 
 
 @mcp.tool()
@@ -446,10 +446,10 @@ async def deactivate_application(ctx: Context, app_id: str) -> list:
 
         if err:
             logger.error(f"Okta API error while deactivating application {app_id}: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
 
         logger.info(f"Successfully deactivated application: {app_id}")
-        return [f"Application {app_id} deactivated successfully"]
+        return [{"message": f"Application {app_id} deactivated successfully"}]
     except Exception as e:
         logger.error(f"Exception while deactivating application {app_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]

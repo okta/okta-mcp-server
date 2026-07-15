@@ -176,6 +176,38 @@ async def create_custom_domain(
             logger.error(f"Okta API error while creating custom domain {domain!r}: {err}")
             return {"error": str(err)}
 
+        # The Okta Python SDK's ``create_custom_domain`` returns
+        # ``(None, response, None)`` when the HTTP response body is empty or
+        # returns 204 No Content (see okta.api.custom_domain_api).  The
+        # resource IS successfully created on Okta in that scenario, so fall
+        # back to ``list_custom_domains`` and locate the freshly-created
+        # domain by FQDN so the caller still receives the persisted object.
+        if created is None:
+            logger.info(
+                f"SDK returned no body for create_custom_domain; refetching '{domain}' "
+                "via list_custom_domains"
+            )
+            refetched_list, _, refetch_err = await client.list_custom_domains()
+            if refetch_err:
+                return {
+                    "error": (
+                        f"Custom domain '{domain}' was created on Okta but the follow-up "
+                        f"list_custom_domains failed: {refetch_err}"
+                    )
+                }
+            for candidate in getattr(refetched_list, "domains", None) or []:
+                if getattr(candidate, "domain", None) == domain:
+                    created = candidate
+                    break
+            if created is None:
+                return {
+                    "error": (
+                        f"Custom domain '{domain}' create request succeeded but the resource "
+                        "was not returned by list_custom_domains. It may still exist on Okta; "
+                        "verify with list_custom_domains()."
+                    )
+                }
+
         logger.info(
             f"Successfully created custom domain '{domain}' with id: {getattr(created, 'id', None)}"
         )

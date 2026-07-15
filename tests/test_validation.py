@@ -357,7 +357,7 @@ class TestValidateOsVersionParams:
             return ["ok"]
         result = await tool(ver="14.2")
         assert isinstance(result, list)
-        assert result[0].startswith("Error:")
+        assert "error" in result[0]
 
     # --- Sync function support ---
 

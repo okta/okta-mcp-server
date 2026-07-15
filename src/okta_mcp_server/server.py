@@ -16,6 +16,7 @@ from mcp.server.fastmcp import FastMCP
 
 from okta_mcp_server.utils.auth.auth_manager import OktaAuthManager
 from okta_mcp_server.utils.scope_guard import get_disabled_tools, get_startup_scopes, prune_tools_by_scope
+from okta_mcp_server.utils.serialization import json_response
 
 LOG_FILE = os.environ.get("OKTA_LOG_FILE")
 
@@ -56,6 +57,7 @@ mcp = FastMCP("Okta IDaaS MCP Server", lifespan=okta_authorisation_flow)
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
+@json_response
 async def get_scope_status() -> dict:
     """Report which Okta MCP tools are active and which are disabled due to missing OAuth scopes.
 

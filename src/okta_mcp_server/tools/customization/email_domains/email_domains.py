@@ -60,21 +60,6 @@ for _member in list(_DNSRecordType):
 
 
 # ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-def _serialize(obj) -> Any:
-    """Recursively serialise Pydantic SDK models to plain Python types."""
-    if obj is None:
-        return None
-    if hasattr(obj, "model_dump"):
-        return obj.model_dump(by_alias=True, exclude_none=True)
-    if isinstance(obj, list):
-        return [_serialize(item) for item in obj]
-    return obj
-
-
-# ---------------------------------------------------------------------------
 # list_email_domains
 # ---------------------------------------------------------------------------
 
@@ -129,11 +114,10 @@ async def list_email_domains(
             return {"error": str(err)}
 
         domains = domain_list or []
-        serialized = [_serialize(d) for d in domains]
-        logger.info(f"Successfully retrieved {len(serialized)} email domain(s)")
+        logger.info(f"Successfully retrieved {len(domains)} email domain(s)")
         return {
-            "email_domains": serialized,
-            "total_fetched": len(serialized),
+            "email_domains": domains,
+            "total_fetched": len(domains),
         }
 
     except Exception as e:
@@ -246,8 +230,7 @@ async def create_email_domain(
                         created = d
                         break
 
-        result = _serialize(created)
-        if result is None:
+        if created is None:
             logger.error(
                 f"Could not retrieve created email domain {domain!r} after creation."
             )
@@ -259,9 +242,9 @@ async def create_email_domain(
             }
 
         logger.info(
-            f"Successfully created email domain {domain!r} with id: {result.get('id')}"
+            f"Successfully created email domain {domain!r} with id: {getattr(created, 'id', None)}"
         )
-        return result
+        return created
 
     except Exception as e:
         logger.error(f"Exception while creating email domain: {type(e).__name__}: {e}")
@@ -316,7 +299,7 @@ async def get_email_domain(
             return {"error": f"Email domain {email_domain_id!r} not found."}
 
         logger.info(f"Successfully retrieved email domain: {email_domain_id}")
-        return _serialize(domain)
+        return domain
 
     except Exception as e:
         logger.error(
@@ -378,9 +361,8 @@ async def replace_email_domain(
             )
             return {"error": str(err)}
 
-        result = _serialize(updated)
         logger.info(f"Successfully replaced email domain: {email_domain_id}")
-        return result
+        return updated
 
     except Exception as e:
         logger.error(
@@ -552,20 +534,20 @@ async def verify_email_domain(
                     f"Okta API error while verifying email domain {email_domain_id!r}: {err}"
                 )
                 return {"error": str(err)}
-            serialized = _serialize(current)
-            status = serialized.get("validationStatus", "unknown") if serialized else "unknown"
+            _current_status = getattr(current, "validation_status", None)
+            status = getattr(_current_status, "value", _current_status) or "unknown"
             logger.info(
                 f"Email domain {email_domain_id!r} verify triggered; "
                 f"current validationStatus={status!r} (via fallback GET)"
             )
-            return serialized or {}
+            return current
 
-        serialized = _serialize(result)
-        status = serialized.get("validationStatus", "unknown") if serialized else "unknown"
+        _result_status = getattr(result, "validation_status", None)
+        status = getattr(_result_status, "value", _result_status) or "unknown"
         logger.info(
             f"Email domain {email_domain_id!r} verify result: validationStatus={status!r}"
         )
-        return serialized or {}
+        return result
 
     except Exception as e:
         logger.error(

@@ -12,7 +12,7 @@ from loguru import logger
 from mcp.server.fastmcp import Context
 from okta.exceptions.exceptions import ForbiddenException, UnauthorizedException
 from okta.models.device_assurance import DeviceAssurance
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
@@ -565,7 +565,7 @@ async def get_device_assurance_policy(
 @validate_os_version_params("user_stated_os_version")
 @json_response
 async def create_device_assurance_policy(
-    ctx: Context, policy_data: PolicyDataInput, user_stated_os_version: Optional[str] = None
+    ctx: Context, policy_data: Dict[str, Any], user_stated_os_version: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
     """Create a new Device Assurance Policy.
 
@@ -621,11 +621,22 @@ async def create_device_assurance_policy(
         return _build_scope_error("create", 403)
 
     try:
-        # AC2: Intercept osVersion when the function is called directly (e.g. in tests)
-        # without going through Pydantic/FastMCP.  In production FastMCP calls, the
-        # PolicyDataInput model_validator fires first and the function is never reached
-        # if osVersion is present.
-        raw = policy_data if isinstance(policy_data, dict) else policy_data.as_api_dict()
+        # ``policy_data`` is declared as a plain dict at the FastMCP boundary so
+        # that a caller passing something other than an object is rejected with a
+        # JSON error dict here instead of a plain-text Pydantic ValidationError
+        # emitted by FastMCP's own argument-validation layer.  We still enforce
+        # the ``PolicyDataInput`` schema (including the osVersion-in-policy_data
+        # rejection) inside the function.
+        if not isinstance(policy_data, dict):
+            return {"error": "policy_data must be an object (dict)."}
+        try:
+            raw = PolicyDataInput(**policy_data).as_api_dict()
+        except ValidationError as ve:
+            return {"error": str(ve)}
+
+        # AC2: Intercept osVersion when the function is called directly (e.g. in
+        # tests) without going through Pydantic/FastMCP.  In production FastMCP
+        # calls, the PolicyDataInput model_validator has already fired above.
         if raw.get("osVersion") and user_stated_os_version is None:
             return {"error": _OS_VERSION_IN_POLICY_DATA_ERROR}
 
@@ -664,7 +675,7 @@ async def create_device_assurance_policy(
 @validate_os_version_params("user_stated_os_version")
 @json_response
 async def replace_device_assurance_policy(
-    ctx: Context, device_assurance_id: str, policy_data: PolicyDataInput,
+    ctx: Context, device_assurance_id: str, policy_data: Dict[str, Any],
     user_stated_os_version: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Replace (fully update) an existing Device Assurance Policy.
@@ -746,8 +757,16 @@ async def replace_device_assurance_policy(
         return _build_scope_error("replace", 403)
 
     try:
+        # ``policy_data`` is a plain dict at the FastMCP boundary — see the
+        # equivalent guard in create_device_assurance_policy for the rationale.
+        if not isinstance(policy_data, dict):
+            return {"error": "policy_data must be an object (dict)."}
+        try:
+            raw = PolicyDataInput(**policy_data).as_api_dict()
+        except ValidationError as ve:
+            return {"error": str(ve)}
+
         # AC2: same guard as create — intercept osVersion in direct-call paths.
-        raw = policy_data if isinstance(policy_data, dict) else policy_data.as_api_dict()
         if raw.get("osVersion") and user_stated_os_version is None:
             return {"error": _OS_VERSION_IN_POLICY_DATA_ERROR}
 

@@ -151,13 +151,13 @@ async def get_group(group_id: str, ctx: Context = None) -> list:
 
         if err:
             logger.error(f"Okta API error while getting group {group_id}: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
 
         logger.info(f"Successfully retrieved group: {group_id}")
         return [group]
     except Exception as e:
         logger.error(f"Exception while getting group {group_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
 
 
 @mcp.tool()
@@ -188,7 +188,7 @@ async def create_group(profile: dict, ctx: Context = None) -> list:
 
         if err:
             logger.error(f"Okta API error while creating group: {err}")
-            return {"error": f"Error: {err}"}
+            return [{"error": str(err)}]
 
         profile_instance = getattr(group.profile, "actual_instance", None) if hasattr(group, "profile") else None
         group_name = getattr(profile_instance, "name", "N/A") if profile_instance is not None else "N/A"
@@ -196,7 +196,7 @@ async def create_group(profile: dict, ctx: Context = None) -> list:
         return [group]
     except Exception as e:
         logger.error(f"Exception while creating group: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
 
 
 @mcp.tool()
@@ -341,13 +341,13 @@ async def update_group(group_id: str, profile: dict, ctx: Context = None) -> lis
 
         if err:
             logger.error(f"Okta API error while updating group {group_id}: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
 
         logger.info(f"Successfully updated group: {group_id}")
         return [group]
     except Exception as e:
         logger.error(f"Exception while updating group {group_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
 
 
 @mcp.tool()
@@ -563,7 +563,7 @@ async def add_user_to_group(group_id: str, user_id: str, ctx: Context = None) ->
         if not groups_err and user_groups:
             if any(g.id == group_id for g in user_groups):
                 logger.info(f"User {user_id} is already a member of group {group_id}")
-                return [f"User {user_id} is already a member of group {group_id}"]
+                return [{"message": f"User {user_id} is already a member of group {group_id}"}]
 
         logger.debug(f"Calling Okta API to add user {user_id} to group {group_id}")
         result = await client.assign_user_to_group(group_id, user_id)
@@ -571,13 +571,13 @@ async def add_user_to_group(group_id: str, user_id: str, ctx: Context = None) ->
 
         if err:
             logger.error(f"Okta API error while adding user {user_id} to group {group_id}: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
 
         logger.info(f"Successfully added user {user_id} to group {group_id}")
-        return [f"User {user_id} added to group {group_id} successfully"]
+        return [{"message": f"User {user_id} added to group {group_id} successfully"}]
     except Exception as e:
         logger.error(f"Exception while adding user {user_id} to group {group_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
 
 
 @mcp.tool()
@@ -609,10 +609,10 @@ async def remove_user_from_group(group_id: str, user_id: str, ctx: Context = Non
 
         if err:
             logger.error(f"Okta API error while removing user {user_id} from group {group_id}: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
 
         logger.info(f"Successfully removed user {user_id} from group {group_id}")
-        return [f"User {user_id} removed from group {group_id} successfully"]
+        return [{"message": f"User {user_id} removed from group {group_id} successfully"}]
     except Exception as e:
         logger.error(f"Exception while removing user {user_id} from group {group_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]

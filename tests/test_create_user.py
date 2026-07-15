@@ -113,7 +113,7 @@ class TestCreateUserActivateParam:
 
         result = await create_user(profile=PROFILE, ctx=_make_ctx())
 
-        assert "Error" in result[0]
+        assert "error" in result[0]
 
     @pytest.mark.asyncio
     @patch("okta_mcp_server.tools.users.users.get_okta_client")
@@ -123,7 +123,7 @@ class TestCreateUserActivateParam:
 
         result = await create_user(profile=PROFILE, ctx=_make_ctx())
 
-        assert "Exception" in result[0]
+        assert "exception" in result[0]
 
     @pytest.mark.asyncio
     async def test_invalid_activate_type_returns_descriptive_error(self):
@@ -131,6 +131,6 @@ class TestCreateUserActivateParam:
         result = await create_user(profile=PROFILE, activate="false", ctx=_make_ctx())  # type: ignore[arg-type]
 
         assert len(result) == 1
-        assert result[0].startswith("Error:")
-        assert "activate" in result[0]
-        assert "bool" in result[0]
+        err = result[0]["error"]
+        assert "activate" in err
+        assert "bool" in err

@@ -65,15 +65,6 @@ from okta_mcp_server.utils.validation import InvalidFilePathError, validate_file
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _serialize_theme(theme) -> Dict[str, Any]:
-    """Serialize a ThemeResponse Pydantic model to a plain camelCase dict."""
-    if theme is None:
-        return {}
-    if hasattr(theme, "model_dump"):
-        return theme.model_dump(by_alias=True, exclude_none=True)
-    return dict(theme)
-
-
 _SIGN_IN_VARIANTS = {e.value for e in SignInPageTouchPointVariant}
 _DASHBOARD_VARIANTS = {e.value for e in EndUserDashboardTouchPointVariant}
 _ERROR_PAGE_VARIANTS = {e.value for e in ErrorPageTouchPointVariant}
@@ -120,11 +111,10 @@ async def list_brand_themes(
             return {"error": str(err)}
 
         themes = themes or []
-        serialized = [_serialize_theme(t) for t in themes]
-        logger.info(f"Successfully retrieved {len(serialized)} theme(s) for brand: {brand_id}")
+        logger.info(f"Successfully retrieved {len(themes)} theme(s) for brand: {brand_id}")
         return {
-            "themes": serialized,
-            "total_fetched": len(serialized),
+            "themes": themes,
+            "total_fetched": len(themes),
         }
 
     except Exception as e:
@@ -170,7 +160,7 @@ async def get_brand_theme(
             return {"error": str(err)}
 
         logger.info(f"Successfully retrieved theme: {theme_id}")
-        return _serialize_theme(theme)
+        return theme
 
     except Exception as e:
         logger.error(f"Exception while retrieving theme {theme_id}: {type(e).__name__}: {e}")
@@ -281,7 +271,7 @@ async def replace_brand_theme(
             return {"error": str(err)}
 
         logger.info(f"Successfully replaced theme: {theme_id}")
-        return _serialize_theme(theme)
+        return theme
 
     except Exception as e:
         logger.error(f"Exception while replacing theme {theme_id}: {type(e).__name__}: {e}")

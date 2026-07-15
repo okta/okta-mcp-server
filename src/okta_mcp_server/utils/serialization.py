@@ -104,15 +104,20 @@ def _to_jsonable(obj: Any, depth: int, seen: set) -> Any:
         logger.debug(f"to_jsonable: max depth {_MAX_DEPTH} exceeded for {type(obj).__name__}")
         return str(obj)
 
-    # 1. JSON-native scalars
-    if obj is None or isinstance(obj, (str, int, float, bool)):
-        return obj
-
-    # 2. Enum -> .value (recurse so IntEnum / StrEnum stay correct)
+    # 1. Enum -> .value (recurse so IntEnum / StrEnum / (str, Enum) mixins stay
+    #    correct).  Must precede the scalar passthrough below because
+    #    ``(str, Enum)`` classes (e.g. the Okta SDK's ``ApplicationSignOnMode``)
+    #    satisfy ``isinstance(x, str)`` yet still carry the enum ``__str__`` /
+    #    ``__repr__`` that leak Python object descriptions to any consumer
+    #    that does not use ``json.dumps``' str-subclass fast path.
     if isinstance(obj, Enum):
         return _to_jsonable(obj.value, depth + 1, seen)
 
-    # 5. Transport objects — drop before model_dump branches, since
+    # 2. JSON-native scalars
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+
+    # 3. Transport objects — drop before model_dump branches, since
     #    OktaAPIResponse exposes neither model_dump nor to_dict.
     if _is_transport_response(obj):
         return None

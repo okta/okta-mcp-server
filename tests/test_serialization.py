@@ -56,6 +56,45 @@ def test_enum_unwrapped_to_value():
     assert to_jsonable([Color.RED, Color.BLUE]) == ["red", "blue"]
 
 
+def test_str_enum_mixin_unwrapped_to_value():
+    """``(str, Enum)`` mixins (e.g. Okta's ``ApplicationSignOnMode``) must be
+    unwrapped to their raw ``.value`` instead of leaking through the scalar
+    passthrough.  Historically the scalar branch ran first, which let the
+    enum object survive: any non-``json`` consumer (f-string, ``logger.info``)
+    then rendered the Python repr ``<Color.RED: 'red'>`` — the exact bug
+    described in issue #14.
+    """
+
+    class Color(str, Enum):
+        RED = "red"
+        BLUE = "blue"
+
+    result = to_jsonable(Color.RED)
+    assert result == "red"
+    # Critical: the returned value must NOT still be the enum instance,
+    # otherwise ``str(result)`` would still emit ``<Color.RED: 'red'>``.
+    assert type(result) is str
+    assert not isinstance(result, Color)
+
+    # Nested inside a container round-trips through ``json.dumps`` cleanly.
+    payload = {"mode": Color.BLUE, "modes": [Color.RED, Color.BLUE]}
+    assert to_jsonable(payload) == {"mode": "blue", "modes": ["red", "blue"]}
+    assert json.dumps(to_jsonable(payload)) == '{"mode": "blue", "modes": ["red", "blue"]}'
+
+
+def test_int_enum_mixin_unwrapped_to_value():
+    """``(int, Enum)`` mixins are unwrapped for the same reason as ``(str, Enum)``."""
+
+    class Priority(int, Enum):
+        LOW = 1
+        HIGH = 2
+
+    result = to_jsonable(Priority.HIGH)
+    assert result == 2
+    assert type(result) is int
+    assert not isinstance(result, Priority)
+
+
 # ---------------------------------------------------------------------------
 # to_jsonable: containers
 # ---------------------------------------------------------------------------

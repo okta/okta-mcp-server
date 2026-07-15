@@ -206,11 +206,12 @@ def create_paginated_response(
 ) -> Dict[str, Any]:
     """Create a standardized paginated response format.
 
-    The full response (including ``items``) is normalized through
-    :func:`okta_mcp_server.utils.serialization.to_jsonable` before return.
-    This guarantees that SDK models, enums, and nested transport objects in
-    ``items`` or ``pagination_info`` become JSON-native values that
-    ``json.dumps`` can encode, so callers never need to serialize manually.
+    The returned dict may still contain raw SDK models in ``items`` and
+    ``pagination_info``.  Every caller of this helper is a tool decorated
+    with :func:`okta_mcp_server.utils.serialization.json_response`, so the
+    single serialization boundary at the tool return already normalizes the
+    payload through :func:`to_jsonable`.  We deliberately do not re-normalize
+    here to avoid walking large ``fetch_all=True`` payloads twice.
 
     Args:
         items: List of items to return (raw SDK models or already-dict payloads)
@@ -219,11 +220,9 @@ def create_paginated_response(
         pagination_info: Additional pagination metadata
 
     Returns:
-        Dict with standardized pagination response format, fully JSON-native.
+        Dict with standardized pagination response format.  Nested SDK models
+        are flattened by the outer ``@json_response`` decorator.
     """
-    # Lazy import to avoid any circular-import risk during module init.
-    from okta_mcp_server.utils.serialization import to_jsonable
-
     result: Dict[str, Any] = {
         "items": items,
         "total_fetched": len(items),
@@ -243,7 +242,7 @@ def create_paginated_response(
     if pagination_info:
         result["pagination_info"] = pagination_info
 
-    return to_jsonable(result)
+    return result
 
 
 def build_query_params(

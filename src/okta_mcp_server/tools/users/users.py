@@ -232,7 +232,7 @@ async def get_user_profile_attributes(ctx: Context = None) -> list:
         return users  # no user has been created yet
     except Exception as e:
         logger.error(f"Exception while fetching profile attributes: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
 
 
 @mcp.tool()
@@ -262,13 +262,13 @@ async def get_user(user_id: str, ctx: Context = None) -> list:
 
         if err:
             logger.error(f"Okta API error while getting user {user_id}: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
 
         logger.info(f"Successfully retrieved user: {user.profile.email if hasattr(user, 'profile') else user_id}")
         return [user]
     except Exception as e:
         logger.error(f"Exception while getting user {user_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
 
 
 @mcp.tool()
@@ -304,7 +304,7 @@ async def create_user(profile: dict, activate: bool = True, ctx: Context = None)
             "Pass activate=true to create an active user or activate=false to create a STAGED user."
         )
         logger.error(msg)
-        return [f"Error: {msg}"]
+        return [{"error": msg}]
 
     logger.debug(
         f"User profile: email={profile.get('email', 'N/A')}, login={profile.get('login', 'N/A')}, activate={activate}"
@@ -322,7 +322,7 @@ async def create_user(profile: dict, activate: bool = True, ctx: Context = None)
 
         if err:
             logger.error(f"Okta API error while creating user: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
 
         logger.info(
             f"Successfully created user: {user.id} ({user.profile.email if hasattr(user, 'profile') else 'N/A'})"
@@ -330,7 +330,7 @@ async def create_user(profile: dict, activate: bool = True, ctx: Context = None)
         return [user]
     except Exception as e:
         logger.error(f"Exception while creating user: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
 
 
 @mcp.tool()
@@ -363,13 +363,13 @@ async def update_user(user_id: str, profile: dict, ctx: Context = None) -> list:
 
         if err:
             logger.error(f"Okta API error while updating user {user_id}: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
 
         logger.info(f"Successfully updated user: {user_id}")
         return [user]
     except Exception as e:
         logger.error(f"Exception while updating user {user_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
 
 
 @mcp.tool()
@@ -413,13 +413,13 @@ async def deactivate_user(user_id: str, ctx: Context = None) -> list:
 
         if err:
             logger.error(f"Okta API error while deactivating user {user_id}: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
 
         logger.info(f"Successfully deactivated user: {user_id}")
-        return [f"User {user_id} deactivated successfully."]
+        return [{"message": f"User {user_id} deactivated successfully."}]
     except Exception as e:
         logger.error(f"Exception while deactivating user {user_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
 
 
 @mcp.tool()
@@ -462,13 +462,13 @@ async def delete_deactivated_user(user_id: str, ctx: Context = None) -> list:
 
         if err:
             logger.error(f"Okta API error while deleting user {user_id}: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
 
         logger.info(f"Successfully deleted user: {user_id}")
-        return [f"User {user_id} deleted successfully."]
+        return [{"message": f"User {user_id} deleted successfully."}]
     except Exception as e:
         logger.error(f"Exception while deleting user {user_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
 
 
 @mcp.tool()
