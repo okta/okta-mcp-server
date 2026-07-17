@@ -84,6 +84,20 @@ from okta_mcp_server.utils.validation import validate_ids
 def _serialize(obj) -> Any:
     """Recursively serialise SDK v3 models and lists to plain Python types.
 
+    Kept intentionally as a per-module helper (unlike the equivalent helpers
+    removed from ``brands.py`` / ``email_domains.py`` / ``themes.py`` in the
+    #14 refactor).  The central ``@json_response`` boundary in
+    ``utils/serialization.py`` would default to the SDK's ``to_dict`` path,
+    which is wrong for the preview models this module handles.
+
+    Contract note (PR #90 review, cross-module consistency): the other
+    customization modules now return ``{"error": "..."}`` when the SDK
+    returns ``(None, response, None)``; this module keeps the legacy ``{}``
+    contract via ``_serialize(x) or {}`` at every call site because empty
+    bodies are a legitimate response for some template-preview endpoints.
+    Unify with the error-dict pattern in a follow-up if operator feedback
+    shows the ``{}`` case is confusing.
+
     We explicitly use ``model_dump`` (Pydantic v2) rather than ``to_dict``.
     The SDK-generated ``to_dict`` on preview models (e.g. ``EmailPreview``)
     marks ``body`` and ``subject`` as server-readOnly and omits them from the

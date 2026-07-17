@@ -30,6 +30,7 @@ from enum import Enum
 import pytest
 
 import okta.models as okta_models
+from okta.models.application_sign_on_mode import ApplicationSignOnMode
 
 from okta_mcp_server.utils.serialization import (
     _failure_envelope,
@@ -129,7 +130,9 @@ def test_nested_structure_round_trips():
 # ---------------------------------------------------------------------------
 
 def test_pydantic_v2_model_is_flattened():
-    app = okta_models.Application.model_construct(label="hello", sign_on_mode="SAML_2_0")
+    app = okta_models.Application.model_construct(
+        label="hello", sign_on_mode=ApplicationSignOnMode.SAML_2_0
+    )
     result = to_jsonable(app)
 
     assert isinstance(result, dict)
@@ -140,8 +143,12 @@ def test_pydantic_v2_model_is_flattened():
 
 def test_list_of_models_round_trips():
     apps = [
-        okta_models.Application.model_construct(label="a", sign_on_mode="SAML_2_0"),
-        okta_models.Application.model_construct(label="b", sign_on_mode="OPENID_CONNECT"),
+        okta_models.Application.model_construct(
+            label="a", sign_on_mode=ApplicationSignOnMode.SAML_2_0
+        ),
+        okta_models.Application.model_construct(
+            label="b", sign_on_mode=ApplicationSignOnMode.OPENID_CONNECT
+        ),
     ]
     result = to_jsonable(apps)
 
@@ -164,6 +171,33 @@ def test_datetime_in_pydantic_model_serialized_rfc3339():
     result = to_jsonable(model)
 
     assert result["when"] == "2024-01-02T03:04:05Z"
+
+
+def test_custom_pages_serialize_emits_rfc3339_datetime():
+    """PR #90 review round 4: ``custom_pages._serialize`` must set
+    ``mode='json'`` so nested datetimes survive as RFC 3339 strings when the
+    payload flows through the outer ``@json_response`` boundary.  Without
+    ``mode='json'``, ``model_dump`` returns a raw ``datetime`` and
+    ``to_jsonable`` would fall through to ``str(datetime)`` producing
+    ``"2024-01-02 03:04:05+00:00"`` (space separator) instead of the
+    ``"2024-01-02T03:04:05Z"`` required by RFC 3339.
+    """
+    from pydantic import BaseModel
+
+    from okta_mcp_server.tools.customization.custom_pages.custom_pages import (
+        _serialize,
+    )
+
+    class PageWithTimestamp(BaseModel):
+        when: datetime
+
+    model = PageWithTimestamp(when=datetime(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc))
+    serialized = _serialize(model)
+    # After the local _serialize, the outer boundary runs to_jsonable — but
+    # since serialized is already a plain dict, we can assert directly.
+    assert serialized["when"] == "2024-01-02T03:04:05Z", (
+        "custom_pages._serialize dropped mode='json' — datetime is no longer RFC 3339."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -290,9 +324,35 @@ def test_failure_envelope_shape_is_json_native():
     assert envelope["error"]["type"] == "ValueError"
     assert envelope["error"]["tool"] == "my_tool"
     assert envelope["status_code"] is None
-    assert "traceback_tail" in envelope["raw"]
+    # Raw traceback is opt-in via OKTA_MCP_INCLUDE_RAW.  Default: raw is
+    # present but empty so the envelope shape is stable across configurations.
+    assert envelope["raw"] == {}
+    assert "traceback_tail" not in envelope["raw"]
     # The envelope must NOT contain an opaque-object repr.
     assert not re.search(r"<.+ object at 0x[0-9a-f]+>", encoded)
+
+
+def test_failure_envelope_includes_traceback_when_flag_set(monkeypatch):
+    monkeypatch.setenv("OKTA_MCP_INCLUDE_RAW", "1")
+    try:
+        raise ValueError("exposed")
+    except ValueError as exc:
+        envelope = _failure_envelope("my_tool", exc)
+
+    assert "traceback_tail" in envelope["raw"]
+    # The tail should carry a snippet of the raising context.
+    assert "ValueError" in envelope["raw"]["traceback_tail"]
+
+
+@pytest.mark.parametrize("falsy", ["", "0", "false", "no", "off", "anything-else"])
+def test_failure_envelope_omits_traceback_for_falsy_flag(monkeypatch, falsy):
+    monkeypatch.setenv("OKTA_MCP_INCLUDE_RAW", falsy)
+    try:
+        raise ValueError("nope")
+    except ValueError as exc:
+        envelope = _failure_envelope("my_tool", exc)
+
+    assert envelope["raw"] == {}
 
 
 def test_failure_envelope_truncates_long_messages():
@@ -321,7 +381,9 @@ def test_decorator_preserves_metadata_async():
 def test_decorator_serializes_async_result():
     @json_response
     async def echo_app():
-        return okta_models.Application.model_construct(label="hi", sign_on_mode="SAML_2_0")
+        return okta_models.Application.model_construct(
+            label="hi", sign_on_mode=ApplicationSignOnMode.SAML_2_0
+        )
 
     result = asyncio.run(echo_app())
 

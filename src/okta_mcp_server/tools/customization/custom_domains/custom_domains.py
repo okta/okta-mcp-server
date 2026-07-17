@@ -182,6 +182,11 @@ async def create_custom_domain(
         # resource IS successfully created on Okta in that scenario, so fall
         # back to ``list_custom_domains`` and locate the freshly-created
         # domain by FQDN so the caller still receives the persisted object.
+        #
+        # ``GET /api/v1/domains`` does not paginate — all custom domains for
+        # the org are returned in a single response — so a plain list scan is
+        # sufficient here.  FQDN comparison is case-insensitive per RFC 1035
+        # to guard against Okta normalizing the stored ``domain`` field.
         if created is None:
             logger.info(
                 f"SDK returned no body for create_custom_domain; refetching '{domain}' "
@@ -195,8 +200,10 @@ async def create_custom_domain(
                         f"list_custom_domains failed: {refetch_err}"
                     )
                 }
+            target_domain = domain.lower()
             for candidate in getattr(refetched_list, "domains", None) or []:
-                if getattr(candidate, "domain", None) == domain:
+                candidate_fqdn = getattr(candidate, "domain", None)
+                if isinstance(candidate_fqdn, str) and candidate_fqdn.lower() == target_domain:
                     created = candidate
                     break
             if created is None:
@@ -251,6 +258,19 @@ async def get_custom_domain(
             logger.error(f"Okta API error while retrieving custom domain {domain_id!r}: {err}")
             return {"error": str(err)}
 
+        if domain is None:
+            # Guard against (None, response, None) — the previous per-module
+            # ``_serialize_domain`` helper silently returned ``{}`` here.
+            logger.warning(
+                f"get_custom_domain returned no body for {domain_id!r} despite success status."
+            )
+            return {
+                "error": (
+                    f"Okta returned an empty response for custom domain {domain_id!r}. "
+                    "Verify the ID with list_custom_domains()."
+                )
+            }
+
         logger.info(f"Successfully retrieved custom domain: {domain_id}")
         return domain
 
@@ -302,6 +322,17 @@ async def replace_custom_domain(
         if err:
             logger.error(f"Okta API error while replacing brand for domain {domain_id!r}: {err}")
             return {"error": str(err)}
+
+        if updated is None:
+            logger.warning(
+                f"replace_custom_domain returned no body for {domain_id!r} despite success status."
+            )
+            return {
+                "error": (
+                    f"Custom domain {domain_id!r} replace succeeded but the response was empty. "
+                    "Re-fetch with get_custom_domain() to confirm the new brand association."
+                )
+            }
 
         logger.info(f"Successfully updated brand for custom domain: {domain_id}")
         return updated

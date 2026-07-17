@@ -159,6 +159,19 @@ async def get_brand_theme(
             logger.error(f"Okta API error while retrieving theme {theme_id}: {err}")
             return {"error": str(err)}
 
+        if theme is None:
+            # Guard against (None, response, None) — the previous per-module
+            # ``_serialize_theme`` helper silently returned ``{}`` here.
+            logger.warning(
+                f"get_brand_theme returned no body for {theme_id} despite success status."
+            )
+            return {
+                "error": (
+                    f"Okta returned an empty response for theme {theme_id!r} on brand "
+                    f"{brand_id!r}. Verify the IDs with list_brand_themes()."
+                )
+            }
+
         logger.info(f"Successfully retrieved theme: {theme_id}")
         return theme
 
@@ -269,6 +282,17 @@ async def replace_brand_theme(
         if err:
             logger.error(f"Okta API error while replacing theme {theme_id}: {err}")
             return {"error": str(err)}
+
+        if theme is None:
+            logger.warning(
+                f"replace_brand_theme returned no body for {theme_id} despite success status."
+            )
+            return {
+                "error": (
+                    f"Theme {theme_id!r} replace succeeded but the response was empty. "
+                    "Re-fetch with get_brand_theme() to confirm the current state."
+                )
+            }
 
         logger.info(f"Successfully replaced theme: {theme_id}")
         return theme

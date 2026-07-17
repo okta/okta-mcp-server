@@ -35,6 +35,7 @@ Design properties
 
 import functools
 import inspect
+import os
 import traceback
 from enum import Enum
 from typing import Any, Callable
@@ -51,6 +52,28 @@ _ERROR_MESSAGE_LIMIT = 1024
 
 #: Maximum number of characters from the traceback preserved in the envelope.
 _TRACEBACK_TAIL_LIMIT = 4096
+
+#: Opt-in environment flag that lets operators re-enable the raw traceback tail
+#: in the failure envelope.  Off by default so we never leak server-side stack
+#: frames to MCP clients unless the operator explicitly asks for them.
+#:
+#: NOTE: This flag name is deliberately reused from the deferred "raw success
+#: envelope" feature described in ``docs/hld_mcp_serialization.txt:341``.  Both
+#: modes share a single "verbose diagnostic mode" semantics — operators who
+#: want raw success wrapping will also want raw failure tracebacks and vice
+#: versa.  If the deferred success-wrapping feature ever lands, it MUST also
+#: read this same variable so both behaviors stay in lock-step.
+_INCLUDE_RAW_ENV_VAR = "OKTA_MCP_INCLUDE_RAW"
+
+
+def _include_raw_traceback() -> bool:
+    """Return True when the operator has opted in to raw traceback exposure.
+
+    Truthy values: ``1``, ``true``, ``yes``, ``on`` (case-insensitive).  Any
+    other value (including unset) evaluates to False.
+    """
+    val = os.environ.get(_INCLUDE_RAW_ENV_VAR, "").strip().lower()
+    return val in {"1", "true", "yes", "on"}
 
 #: Safety bound on recursion depth.  Okta payloads nest no deeper than ~10 in
 #: practice; this guard exists only to short-circuit accidental cycles that
@@ -84,6 +107,12 @@ def to_jsonable(obj: Any) -> Any:
     7. Objects exposing ``__dict__`` are flattened via ``vars(obj)`` and recursed.
     8. Anything else falls through to ``str(obj)`` and is logged at DEBUG so
        unexpected types surface during development.
+
+    Types not explicitly handled (``bytes``, ``bytearray``, ``memoryview``,
+    ``decimal.Decimal``, ``pathlib.Path``, ``datetime`` at the top level,
+    etc.) fall through rule 8 to ``str(obj)`` — lossy but guaranteed
+    JSON-serialisable.  Add an explicit branch here if a tool ever needs one
+    of those types round-tripped losslessly.
 
     Args:
         obj: Any Python value coming back from a tool body.
@@ -122,7 +151,7 @@ def _to_jsonable(obj: Any, depth: int, seen: set) -> Any:
     if _is_transport_response(obj):
         return None
 
-    # 3. Pydantic v2 model.  We accept the result only if it is dict/list-shaped;
+    # 4. Pydantic v2 model.  We accept the result only if it is dict/list-shaped;
     #    otherwise the attribute is a coincidence (e.g. an auto-generated Mock)
     #    and we fall through to the next strategy rather than recursing on
     #    another opaque object.
@@ -136,7 +165,7 @@ def _to_jsonable(obj: Any, depth: int, seen: set) -> Any:
         if isinstance(dumped, (dict, list)):
             return _to_jsonable(dumped, depth + 1, seen)
 
-    # 4. Okta SDK v2 model with to_dict().  Same dict/list-shape guard as above.
+    # 5. Okta SDK v2 model with to_dict().  Same dict/list-shape guard as above.
     to_dict = getattr(obj, "to_dict", None)
     if callable(to_dict):
         try:
@@ -147,18 +176,18 @@ def _to_jsonable(obj: Any, depth: int, seen: set) -> Any:
         if isinstance(dumped, (dict, list)):
             return _to_jsonable(dumped, depth + 1, seen)
 
-    # Defensive short-circuit for unittest.mock objects: every attribute
-    # access lazily mutates their ``__dict__``, which both poisons the
-    # ``vars()`` fallback ("dictionary changed size during iteration") and
-    # makes any attribute look callable.  Tools never legitimately return
-    # Mocks in production; emitting ``str(obj)`` keeps tests deterministic.
-    # We run this check *after* the model_dump / to_dict branches above so a
-    # caller that explicitly configures ``mock.to_dict.return_value`` still
-    # gets the configured dict flattened by the normal path.
+    # 6. Defensive short-circuit for unittest.mock objects: every attribute
+    #    access lazily mutates their ``__dict__``, which both poisons the
+    #    ``vars()`` fallback ("dictionary changed size during iteration") and
+    #    makes any attribute look callable.  Tools never legitimately return
+    #    Mocks in production; emitting ``str(obj)`` keeps tests deterministic.
+    #    We run this check *after* the model_dump / to_dict branches above so a
+    #    caller that explicitly configures ``mock.to_dict.return_value`` still
+    #    gets the configured dict flattened by the normal path.
     if type(obj).__module__ == "unittest.mock":
         return str(obj)
 
-    # 6. Containers (cycle-guarded)
+    # 7. Containers (cycle-guarded)
     obj_id = id(obj)
     if isinstance(obj, dict):
         if obj_id in seen:
@@ -178,7 +207,7 @@ def _to_jsonable(obj: Any, depth: int, seen: set) -> Any:
         finally:
             seen.discard(obj_id)
 
-    # 7. Plain object with attributes
+    # 8. Plain object with attributes
     if hasattr(obj, "__dict__"):
         if obj_id in seen:
             return None
@@ -188,7 +217,7 @@ def _to_jsonable(obj: Any, depth: int, seen: set) -> Any:
         finally:
             seen.discard(obj_id)
 
-    # 8. Last resort
+    # 9. Last resort
     logger.debug(f"to_jsonable: falling back to str() for {type(obj).__name__}")
     return str(obj)
 
@@ -216,11 +245,15 @@ def _failure_envelope(tool_name: str, exc: BaseException) -> dict:
     """Build the structured error envelope returned when serialization fails.
 
     Every field is a JSON-native primitive, so ``json.dumps`` on the envelope
-    cannot itself raise.  ``raw.traceback_tail`` is a diagnostic string —
-    explicitly non-machine-parseable — kept short enough to fit comfortably in
-    an MCP ``TextContent.text`` payload.
+    cannot itself raise.  The raw traceback tail is intentionally **not**
+    included by default so we do not leak server-side stack frames to MCP
+    clients.  Operators can opt back in by setting the ``OKTA_MCP_INCLUDE_RAW``
+    environment variable (see :func:`_include_raw_traceback`); in that mode the
+    ``raw.traceback_tail`` field carries the last ``_TRACEBACK_TAIL_LIMIT``
+    characters of ``traceback.format_exc()``.  The full traceback is always
+    written to the server log via ``logger.exception`` regardless of the flag.
     """
-    return {
+    envelope = {
         "ok": False,
         "error": {
             "type": exc.__class__.__name__,
@@ -228,10 +261,11 @@ def _failure_envelope(tool_name: str, exc: BaseException) -> dict:
             "tool": tool_name,
         },
         "status_code": None,
-        "raw": {
-            "traceback_tail": traceback.format_exc()[-_TRACEBACK_TAIL_LIMIT:],
-        },
+        "raw": {},
     }
+    if _include_raw_traceback():
+        envelope["raw"]["traceback_tail"] = traceback.format_exc()[-_TRACEBACK_TAIL_LIMIT:]
+    return envelope
 
 
 # ---------------------------------------------------------------------------

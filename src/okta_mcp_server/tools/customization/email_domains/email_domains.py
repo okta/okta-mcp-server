@@ -361,6 +361,17 @@ async def replace_email_domain(
             )
             return {"error": str(err)}
 
+        if updated is None:
+            logger.warning(
+                f"replace_email_domain returned no body for {email_domain_id!r} despite success status."
+            )
+            return {
+                "error": (
+                    f"Email domain {email_domain_id!r} replace succeeded but the response was empty. "
+                    "Re-fetch with get_email_domain() to confirm the current state."
+                )
+            }
+
         logger.info(f"Successfully replaced email domain: {email_domain_id}")
         return updated
 

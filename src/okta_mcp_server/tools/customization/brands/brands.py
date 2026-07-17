@@ -205,6 +205,22 @@ async def get_brand(
             logger.error(f"Okta API error while retrieving brand {brand_id}: {err}")
             return {"error": str(err)}
 
+        # Guard: SDK may return ``(None, response, None)`` for a successful
+        # request that carried an empty body (e.g. an unexpected 204).  The
+        # inlined ``_serialize_brand`` previously converted this to ``{}`` —
+        # surface an explicit error dict instead so callers do not silently
+        # receive ``null`` through the @json_response boundary.
+        if brand is None:
+            logger.warning(
+                f"get_brand returned no body for {brand_id} despite success status."
+            )
+            return {
+                "error": (
+                    f"Okta returned an empty response for brand {brand_id!r}. "
+                    "Verify the ID with list_brands()."
+                )
+            }
+
         logger.info(f"Successfully retrieved brand: {brand_id}")
         return brand
 
@@ -276,6 +292,19 @@ async def create_brand(
         if err:
             logger.error(f"Okta API error while creating brand '{name}': {err}")
             return {"error": str(err)}
+
+        if brand is None:
+            # Guard against (None, response, None) — the resource may still
+            # have been created on Okta but the SDK returned no body.
+            logger.warning(
+                f"create_brand returned no body for '{name}' despite success status."
+            )
+            return {
+                "error": (
+                    f"Brand '{name}' create request succeeded but the response was empty. "
+                    "Use list_brands() to confirm and retrieve the new brand."
+                )
+            }
 
         logger.info(f"Successfully created brand '{name}' with ID: {getattr(brand, 'id', 'unknown')}")
         return brand
@@ -368,6 +397,17 @@ async def replace_brand(
         if err:
             logger.error(f"Okta API error while replacing brand {brand_id}: {err}")
             return {"error": str(err)}
+
+        if brand is None:
+            logger.warning(
+                f"replace_brand returned no body for {brand_id} despite success status."
+            )
+            return {
+                "error": (
+                    f"Brand {brand_id!r} replace request succeeded but the response was empty. "
+                    "Re-fetch with get_brand() to confirm the current state."
+                )
+            }
 
         logger.info(f"Successfully replaced brand: {brand_id}")
         return brand

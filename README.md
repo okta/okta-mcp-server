@@ -847,6 +847,28 @@ export OKTA_LOG_LEVEL=DEBUG
 > [!TIP]
 > Debug mode is particularly useful when troubleshooting connection or authentication issues.
 
+### 🧵 Include raw traceback in serializer-failure envelopes
+
+When a tool response fails the JSON serialization boundary (rare — usually a
+bug in a new SDK payload shape), the server returns a JSON-native failure
+envelope of the form:
+
+```json
+{"ok": false, "error": {...}, "status_code": null, "raw": {}}
+```
+
+The last 4096 characters of `traceback.format_exc()` are only attached as
+`raw.traceback_tail` when the operator explicitly opts in:
+
+```bash
+export OKTA_MCP_INCLUDE_RAW=1   # accepts 1 / true / yes / on
+```
+
+> [!WARNING]
+> `OKTA_MCP_INCLUDE_RAW` exposes server-side stack frames to MCP clients — use
+> it only when triaging a specific failure. The full traceback is always
+> written to the server log via `logger.exception` regardless of this flag.
+
 ### 🚨 Common Issues
 
 1. **Authentication Failures**
