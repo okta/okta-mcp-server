@@ -41,7 +41,7 @@ from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DELETE_CUSTOM_DOMAIN
 from okta_mcp_server.utils.scope_guard import require_scopes
-from okta_mcp_server.utils.serialization import json_response
+from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import InvalidFilePathError, validate_file_path, validate_ids
 
 
@@ -150,11 +150,14 @@ async def create_custom_domain(
         client = await get_okta_client(manager)
 
         # Check for an existing domain with the same FQDN before creating.
+        # Case-insensitive per RFC 1035, matching the refetch fallback below.
         existing_list, _, list_err = await client.list_custom_domains()
         if not list_err and existing_list:
             existing_domains = getattr(existing_list, "domains", None) or []
+            target_domain = domain.lower()
             for existing in existing_domains:
-                if getattr(existing, "domain", None) == domain:
+                existing_fqdn = getattr(existing, "domain", None)
+                if isinstance(existing_fqdn, str) and existing_fqdn.lower() == target_domain:
                     existing_id = getattr(existing, "id", "unknown")
                     logger.warning(
                         f"Custom domain '{domain}' already exists (id: {existing_id})"
@@ -261,15 +264,11 @@ async def get_custom_domain(
         if domain is None:
             # Guard against (None, response, None) — the previous per-module
             # ``_serialize_domain`` helper silently returned ``{}`` here.
-            logger.warning(
-                f"get_custom_domain returned no body for {domain_id!r} despite success status."
+            return none_body_error(
+                "get_custom_domain",
+                f"retrieving custom domain {domain_id!r}",
+                "Verify the ID with list_custom_domains().",
             )
-            return {
-                "error": (
-                    f"Okta returned an empty response for custom domain {domain_id!r}. "
-                    "Verify the ID with list_custom_domains()."
-                )
-            }
 
         logger.info(f"Successfully retrieved custom domain: {domain_id}")
         return domain
@@ -324,15 +323,11 @@ async def replace_custom_domain(
             return {"error": str(err)}
 
         if updated is None:
-            logger.warning(
-                f"replace_custom_domain returned no body for {domain_id!r} despite success status."
+            return none_body_error(
+                "replace_custom_domain",
+                f"replacing brand for custom domain {domain_id!r}",
+                "Re-fetch with get_custom_domain() to confirm the new brand association.",
             )
-            return {
-                "error": (
-                    f"Custom domain {domain_id!r} replace succeeded but the response was empty. "
-                    "Re-fetch with get_custom_domain() to confirm the new brand association."
-                )
-            }
 
         logger.info(f"Successfully updated brand for custom domain: {domain_id}")
         return updated
@@ -568,7 +563,15 @@ async def verify_custom_domain(
             logger.error(f"Okta API error while verifying domain {domain_id!r}: {err}")
             return {"error": str(err)}
 
-        validation_status = getattr(verified, "validation_status", None) or "unknown"
+        if verified is None:
+            return none_body_error(
+                "verify_custom_domain",
+                f"verifying custom domain {domain_id!r}",
+                "Re-fetch with get_custom_domain() to confirm the current validationStatus.",
+            )
+
+        _raw_status = getattr(verified, "validation_status", None)
+        validation_status = getattr(_raw_status, "value", _raw_status) or "unknown"
         logger.info(f"Custom domain {domain_id!r} verification result: {validation_status}")
         return verified
 

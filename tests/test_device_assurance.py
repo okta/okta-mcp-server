@@ -913,7 +913,10 @@ class TestGetDeviceAssurancePolicy:
 
     @pytest.mark.asyncio
     @patch("okta_mcp_server.tools.device_assurance.device_assurance.get_okta_client")
-    async def test_returns_none_when_policy_not_found(self, mock_get_client, ctx_no_elicitation):
+    async def test_none_body_returns_error_dict(self, mock_get_client, ctx_no_elicitation):
+        """Fresh-review finding: this used to silently return bare None on the
+        Okta SDK's (None, response, None) quirk instead of an actionable
+        error dict, unlike every other get_*/create_*/replace_* tool."""
         client = AsyncMock()
         client.get_device_assurance_policy.return_value = (None, MagicMock(), None)
         mock_get_client.return_value = client
@@ -922,7 +925,9 @@ class TestGetDeviceAssurancePolicy:
             ctx=ctx_no_elicitation, device_assurance_id=DEVICE_ASSURANCE_ID
         )
 
-        assert result is None
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert DEVICE_ASSURANCE_ID in result["error"]
 
     @pytest.mark.asyncio
     @patch("okta_mcp_server.tools.device_assurance.device_assurance.get_okta_client")
@@ -1059,7 +1064,10 @@ class TestCreateDeviceAssurancePolicy:
     @pytest.mark.asyncio
     @patch("okta_mcp_server.tools.device_assurance.device_assurance.DeviceAssurance")
     @patch("okta_mcp_server.tools.device_assurance.device_assurance.get_okta_client")
-    async def test_returns_none_when_api_returns_no_policy(self, mock_get_client, mock_da_cls, ctx_no_elicitation):
+    async def test_none_body_returns_error_dict(self, mock_get_client, mock_da_cls, ctx_no_elicitation):
+        """Fresh-review finding: this used to silently return bare None on the
+        Okta SDK's (None, response, None) quirk instead of an actionable
+        error dict, unlike every other get_*/create_*/replace_* tool."""
         client = AsyncMock()
         client.create_device_assurance_policy.return_value = (None, MagicMock(), None)
         mock_get_client.return_value = client
@@ -1070,7 +1078,9 @@ class TestCreateDeviceAssurancePolicy:
             policy_data={"name": "Test", "platform": "MACOS"},
         )
 
-        assert result is None
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert "Test" in result["error"]
 
     # -----------------------------------------------------------------
     # PR #90 review: policy_data type / schema guardrails

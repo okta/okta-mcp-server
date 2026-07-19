@@ -57,7 +57,7 @@ from okta_mcp_server.utils.messages import (
     DELETE_THEME_LOGO,
 )
 from okta_mcp_server.utils.scope_guard import require_scopes
-from okta_mcp_server.utils.serialization import json_response
+from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import InvalidFilePathError, validate_file_path, validate_ids
 
 
@@ -162,15 +162,11 @@ async def get_brand_theme(
         if theme is None:
             # Guard against (None, response, None) — the previous per-module
             # ``_serialize_theme`` helper silently returned ``{}`` here.
-            logger.warning(
-                f"get_brand_theme returned no body for {theme_id} despite success status."
+            return none_body_error(
+                "get_brand_theme",
+                f"retrieving theme {theme_id!r} on brand {brand_id!r}",
+                "Verify the IDs with list_brand_themes(brand_id=...).",
             )
-            return {
-                "error": (
-                    f"Okta returned an empty response for theme {theme_id!r} on brand "
-                    f"{brand_id!r}. Verify the IDs with list_brand_themes()."
-                )
-            }
 
         logger.info(f"Successfully retrieved theme: {theme_id}")
         return theme
@@ -284,15 +280,11 @@ async def replace_brand_theme(
             return {"error": str(err)}
 
         if theme is None:
-            logger.warning(
-                f"replace_brand_theme returned no body for {theme_id} despite success status."
+            return none_body_error(
+                "replace_brand_theme",
+                f"replacing theme {theme_id!r} on brand {brand_id!r}",
+                "Re-fetch with get_brand_theme() to confirm the current state.",
             )
-            return {
-                "error": (
-                    f"Theme {theme_id!r} replace succeeded but the response was empty. "
-                    "Re-fetch with get_brand_theme() to confirm the current state."
-                )
-            }
 
         logger.info(f"Successfully replaced theme: {theme_id}")
         return theme

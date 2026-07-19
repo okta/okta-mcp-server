@@ -20,8 +20,9 @@ Public surface
   to satisfy RFC 8259; datetimes are emitted as RFC 3339 strings via Pydantic's
   ``model_dump(mode="json")`` path.
 * :func:`json_response` — innermost decorator for every ``@mcp.tool``.  Wraps
-  the tool's return through :func:`to_jsonable` and, on serializer failure,
-  returns a structured error envelope built from primitives only.
+  the *entire* tool call — both running the tool body and serializing its
+  return value — and, on any exception from either step, returns a
+  structured error envelope built from primitives only.
 
 Design properties
 -----------------
@@ -29,8 +30,24 @@ Design properties
 * **Idempotent.**  Re-serializing an already-JSON tree is a no-op, so the
   decorator is safe to add to tools that already call ``.to_dict()`` /
   ``.model_dump(...)`` during the migration window.
-* **Fail-safe.**  If :func:`to_jsonable` raises, the decorator returns the
-  envelope defined in :func:`_failure_envelope`, never an opaque SDK object.
+* **Fail-safe, by design, at the cost of MCP protocol error semantics.**
+  ``@json_response`` catches *any* exception raised while running the
+  wrapped tool — not only failures from :func:`to_jsonable` — and returns the
+  envelope defined in :func:`_failure_envelope` as an ordinary return value.
+  This is intentional: the underlying MCP SDK's own exception path
+  (``mcp.server.lowlevel.server``) renders an uncaught exception as
+  ``CallToolResult(isError=True, content=[TextContent(text=str(exc))])`` —
+  i.e. plain text, not JSON — which is exactly the leak this module exists to
+  close. The tradeoff is that such failures are reported to the caller with
+  ``isError=False`` (a normal tool result whose body happens to carry
+  ``"ok": false``) rather than the protocol-level ``isError=True`` signal.
+  Callers that branch on ``CallToolResult.isError`` instead of inspecting the
+  response body will not detect these failures as errors. Most tool bodies
+  already wrap their own SDK calls in ``try/except Exception`` and never let
+  an exception reach this decorator; the exceptions this catches are ones
+  that escape that inner handling — e.g. attribute access on ``ctx`` that
+  happens before a tool's own ``try:`` block — plus genuine
+  :func:`to_jsonable` failures.
 """
 
 import functools
@@ -57,12 +74,15 @@ _TRACEBACK_TAIL_LIMIT = 4096
 #: in the failure envelope.  Off by default so we never leak server-side stack
 #: frames to MCP clients unless the operator explicitly asks for them.
 #:
-#: NOTE: This flag name is deliberately reused from the deferred "raw success
-#: envelope" feature described in ``docs/hld_mcp_serialization.txt:341``.  Both
-#: modes share a single "verbose diagnostic mode" semantics — operators who
-#: want raw success wrapping will also want raw failure tracebacks and vice
-#: versa.  If the deferred success-wrapping feature ever lands, it MUST also
-#: read this same variable so both behaviors stay in lock-step.
+#: NOTE: A previously-discussed, not-yet-implemented idea was a "raw success
+#: envelope" mode (wrapping successful responses with transport metadata such
+#: as response headers) under this same flag name.  Both modes would share a
+#: single "verbose diagnostic mode" semantics — operators who want raw success
+#: wrapping will also want raw failure tracebacks and vice versa.  If that
+#: success-wrapping mode is ever implemented, it MUST also read this same
+#: variable so both behaviors stay in lock-step; this comment is the sole
+#: source of truth for that intent since no design doc for it is tracked in
+#: this repository.
 _INCLUDE_RAW_ENV_VAR = "OKTA_MCP_INCLUDE_RAW"
 
 
@@ -269,6 +289,33 @@ def _failure_envelope(tool_name: str, exc: BaseException) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# None-body guard
+# ---------------------------------------------------------------------------
+
+def none_body_error(tool_name: str, action: str, hint: str) -> dict:
+    """Build the ``{"error": ...}`` dict for the Okta SDK's ``(None, response,
+    None)`` quirk — a nominally successful call whose result payload is
+    ``None``.
+
+    Every ``get_*``/``create_*``/``update_*``/``replace_*`` tool that unpacks
+    an SDK 3-tuple should call this when the result is ``None`` despite
+    ``err`` being falsy, instead of silently returning ``None``/``null`` to
+    the MCP caller. Logs a warning and builds the caller-facing message in
+    one call so call sites don't repeat the same six lines.
+
+    Args:
+        tool_name: The tool function's own name, for the log line.
+        action: What the tool was doing, e.g. ``f"retrieving brand {brand_id!r}"``.
+        hint: What the caller should do next, e.g. ``"Verify the ID with list_brands()."``.
+
+    Returns:
+        ``{"error": "Okta returned an empty response while <action>. <hint>"}``
+    """
+    logger.warning(f"{tool_name} returned no body despite success status ({action}).")
+    return {"error": f"Okta returned an empty response while {action}. {hint}"}
+
+
+# ---------------------------------------------------------------------------
 # Decorator
 # ---------------------------------------------------------------------------
 
@@ -281,8 +328,13 @@ def json_response(fn: Callable) -> Callable:
 
     Behavior:
       * Success → ``to_jsonable(result)`` is returned.
-      * Serializer failure → :func:`_failure_envelope` is returned and the
-        full traceback is logged via ``logger.exception``.
+      * ANY exception raised while running ``fn`` (not only a
+        :func:`to_jsonable` failure) → :func:`_failure_envelope` is returned
+        as a normal value and the full traceback is logged via
+        ``logger.exception``. This deliberately swallows exceptions that
+        would otherwise reach the MCP SDK's own exception handling — see the
+        module docstring's "Fail-safe" section for why, and for the resulting
+        ``isError=False`` tradeoff callers should be aware of.
 
     Both async and sync functions are supported; the wrapper preserves
     ``__name__`` / ``__doc__`` via :func:`functools.wraps`.

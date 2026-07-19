@@ -24,7 +24,7 @@ from okta_mcp_server.utils.messages import (
     DELETE_POLICY_RULE,
 )
 from okta_mcp_server.utils.scope_guard import require_scopes
-from okta_mcp_server.utils.serialization import json_response
+from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import validate_ids
 
 
@@ -178,6 +178,13 @@ async def get_policy(ctx: Context, policy_id: str) -> Optional[Dict[str, Any]]:
             logger.error(f"Error getting policy {policy_id}: {err}")
             return {"error": str(err)}
 
+        if policy is None:
+            return none_body_error(
+                "get_policy",
+                f"retrieving policy {policy_id!r}",
+                "Verify the ID with list_policies(type=...).",
+            )
+
         return policy
 
     except Exception as e:
@@ -215,6 +222,13 @@ async def create_policy(ctx: Context, policy_data: Dict[str, Any]) -> Optional[D
             logger.error(f"Error creating policy: {err}")
             return {"error": str(err)}
 
+        if policy is None:
+            return none_body_error(
+                "create_policy",
+                f"creating policy {policy_data.get('name', 'N/A')!r}",
+                "Use list_policies(type=...) to confirm and retrieve the new policy.",
+            )
+
         return policy
 
     except Exception as e:
@@ -245,6 +259,13 @@ async def update_policy(ctx: Context, policy_id: str, policy_data: Dict[str, Any
         if err:
             logger.error(f"Error updating policy {policy_id}: {err}")
             return {"error": str(err)}
+
+        if policy is None:
+            return none_body_error(
+                "update_policy",
+                f"updating policy {policy_id!r}",
+                "Re-fetch with get_policy() to confirm the current state.",
+            )
 
         return policy
 
@@ -469,6 +490,13 @@ async def get_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Optiona
             logger.error(f"Error getting policy rule: {err}")
             return {"error": str(err)}
 
+        if rule is None:
+            return none_body_error(
+                "get_policy_rule",
+                f"retrieving rule {rule_id!r} for policy {policy_id!r}",
+                "Verify the IDs with list_policy_rules(policy_id=...).",
+            )
+
         return rule
 
     except Exception as e:
@@ -506,6 +534,13 @@ async def create_policy_rule(ctx: Context, policy_id: str, rule_data: Dict[str, 
             logger.error(f"Error creating policy rule: {err}")
             return {"error": str(err)}
 
+        if rule is None:
+            return none_body_error(
+                "create_policy_rule",
+                f"creating rule {rule_data.get('name', 'N/A')!r} for policy {policy_id!r}",
+                "Use list_policy_rules(policy_id=...) to confirm and retrieve the new rule.",
+            )
+
         return rule
 
     except Exception as e:
@@ -540,6 +575,13 @@ async def update_policy_rule(
         if err:
             logger.error(f"Error updating policy rule: {err}")
             return {"error": str(err)}
+
+        if rule is None:
+            return none_body_error(
+                "update_policy_rule",
+                f"updating rule {rule_id!r} for policy {policy_id!r}",
+                "Re-fetch with get_policy_rule() to confirm the current state.",
+            )
 
         return rule
 

@@ -37,6 +37,7 @@ from okta.models.email_template_response import EmailTemplateResponse
 from okta_mcp_server.tools.customization.custom_templates.custom_templates import (
     _check_no_content_response,
     _serialize,
+    create_email_customization,
     get_email_customization_preview,
     get_email_default_content_preview,
     list_email_customizations,
@@ -959,3 +960,39 @@ class TestListEmailCustomizations:
             "brand_id" in str(item).lower() or "invalid" in str(item).lower()
             for item in result
         )
+
+
+class TestCreateEmailCustomizationLanguageDuplicateCheck:
+    """Fresh-review finding: the pre-create duplicate check compared
+    ``language`` with a case-sensitive ``==``. BCP 47 (RFC 5646) language
+    tags must be matched case-insensitively -- subtag casing is only a
+    convention, not a distinguishing feature."""
+
+    @pytest.mark.asyncio
+    @patch(
+        "okta_mcp_server.tools.customization.custom_templates.custom_templates.get_okta_client"
+    )
+    async def test_duplicate_language_detected_case_insensitively(
+        self, mock_get_client, ctx_no_elicitation
+    ):
+        existing = MagicMock()
+        existing.language = "EN"
+        existing.id = CUSTOMIZATION_ID
+
+        client = AsyncMock()
+        client.list_email_customizations.return_value = ([existing], MagicMock(), None)
+        mock_get_client.return_value = client
+
+        result = await create_email_customization(
+            ctx=ctx_no_elicitation,
+            brand_id=BRAND_ID,
+            template_name=TEMPLATE_NAME,
+            language="en",
+            subject="Welcome",
+            body=_BODY,
+        )
+
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert "already exists" in result["error"]
+        client.create_email_customization.assert_not_called()

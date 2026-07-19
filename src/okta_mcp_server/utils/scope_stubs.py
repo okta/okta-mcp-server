@@ -33,6 +33,7 @@ import re
 from typing import Any
 
 from okta_mcp_server.utils.scope_registry import TOOL_SCOPE_REGISTRY
+from okta_mcp_server.utils.serialization import json_response
 
 #: Maps stub_tool_name → required_scope; populated during _register_stubs().
 SCOPE_STUB_REGISTRY: dict[str, str] = {}
@@ -112,7 +113,10 @@ def _register_stubs() -> None:
         stub_name = _scope_to_stub_name(scope)
         SCOPE_STUB_REGISTRY[stub_name] = scope
 
-        stub_fn = _make_stub_fn(scope, tools)
+        # Wrap in the same json_response boundary every statically-defined
+        # @mcp.tool() function gets, so this dynamically-registered tool
+        # cannot leak a plain-text exception if its body ever raises.
+        stub_fn = json_response(_make_stub_fn(scope, tools))
         stub_fn.__name__ = stub_name
         stub_fn.__doc__ = _build_stub_description(scope, tools)
 

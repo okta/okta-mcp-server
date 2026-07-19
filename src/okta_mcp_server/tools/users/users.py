@@ -21,7 +21,7 @@ from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConf
 from okta_mcp_server.utils.messages import DEACTIVATE_USER, DELETE_USER
 from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
 from okta_mcp_server.utils.scope_guard import require_scopes
-from okta_mcp_server.utils.serialization import json_response
+from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import validate_ids
 
 
@@ -264,6 +264,15 @@ async def get_user(user_id: str, ctx: Context = None) -> list:
             logger.error(f"Okta API error while getting user {user_id}: {err}")
             return [{"error": str(err)}]
 
+        if user is None:
+            return [
+                none_body_error(
+                    "get_user",
+                    f"retrieving user {user_id!r}",
+                    "Verify the ID with list_users().",
+                )
+            ]
+
         logger.info(f"Successfully retrieved user: {user.profile.email if hasattr(user, 'profile') else user_id}")
         return [user]
     except Exception as e:
@@ -324,6 +333,15 @@ async def create_user(profile: dict, activate: bool = True, ctx: Context = None)
             logger.error(f"Okta API error while creating user: {err}")
             return [{"error": str(err)}]
 
+        if user is None:
+            return [
+                none_body_error(
+                    "create_user",
+                    f"creating user {profile.get('login', profile.get('email', 'N/A'))!r}",
+                    "Use list_users() to confirm and retrieve the new user.",
+                )
+            ]
+
         logger.info(
             f"Successfully created user: {user.id} ({user.profile.email if hasattr(user, 'profile') else 'N/A'})"
         )
@@ -364,6 +382,15 @@ async def update_user(user_id: str, profile: dict, ctx: Context = None) -> list:
         if err:
             logger.error(f"Okta API error while updating user {user_id}: {err}")
             return [{"error": str(err)}]
+
+        if user is None:
+            return [
+                none_body_error(
+                    "update_user",
+                    f"updating user {user_id!r}",
+                    "Re-fetch with get_user() to confirm the current state.",
+                )
+            ]
 
         logger.info(f"Successfully updated user: {user_id}")
         return [user]

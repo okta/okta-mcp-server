@@ -45,7 +45,7 @@ from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConf
 from okta_mcp_server.utils.messages import DEACTIVATE_APPLICATION, DELETE_APPLICATION
 from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
 from okta_mcp_server.utils.scope_guard import require_scopes
-from okta_mcp_server.utils.serialization import json_response
+from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import validate_ids
 
 
@@ -183,6 +183,13 @@ async def get_application(ctx: Context, app_id: str, expand: Optional[str] = Non
             logger.error(f"Okta API error while getting application {app_id}: {err}")
             return {"error": str(err)}
 
+        if app is None:
+            return none_body_error(
+                "get_application",
+                f"retrieving application {app_id!r}",
+                "Verify the ID with list_applications().",
+            )
+
         logger.info(f"Successfully retrieved application: {app_id}")
         return app
     except Exception as e:
@@ -219,6 +226,13 @@ async def create_application(ctx: Context, app_config: Dict[str, Any], activate:
             logger.error(f"Okta API error while creating application: {err}")
             return {"error": str(err)}
 
+        if app is None:
+            return none_body_error(
+                "create_application",
+                "creating the application",
+                "Use list_applications() to confirm and retrieve the new application.",
+            )
+
         logger.info(f"Successfully created application")
         return app
     except Exception as e:
@@ -254,6 +268,13 @@ async def update_application(ctx: Context, app_id: str, app_config: Dict[str, An
         if err:
             logger.error(f"Okta API error while updating application {app_id}: {err}")
             return {"error": str(err)}
+
+        if app is None:
+            return none_body_error(
+                "update_application",
+                f"updating application {app_id!r}",
+                "Re-fetch with get_application() to confirm the current state.",
+            )
 
         logger.info(f"Successfully updated application: {app_id}")
         return app

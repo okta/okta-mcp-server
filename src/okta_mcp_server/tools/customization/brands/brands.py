@@ -33,7 +33,7 @@ from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fall
 from okta_mcp_server.utils.messages import DELETE_BRAND
 from okta_mcp_server.utils.pagination import create_paginated_response, extract_after_cursor, paginate_all_results
 from okta_mcp_server.utils.scope_guard import require_scopes
-from okta_mcp_server.utils.serialization import json_response
+from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import validate_ids
 
 
@@ -206,20 +206,13 @@ async def get_brand(
             return {"error": str(err)}
 
         # Guard: SDK may return ``(None, response, None)`` for a successful
-        # request that carried an empty body (e.g. an unexpected 204).  The
-        # inlined ``_serialize_brand`` previously converted this to ``{}`` —
-        # surface an explicit error dict instead so callers do not silently
-        # receive ``null`` through the @json_response boundary.
+        # request that carried an empty body (e.g. an unexpected 204).
         if brand is None:
-            logger.warning(
-                f"get_brand returned no body for {brand_id} despite success status."
+            return none_body_error(
+                "get_brand",
+                f"retrieving brand {brand_id!r}",
+                "Verify the ID with list_brands().",
             )
-            return {
-                "error": (
-                    f"Okta returned an empty response for brand {brand_id!r}. "
-                    "Verify the ID with list_brands()."
-                )
-            }
 
         logger.info(f"Successfully retrieved brand: {brand_id}")
         return brand
@@ -296,15 +289,11 @@ async def create_brand(
         if brand is None:
             # Guard against (None, response, None) — the resource may still
             # have been created on Okta but the SDK returned no body.
-            logger.warning(
-                f"create_brand returned no body for '{name}' despite success status."
+            return none_body_error(
+                "create_brand",
+                f"creating brand {name!r}",
+                "Use list_brands() to confirm and retrieve the new brand.",
             )
-            return {
-                "error": (
-                    f"Brand '{name}' create request succeeded but the response was empty. "
-                    "Use list_brands() to confirm and retrieve the new brand."
-                )
-            }
 
         logger.info(f"Successfully created brand '{name}' with ID: {getattr(brand, 'id', 'unknown')}")
         return brand
@@ -399,15 +388,11 @@ async def replace_brand(
             return {"error": str(err)}
 
         if brand is None:
-            logger.warning(
-                f"replace_brand returned no body for {brand_id} despite success status."
+            return none_body_error(
+                "replace_brand",
+                f"replacing brand {brand_id!r}",
+                "Re-fetch with get_brand() to confirm the current state.",
             )
-            return {
-                "error": (
-                    f"Brand {brand_id!r} replace request succeeded but the response was empty. "
-                    "Re-fetch with get_brand() to confirm the current state."
-                )
-            }
 
         logger.info(f"Successfully replaced brand: {brand_id}")
         return brand

@@ -16,7 +16,7 @@ from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fall
 from okta_mcp_server.utils.messages import DELETE_GROUP
 from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
 from okta_mcp_server.utils.scope_guard import require_scopes
-from okta_mcp_server.utils.serialization import json_response
+from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import validate_ids
 
 
@@ -153,6 +153,15 @@ async def get_group(group_id: str, ctx: Context = None) -> list:
             logger.error(f"Okta API error while getting group {group_id}: {err}")
             return [{"error": str(err)}]
 
+        if group is None:
+            return [
+                none_body_error(
+                    "get_group",
+                    f"retrieving group {group_id!r}",
+                    "Verify the ID with list_groups().",
+                )
+            ]
+
         logger.info(f"Successfully retrieved group: {group_id}")
         return [group]
     except Exception as e:
@@ -189,6 +198,15 @@ async def create_group(profile: dict, ctx: Context = None) -> list:
         if err:
             logger.error(f"Okta API error while creating group: {err}")
             return [{"error": str(err)}]
+
+        if group is None:
+            return [
+                none_body_error(
+                    "create_group",
+                    f"creating group {profile.get('name', 'N/A')!r}",
+                    "Use list_groups() to confirm and retrieve the new group.",
+                )
+            ]
 
         profile_instance = getattr(group.profile, "actual_instance", None) if hasattr(group, "profile") else None
         group_name = getattr(profile_instance, "name", "N/A") if profile_instance is not None else "N/A"
@@ -342,6 +360,15 @@ async def update_group(group_id: str, profile: dict, ctx: Context = None) -> lis
         if err:
             logger.error(f"Okta API error while updating group {group_id}: {err}")
             return [{"error": str(err)}]
+
+        if group is None:
+            return [
+                none_body_error(
+                    "update_group",
+                    f"updating group {group_id!r}",
+                    "Re-fetch with get_group() to confirm the current state.",
+                )
+            ]
 
         logger.info(f"Successfully updated group: {group_id}")
         return [group]

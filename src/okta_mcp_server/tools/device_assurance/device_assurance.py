@@ -19,7 +19,7 @@ from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DELETE_DEVICE_ASSURANCE_POLICY
 from okta_mcp_server.utils.scope_guard import require_scopes
-from okta_mcp_server.utils.serialization import json_response
+from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import validate_ids, validate_os_version_params
 
 
@@ -547,7 +547,11 @@ async def get_device_assurance_policy(
             return {"error": str(err)}
 
         if not policy:
-            return None
+            return none_body_error(
+                "get_device_assurance_policy",
+                f"retrieving device assurance policy {device_assurance_id!r}",
+                "Verify the ID with list_device_assurance_policies().",
+            )
         policy_dict = policy.to_dict()
         unverifiable = _detect_unverifiable_attributes(policy_dict, resp)
         return _enrich_policy_with_attribute_status(policy_dict, unverifiable)
@@ -658,7 +662,14 @@ async def create_device_assurance_policy(
                 return _build_scope_error("create", err.status)
             return {"error": str(err)}
 
-        logger.info(f"Successfully created device assurance policy {policy.id if policy else 'unknown'}")
+        if policy is None:
+            return none_body_error(
+                "create_device_assurance_policy",
+                f"creating device assurance policy {raw.get('name', 'N/A')!r}",
+                "Use list_device_assurance_policies() to confirm and retrieve the new policy.",
+            )
+
+        logger.info(f"Successfully created device assurance policy {policy.id}")
         return policy
 
     except (ForbiddenException, UnauthorizedException) as e:
@@ -813,7 +824,11 @@ async def replace_device_assurance_policy(
             return {"error": str(err)}
 
         if not policy:
-            return None
+            return none_body_error(
+                "replace_device_assurance_policy",
+                f"replacing device assurance policy {device_assurance_id!r}",
+                "Re-fetch with get_device_assurance_policy() to confirm the current state.",
+            )
 
         after_dict = policy.to_dict()
         after_unverifiable = _detect_unverifiable_attributes(after_dict, replace_resp)

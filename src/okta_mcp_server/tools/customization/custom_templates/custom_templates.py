@@ -446,8 +446,12 @@ async def create_email_customization(
                 if _cx_err or not _cx_page:
                     break
                 all_existing_cx.extend(_cx_page)
+        # Language tags are compared case-insensitively per BCP 47 (RFC 5646) --
+        # subtag casing is a convention, not a distinguishing feature.
+        target_language = language.lower()
         for ex in all_existing_cx:
-            if getattr(ex, "language", None) == language:
+            ex_language = getattr(ex, "language", None)
+            if isinstance(ex_language, str) and ex_language.lower() == target_language:
                 ex_id = getattr(ex, "id", "unknown")
                 logger.warning(
                     f"A '{language}' customization already exists for template "

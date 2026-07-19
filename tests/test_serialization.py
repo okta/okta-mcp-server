@@ -413,6 +413,46 @@ def test_decorator_returns_envelope_when_serializer_raises(monkeypatch):
     json.dumps(result)
 
 
+def test_decorator_returns_envelope_when_tool_body_raises():
+    """PR #90 follow-up review: @json_response's try/except wraps the call to
+    the tool itself, not only the to_jsonable(...) step. Any exception raised
+    directly by the wrapped tool -- including one that would occur before the
+    tool's own inner try/except, e.g. attribute access on a malformed ctx --
+    is caught here and converted into the same failure envelope, rather than
+    propagating to the MCP SDK's own isError=True exception handling. This
+    test exercises that path directly (no monkeypatching of to_jsonable),
+    to distinguish it from test_decorator_returns_envelope_when_serializer_raises
+    above.
+    """
+
+    @json_response
+    async def raises_before_any_return():
+        # Simulates code that runs before a tool's own try/except, e.g.
+        # `ctx.request_context.lifespan_context.okta_auth_manager` on a
+        # malformed context.
+        raise AttributeError("'NoneType' object has no attribute 'okta_auth_manager'")
+
+    result = asyncio.run(raises_before_any_return())
+
+    assert result["ok"] is False
+    assert result["error"]["type"] == "AttributeError"
+    assert result["error"]["tool"] == "raises_before_any_return"
+    json.dumps(result)
+
+
+def test_decorator_returns_envelope_when_sync_tool_body_raises():
+    @json_response
+    def raises_immediately():
+        raise ValueError("bad input")
+
+    result = raises_immediately()
+
+    assert result["ok"] is False
+    assert result["error"]["type"] == "ValueError"
+    assert result["error"]["tool"] == "raises_immediately"
+    json.dumps(result)
+
+
 def test_decorator_supports_sync_functions():
     @json_response
     def add(a: int, b: int) -> int:
