@@ -33,27 +33,13 @@ from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fall
 from okta_mcp_server.utils.messages import DELETE_BRAND
 from okta_mcp_server.utils.pagination import create_paginated_response, extract_after_cursor, paginate_all_results
 from okta_mcp_server.utils.scope_guard import require_scopes
+from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import validate_ids
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-def _serialize_brand(brand) -> Dict[str, Any]:
-    """Serialize a brand Pydantic model to a plain dict with camelCase keys.
-
-    Uses ``model_dump(by_alias=True)`` so that read-only server-assigned
-    fields (``id``, ``isDefault``) are included alongside writable fields.
-    ``None`` values are excluded to keep the payload compact.
-    """
-    if brand is None:
-        return {}
-    if hasattr(brand, "model_dump"):
-        return brand.model_dump(by_alias=True, exclude_none=True)
-    # Fallback for non-Pydantic objects
-    return dict(brand)
-
 
 def _build_default_app(default_app_dict: Dict[str, Any]) -> DefaultApp:
     """Convert a user-supplied dict into a ``DefaultApp`` model.
@@ -71,6 +57,7 @@ def _build_default_app(default_app_dict: Dict[str, Any]) -> DefaultApp:
 
 @mcp.tool()
 @require_scopes("okta.brands.read")
+@json_response
 async def list_brands(
     ctx: Context,
     expand: Optional[List[str]] = None,
@@ -164,16 +151,14 @@ async def list_brands(
             all_brands, pagination_info = await paginate_all_results(
                 response, brands, next_page_fn=_next_page, on_page=_on_page
             )
-            serialized = [_serialize_brand(b) for b in all_brands]
             logger.info(
                 f"Successfully retrieved {len(all_brands)} brand(s) across "
                 f"{pagination_info['pages_fetched']} page(s)"
             )
-            return create_paginated_response(serialized, response, fetch_all_used=True, pagination_info=pagination_info)
+            return create_paginated_response(all_brands, response, fetch_all_used=True, pagination_info=pagination_info)
 
-        serialized = [_serialize_brand(b) for b in brands]
         logger.info(f"Successfully retrieved {len(brands)} brand(s)")
-        return create_paginated_response(serialized, response, fetch_all_used=fetch_all)
+        return create_paginated_response(brands, response, fetch_all_used=fetch_all)
 
     except Exception as e:
         logger.error(f"Exception while listing brands: {type(e).__name__}: {e}")
@@ -187,6 +172,7 @@ async def list_brands(
 @mcp.tool()
 @require_scopes("okta.brands.read")
 @validate_ids("brand_id")
+@json_response
 async def get_brand(
     ctx: Context,
     brand_id: str,
@@ -219,8 +205,17 @@ async def get_brand(
             logger.error(f"Okta API error while retrieving brand {brand_id}: {err}")
             return {"error": str(err)}
 
+        # Guard: SDK may return ``(None, response, None)`` for a successful
+        # request that carried an empty body (e.g. an unexpected 204).
+        if brand is None:
+            return none_body_error(
+                "get_brand",
+                f"retrieving brand {brand_id!r}",
+                "Verify the ID with list_brands().",
+            )
+
         logger.info(f"Successfully retrieved brand: {brand_id}")
-        return _serialize_brand(brand)
+        return brand
 
     except Exception as e:
         logger.error(f"Exception while retrieving brand {brand_id}: {type(e).__name__}: {e}")
@@ -233,6 +228,7 @@ async def get_brand(
 
 @mcp.tool()
 @require_scopes("okta.brands.manage")
+@json_response
 async def create_brand(
     ctx: Context,
     name: str,
@@ -290,8 +286,17 @@ async def create_brand(
             logger.error(f"Okta API error while creating brand '{name}': {err}")
             return {"error": str(err)}
 
+        if brand is None:
+            # Guard against (None, response, None) — the resource may still
+            # have been created on Okta but the SDK returned no body.
+            return none_body_error(
+                "create_brand",
+                f"creating brand {name!r}",
+                "Use list_brands() to confirm and retrieve the new brand.",
+            )
+
         logger.info(f"Successfully created brand '{name}' with ID: {getattr(brand, 'id', 'unknown')}")
-        return _serialize_brand(brand)
+        return brand
 
     except Exception as e:
         logger.error(f"Exception while creating brand '{name}': {type(e).__name__}: {e}")
@@ -305,6 +310,7 @@ async def create_brand(
 @mcp.tool()
 @require_scopes("okta.brands.manage")
 @validate_ids("brand_id")
+@json_response
 async def replace_brand(
     ctx: Context,
     brand_id: str,
@@ -381,8 +387,15 @@ async def replace_brand(
             logger.error(f"Okta API error while replacing brand {brand_id}: {err}")
             return {"error": str(err)}
 
+        if brand is None:
+            return none_body_error(
+                "replace_brand",
+                f"replacing brand {brand_id!r}",
+                "Re-fetch with get_brand() to confirm the current state.",
+            )
+
         logger.info(f"Successfully replaced brand: {brand_id}")
-        return _serialize_brand(brand)
+        return brand
 
     except Exception as e:
         logger.error(f"Exception while replacing brand {brand_id}: {type(e).__name__}: {e}")
@@ -396,6 +409,7 @@ async def replace_brand(
 @mcp.tool()
 @require_scopes("okta.brands.manage")
 @validate_ids("brand_id")
+@json_response
 async def delete_brand(
     ctx: Context,
     brand_id: str,
@@ -459,6 +473,7 @@ async def delete_brand(
 @mcp.tool()
 @require_scopes("okta.brands.read")
 @validate_ids("brand_id")
+@json_response
 async def list_brand_domains(
     ctx: Context,
     brand_id: str,
@@ -496,19 +511,15 @@ async def list_brand_domains(
             logger.info(f"No domains found for brand: {brand_id}")
             return {"domains": [], "total_fetched": 0}
 
-        # brand_domains is a BrandDomains model with a .domains list attribute
+        # brand_domains is a BrandDomains model with a .domains list attribute.
+        # The outer @json_response decorator flattens raw SDK models via
+        # to_jsonable, so we can return the list untouched.
         raw_domains = getattr(brand_domains, "domains", None) or []
-        serialized: List[Dict[str, Any]] = []
-        for domain in raw_domains:
-            if hasattr(domain, "model_dump"):
-                serialized.append(domain.model_dump(by_alias=True, exclude_none=True))
-            else:
-                serialized.append(dict(domain))
 
-        logger.info(f"Successfully retrieved {len(serialized)} domain(s) for brand: {brand_id}")
+        logger.info(f"Successfully retrieved {len(raw_domains)} domain(s) for brand: {brand_id}")
         return {
-            "domains": serialized,
-            "total_fetched": len(serialized),
+            "domains": raw_domains,
+            "total_fetched": len(raw_domains),
         }
 
     except Exception as e:

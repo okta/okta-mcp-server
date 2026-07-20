@@ -44,6 +44,11 @@ def _make_user_mock(status: str = "PROVISIONED"):
     user.status = status
     user.profile = MagicMock()
     user.profile.email = PROFILE["email"]
+    user.to_dict.return_value = {
+        "id": "00uTESTUSER0000001",
+        "status": status,
+        "profile": {"email": PROFILE["email"]},
+    }
     return user
 
 
@@ -64,7 +69,7 @@ class TestCreateUserActivateParam:
         assert isinstance(call_args[0], CreateUserRequest)
         assert call_args[0].profile.email == PROFILE["email"]
         assert call_args[1] == True
-        assert result[0].status == "PROVISIONED"
+        assert result[0]["status"] == "PROVISIONED"
 
     @pytest.mark.asyncio
     @patch("okta_mcp_server.tools.users.users.get_okta_client")
@@ -80,7 +85,7 @@ class TestCreateUserActivateParam:
         assert isinstance(call_args[0], CreateUserRequest)
         assert call_args[0].profile.email == PROFILE["email"]
         assert call_args[1] == True
-        assert result[0].status == "PROVISIONED"
+        assert result[0]["status"] == "PROVISIONED"
 
     @pytest.mark.asyncio
     @patch("okta_mcp_server.tools.users.users.get_okta_client")
@@ -96,7 +101,7 @@ class TestCreateUserActivateParam:
         assert isinstance(call_args[0], CreateUserRequest)
         assert call_args[0].profile.email == PROFILE["email"]
         assert call_args[1] == False
-        assert result[0].status == "STAGED"
+        assert result[0]["status"] == "STAGED"
 
     @pytest.mark.asyncio
     @patch("okta_mcp_server.tools.users.users.get_okta_client")
@@ -108,7 +113,7 @@ class TestCreateUserActivateParam:
 
         result = await create_user(profile=PROFILE, ctx=_make_ctx())
 
-        assert "Error" in result[0]
+        assert "error" in result[0]
 
     @pytest.mark.asyncio
     @patch("okta_mcp_server.tools.users.users.get_okta_client")
@@ -118,7 +123,7 @@ class TestCreateUserActivateParam:
 
         result = await create_user(profile=PROFILE, ctx=_make_ctx())
 
-        assert "Exception" in result[0]
+        assert "exception" in result[0]
 
     @pytest.mark.asyncio
     async def test_invalid_activate_type_returns_descriptive_error(self):
@@ -126,6 +131,6 @@ class TestCreateUserActivateParam:
         result = await create_user(profile=PROFILE, activate="false", ctx=_make_ctx())  # type: ignore[arg-type]
 
         assert len(result) == 1
-        assert result[0].startswith("Error:")
-        assert "activate" in result[0]
-        assert "bool" in result[0]
+        err = result[0]["error"]
+        assert "activate" in err
+        assert "bool" in err

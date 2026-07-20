@@ -376,7 +376,7 @@ def validate_ids(*id_params: str, error_return_type: str = "list"):
                             if error_return_type == "dict":
                                 return {"error": str(e)}
                             else:  # default to list
-                                return [f"Error: {e}"]
+                                return [{"error": str(e)}]
 
             return await func(*args, **kwargs)
 
@@ -399,7 +399,7 @@ def validate_ids(*id_params: str, error_return_type: str = "list"):
                             if error_return_type == "dict":
                                 return {"error": str(e)}
                             else:
-                                return [f"Error: {e}"]
+                                return [{"error": str(e)}]
 
             return func(*args, **kwargs)
 
@@ -552,7 +552,7 @@ def validate_os_version_params(*param_names: str, error_return_type: str = "dict
             if error:
                 if error_return_type == "dict":
                     return {"error": error}
-                return [f"Error: {error}"]
+                return [{"error": error}]
             return await func(*args, **kwargs)
 
         @functools.wraps(func)
@@ -564,7 +564,7 @@ def validate_os_version_params(*param_names: str, error_return_type: str = "dict
             if error:
                 if error_return_type == "dict":
                     return {"error": error}
-                return [f"Error: {error}"]
+                return [{"error": error}]
             return func(*args, **kwargs)
 
         if inspect.iscoroutinefunction(func):

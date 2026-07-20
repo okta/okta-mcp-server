@@ -21,11 +21,13 @@ from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConf
 from okta_mcp_server.utils.messages import DEACTIVATE_USER, DELETE_USER
 from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
 from okta_mcp_server.utils.scope_guard import require_scopes
+from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import validate_ids
 
 
 @mcp.tool()
 @require_scopes("okta.users.read", error_return_type="list")
+@json_response
 async def list_users(
     ctx: Context,
     search: str = "",
@@ -196,6 +198,7 @@ async def list_users(
 
 @mcp.tool()
 @require_scopes("okta.users.read", error_return_type="list")
+@json_response
 async def get_user_profile_attributes(ctx: Context = None) -> list:
     """List all user profile attributes supported by your Okta org.
     This is helpful in case you need to check if the user profile attribute is valid.
@@ -229,12 +232,13 @@ async def get_user_profile_attributes(ctx: Context = None) -> list:
         return users  # no user has been created yet
     except Exception as e:
         logger.error(f"Exception while fetching profile attributes: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
 
 
 @mcp.tool()
 @require_scopes("okta.users.read", error_return_type="list")
 @validate_ids("user_id")
+@json_response
 async def get_user(user_id: str, ctx: Context = None) -> list:
     """Get a user by ID from the Okta organization
 
@@ -258,17 +262,27 @@ async def get_user(user_id: str, ctx: Context = None) -> list:
 
         if err:
             logger.error(f"Okta API error while getting user {user_id}: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
+
+        if user is None:
+            return [
+                none_body_error(
+                    "get_user",
+                    f"retrieving user {user_id!r}",
+                    "Verify the ID with list_users().",
+                )
+            ]
 
         logger.info(f"Successfully retrieved user: {user.profile.email if hasattr(user, 'profile') else user_id}")
         return [user]
     except Exception as e:
         logger.error(f"Exception while getting user {user_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
 
 
 @mcp.tool()
 @require_scopes("okta.users.manage", error_return_type="list")
+@json_response
 async def create_user(profile: dict, activate: bool = True, ctx: Context = None) -> list:
     """Create a user in the Okta organization.
 
@@ -299,7 +313,7 @@ async def create_user(profile: dict, activate: bool = True, ctx: Context = None)
             "Pass activate=true to create an active user or activate=false to create a STAGED user."
         )
         logger.error(msg)
-        return [f"Error: {msg}"]
+        return [{"error": msg}]
 
     logger.debug(
         f"User profile: email={profile.get('email', 'N/A')}, login={profile.get('login', 'N/A')}, activate={activate}"
@@ -317,7 +331,16 @@ async def create_user(profile: dict, activate: bool = True, ctx: Context = None)
 
         if err:
             logger.error(f"Okta API error while creating user: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
+
+        if user is None:
+            return [
+                none_body_error(
+                    "create_user",
+                    f"creating user {profile.get('login', profile.get('email', 'N/A'))!r}",
+                    "Use list_users() to confirm and retrieve the new user.",
+                )
+            ]
 
         logger.info(
             f"Successfully created user: {user.id} ({user.profile.email if hasattr(user, 'profile') else 'N/A'})"
@@ -325,12 +348,13 @@ async def create_user(profile: dict, activate: bool = True, ctx: Context = None)
         return [user]
     except Exception as e:
         logger.error(f"Exception while creating user: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
 
 
 @mcp.tool()
 @require_scopes("okta.users.manage", error_return_type="list")
 @validate_ids("user_id")
+@json_response
 async def update_user(user_id: str, profile: dict, ctx: Context = None) -> list:
     """Update a user in the Okta organization.
 
@@ -357,18 +381,28 @@ async def update_user(user_id: str, profile: dict, ctx: Context = None) -> list:
 
         if err:
             logger.error(f"Okta API error while updating user {user_id}: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
+
+        if user is None:
+            return [
+                none_body_error(
+                    "update_user",
+                    f"updating user {user_id!r}",
+                    "Re-fetch with get_user() to confirm the current state.",
+                )
+            ]
 
         logger.info(f"Successfully updated user: {user_id}")
         return [user]
     except Exception as e:
         logger.error(f"Exception while updating user {user_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
 
 
 @mcp.tool()
 @require_scopes("okta.users.manage", error_return_type="list")
 @validate_ids("user_id")
+@json_response
 async def deactivate_user(user_id: str, ctx: Context = None) -> list:
     """Deactivates a user from the Okta organization.
 
@@ -406,18 +440,19 @@ async def deactivate_user(user_id: str, ctx: Context = None) -> list:
 
         if err:
             logger.error(f"Okta API error while deactivating user {user_id}: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
 
         logger.info(f"Successfully deactivated user: {user_id}")
-        return [f"User {user_id} deactivated successfully."]
+        return [{"message": f"User {user_id} deactivated successfully."}]
     except Exception as e:
         logger.error(f"Exception while deactivating user {user_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
 
 
 @mcp.tool()
 @require_scopes("okta.users.manage", error_return_type="list")
 @validate_ids("user_id")
+@json_response
 async def delete_deactivated_user(user_id: str, ctx: Context = None) -> list:
     """Delete a user from the Okta organization who has already been deactivated or deprovisioned.
 
@@ -454,16 +489,17 @@ async def delete_deactivated_user(user_id: str, ctx: Context = None) -> list:
 
         if err:
             logger.error(f"Okta API error while deleting user {user_id}: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
 
         logger.info(f"Successfully deleted user: {user_id}")
-        return [f"User {user_id} deleted successfully."]
+        return [{"message": f"User {user_id} deleted successfully."}]
     except Exception as e:
         logger.error(f"Exception while deleting user {user_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
 
 
 @mcp.tool()
+@json_response
 async def export_users_csv(
     ctx: Context,
     output_path: str = "/tmp/okta_users_export.csv",

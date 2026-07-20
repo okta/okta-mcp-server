@@ -41,26 +41,8 @@ from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DELETE_CUSTOM_DOMAIN
 from okta_mcp_server.utils.scope_guard import require_scopes
+from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import InvalidFilePathError, validate_file_path, validate_ids
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-def _serialize_domain(domain) -> Dict[str, Any]:
-    """Serialize a DomainResponse Pydantic model to a plain camelCase dict.
-
-    Uses ``model_dump(by_alias=True, exclude_none=True)`` so that all SDK
-    aliases (e.g. ``brandId``, ``dnsRecords``) are used in the output and
-    ``None`` fields are omitted for a compact, readable response.
-    """
-    if domain is None:
-        return {}
-    try:
-        return domain.model_dump(by_alias=True, exclude_none=True)
-    except Exception:
-        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +51,7 @@ def _serialize_domain(domain) -> Dict[str, Any]:
 
 @mcp.tool()
 @require_scopes("okta.domains.read")
+@json_response
 async def list_custom_domains(ctx: Context) -> Dict[str, Any]:
     """List all custom domains in the Okta organization.
 
@@ -105,11 +88,10 @@ async def list_custom_domains(ctx: Context) -> Dict[str, Any]:
             return {"error": str(err)}
 
         domains = getattr(domain_list, "domains", None) or []
-        serialized = [_serialize_domain(d) for d in domains]
-        logger.info(f"Successfully retrieved {len(serialized)} custom domain(s)")
+        logger.info(f"Successfully retrieved {len(domains)} custom domain(s)")
         return {
-            "domains": serialized,
-            "total_fetched": len(serialized),
+            "domains": domains,
+            "total_fetched": len(domains),
         }
 
     except Exception as e:
@@ -123,6 +105,7 @@ async def list_custom_domains(ctx: Context) -> Dict[str, Any]:
 
 @mcp.tool()
 @require_scopes("okta.domains.manage")
+@json_response
 async def create_custom_domain(
     ctx: Context,
     domain: str,
@@ -167,11 +150,14 @@ async def create_custom_domain(
         client = await get_okta_client(manager)
 
         # Check for an existing domain with the same FQDN before creating.
+        # Case-insensitive per RFC 1035, matching the refetch fallback below.
         existing_list, _, list_err = await client.list_custom_domains()
         if not list_err and existing_list:
             existing_domains = getattr(existing_list, "domains", None) or []
+            target_domain = domain.lower()
             for existing in existing_domains:
-                if getattr(existing, "domain", None) == domain:
+                existing_fqdn = getattr(existing, "domain", None)
+                if isinstance(existing_fqdn, str) and existing_fqdn.lower() == target_domain:
                     existing_id = getattr(existing, "id", "unknown")
                     logger.warning(
                         f"Custom domain '{domain}' already exists (id: {existing_id})"
@@ -193,9 +179,49 @@ async def create_custom_domain(
             logger.error(f"Okta API error while creating custom domain {domain!r}: {err}")
             return {"error": str(err)}
 
-        result = _serialize_domain(created)
-        logger.info(f"Successfully created custom domain '{domain}' with id: {result.get('id')}")
-        return result
+        # The Okta Python SDK's ``create_custom_domain`` returns
+        # ``(None, response, None)`` when the HTTP response body is empty or
+        # returns 204 No Content (see okta.api.custom_domain_api).  The
+        # resource IS successfully created on Okta in that scenario, so fall
+        # back to ``list_custom_domains`` and locate the freshly-created
+        # domain by FQDN so the caller still receives the persisted object.
+        #
+        # ``GET /api/v1/domains`` does not paginate — all custom domains for
+        # the org are returned in a single response — so a plain list scan is
+        # sufficient here.  FQDN comparison is case-insensitive per RFC 1035
+        # to guard against Okta normalizing the stored ``domain`` field.
+        if created is None:
+            logger.info(
+                f"SDK returned no body for create_custom_domain; refetching '{domain}' "
+                "via list_custom_domains"
+            )
+            refetched_list, _, refetch_err = await client.list_custom_domains()
+            if refetch_err:
+                return {
+                    "error": (
+                        f"Custom domain '{domain}' was created on Okta but the follow-up "
+                        f"list_custom_domains failed: {refetch_err}"
+                    )
+                }
+            target_domain = domain.lower()
+            for candidate in getattr(refetched_list, "domains", None) or []:
+                candidate_fqdn = getattr(candidate, "domain", None)
+                if isinstance(candidate_fqdn, str) and candidate_fqdn.lower() == target_domain:
+                    created = candidate
+                    break
+            if created is None:
+                return {
+                    "error": (
+                        f"Custom domain '{domain}' create request succeeded but the resource "
+                        "was not returned by list_custom_domains. It may still exist on Okta; "
+                        "verify with list_custom_domains()."
+                    )
+                }
+
+        logger.info(
+            f"Successfully created custom domain '{domain}' with id: {getattr(created, 'id', None)}"
+        )
+        return created
 
     except Exception as e:
         logger.error(f"Exception while creating custom domain: {type(e).__name__}: {e}")
@@ -209,6 +235,7 @@ async def create_custom_domain(
 @mcp.tool()
 @require_scopes("okta.domains.read")
 @validate_ids("domain_id")
+@json_response
 async def get_custom_domain(
     ctx: Context,
     domain_id: str,
@@ -234,9 +261,17 @@ async def get_custom_domain(
             logger.error(f"Okta API error while retrieving custom domain {domain_id!r}: {err}")
             return {"error": str(err)}
 
-        result = _serialize_domain(domain)
+        if domain is None:
+            # Guard against (None, response, None) — the previous per-module
+            # ``_serialize_domain`` helper silently returned ``{}`` here.
+            return none_body_error(
+                "get_custom_domain",
+                f"retrieving custom domain {domain_id!r}",
+                "Verify the ID with list_custom_domains().",
+            )
+
         logger.info(f"Successfully retrieved custom domain: {domain_id}")
-        return result
+        return domain
 
     except Exception as e:
         logger.error(f"Exception while retrieving custom domain {domain_id}: {type(e).__name__}: {e}")
@@ -250,6 +285,7 @@ async def get_custom_domain(
 @mcp.tool()
 @require_scopes("okta.domains.manage")
 @validate_ids("domain_id", "brand_id")
+@json_response
 async def replace_custom_domain(
     ctx: Context,
     domain_id: str,
@@ -286,9 +322,15 @@ async def replace_custom_domain(
             logger.error(f"Okta API error while replacing brand for domain {domain_id!r}: {err}")
             return {"error": str(err)}
 
-        result = _serialize_domain(updated)
+        if updated is None:
+            return none_body_error(
+                "replace_custom_domain",
+                f"replacing brand for custom domain {domain_id!r}",
+                "Re-fetch with get_custom_domain() to confirm the new brand association.",
+            )
+
         logger.info(f"Successfully updated brand for custom domain: {domain_id}")
-        return result
+        return updated
 
     except Exception as e:
         logger.error(f"Exception while replacing custom domain brand: {type(e).__name__}: {e}")
@@ -302,6 +344,7 @@ async def replace_custom_domain(
 @mcp.tool()
 @require_scopes("okta.domains.manage")
 @validate_ids("domain_id")
+@json_response
 async def delete_custom_domain(
     ctx: Context,
     domain_id: str,
@@ -364,6 +407,7 @@ async def delete_custom_domain(
 @mcp.tool()
 @require_scopes("okta.domains.manage")
 @validate_ids("domain_id")
+@json_response
 async def upsert_custom_domain_certificate(
     ctx: Context,
     domain_id: str,
@@ -463,6 +507,7 @@ async def upsert_custom_domain_certificate(
 @mcp.tool()
 @require_scopes("okta.domains.manage")
 @validate_ids("domain_id")
+@json_response
 async def verify_custom_domain(
     ctx: Context,
     domain_id: str,
@@ -518,10 +563,17 @@ async def verify_custom_domain(
             logger.error(f"Okta API error while verifying domain {domain_id!r}: {err}")
             return {"error": str(err)}
 
-        result = _serialize_domain(verified)
-        validation_status = result.get("validationStatus", "unknown")
+        if verified is None:
+            return none_body_error(
+                "verify_custom_domain",
+                f"verifying custom domain {domain_id!r}",
+                "Re-fetch with get_custom_domain() to confirm the current validationStatus.",
+            )
+
+        _raw_status = getattr(verified, "validation_status", None)
+        validation_status = getattr(_raw_status, "value", _raw_status) or "unknown"
         logger.info(f"Custom domain {domain_id!r} verification result: {validation_status}")
-        return result
+        return verified
 
     except Exception as e:
         logger.error(f"Exception while verifying custom domain {domain_id}: {type(e).__name__}: {e}")

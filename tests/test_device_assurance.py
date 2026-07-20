@@ -913,7 +913,10 @@ class TestGetDeviceAssurancePolicy:
 
     @pytest.mark.asyncio
     @patch("okta_mcp_server.tools.device_assurance.device_assurance.get_okta_client")
-    async def test_returns_none_when_policy_not_found(self, mock_get_client, ctx_no_elicitation):
+    async def test_none_body_returns_error_dict(self, mock_get_client, ctx_no_elicitation):
+        """Fresh-review finding: this used to silently return bare None on the
+        Okta SDK's (None, response, None) quirk instead of an actionable
+        error dict, unlike every other get_*/create_*/replace_* tool."""
         client = AsyncMock()
         client.get_device_assurance_policy.return_value = (None, MagicMock(), None)
         mock_get_client.return_value = client
@@ -922,7 +925,9 @@ class TestGetDeviceAssurancePolicy:
             ctx=ctx_no_elicitation, device_assurance_id=DEVICE_ASSURANCE_ID
         )
 
-        assert result is None
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert DEVICE_ASSURANCE_ID in result["error"]
 
     @pytest.mark.asyncio
     @patch("okta_mcp_server.tools.device_assurance.device_assurance.get_okta_client")
@@ -1059,7 +1064,10 @@ class TestCreateDeviceAssurancePolicy:
     @pytest.mark.asyncio
     @patch("okta_mcp_server.tools.device_assurance.device_assurance.DeviceAssurance")
     @patch("okta_mcp_server.tools.device_assurance.device_assurance.get_okta_client")
-    async def test_returns_none_when_api_returns_no_policy(self, mock_get_client, mock_da_cls, ctx_no_elicitation):
+    async def test_none_body_returns_error_dict(self, mock_get_client, mock_da_cls, ctx_no_elicitation):
+        """Fresh-review finding: this used to silently return bare None on the
+        Okta SDK's (None, response, None) quirk instead of an actionable
+        error dict, unlike every other get_*/create_*/replace_* tool."""
         client = AsyncMock()
         client.create_device_assurance_policy.return_value = (None, MagicMock(), None)
         mock_get_client.return_value = client
@@ -1070,7 +1078,68 @@ class TestCreateDeviceAssurancePolicy:
             policy_data={"name": "Test", "platform": "MACOS"},
         )
 
-        assert result is None
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert "Test" in result["error"]
+
+    # -----------------------------------------------------------------
+    # PR #90 review: policy_data type / schema guardrails
+    #
+    # ``policy_data`` is typed as ``Dict[str, Any]`` at the FastMCP boundary so
+    # that the tool body \u2014 not FastMCP's own validator \u2014 owns the error
+    # response.  These tests lock in that any non-dict input, or any dict that
+    # violates ``PolicyDataInput`` (extra fields, or the explicit
+    # ``osVersion`` guard), returns a JSON-native ``{"error": ...}`` dict
+    # instead of leaking a plain-text ``pydantic.ValidationError``.
+    # -----------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "bad_input", ["not-a-dict", 42, 3.14, ["also", "wrong"], True, None]
+    )
+    async def test_non_dict_policy_data_returns_json_error(
+        self, bad_input, ctx_no_elicitation
+    ):
+        result = await create_device_assurance_policy(
+            ctx=ctx_no_elicitation,
+            policy_data=bad_input,
+        )
+
+        assert isinstance(result, dict)
+        assert result.get("error") == "policy_data must be an object (dict)."
+
+    @pytest.mark.asyncio
+    async def test_extra_field_returns_json_validation_error(self, ctx_no_elicitation):
+        # PolicyDataInput has ``extra="forbid"``; unknown keys must surface as
+        # a JSON error dict, not a raw Pydantic ValidationError.
+        result = await create_device_assurance_policy(
+            ctx=ctx_no_elicitation,
+            policy_data={"name": "X", "platform": "MACOS", "bogus": True},
+        )
+
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert "bogus" in result["error"].lower() or "extra" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_os_version_in_policy_data_returns_json_error(
+        self, ctx_no_elicitation
+    ):
+        # The model_validator rejects ``osVersion`` inside policy_data \u2014 the
+        # tool must surface this as a JSON error dict rather than let the
+        # ValidationError propagate.
+        result = await create_device_assurance_policy(
+            ctx=ctx_no_elicitation,
+            policy_data={
+                "name": "X",
+                "platform": "MACOS",
+                "osVersion": {"minimum": "14.0.0"},
+            },
+        )
+
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert "osVersion" in result["error"]
 
 
 # ===========================================================================
@@ -1259,3 +1328,56 @@ class TestReplaceDeviceAssurancePolicy:
         assert "error" in result
         assert "403" in result["error"]
         assert "okta.deviceAssurance.manage" in result["error"]
+
+    # -----------------------------------------------------------------
+    # PR #90 review: policy_data type / schema guardrails
+    # Mirror of the create-side tests above \u2014 replace_device_assurance_policy
+    # accepts the same ``Dict[str, Any]`` boundary and must surface any
+    # malformed input as a JSON ``{"error": ...}`` dict.
+    # -----------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "bad_input", ["not-a-dict", 42, 3.14, ["also", "wrong"], True, None]
+    )
+    async def test_non_dict_policy_data_returns_json_error(
+        self, bad_input, ctx_no_elicitation
+    ):
+        result = await replace_device_assurance_policy(
+            ctx=ctx_no_elicitation,
+            device_assurance_id=DEVICE_ASSURANCE_ID,
+            policy_data=bad_input,
+        )
+
+        assert isinstance(result, dict)
+        assert result.get("error") == "policy_data must be an object (dict)."
+
+    @pytest.mark.asyncio
+    async def test_extra_field_returns_json_validation_error(self, ctx_no_elicitation):
+        result = await replace_device_assurance_policy(
+            ctx=ctx_no_elicitation,
+            device_assurance_id=DEVICE_ASSURANCE_ID,
+            policy_data={"name": "X", "platform": "MACOS", "bogus": True},
+        )
+
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert "bogus" in result["error"].lower() or "extra" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_os_version_in_policy_data_returns_json_error(
+        self, ctx_no_elicitation
+    ):
+        result = await replace_device_assurance_policy(
+            ctx=ctx_no_elicitation,
+            device_assurance_id=DEVICE_ASSURANCE_ID,
+            policy_data={
+                "name": "X",
+                "platform": "MACOS",
+                "osVersion": {"minimum": "14.0.0"},
+            },
+        )
+
+        assert isinstance(result, dict)
+        assert "error" in result
+        assert "osVersion" in result["error"]

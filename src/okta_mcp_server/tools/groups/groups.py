@@ -16,11 +16,13 @@ from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fall
 from okta_mcp_server.utils.messages import DELETE_GROUP
 from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
 from okta_mcp_server.utils.scope_guard import require_scopes
+from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import validate_ids
 
 
 @mcp.tool()
 @require_scopes("okta.groups.read", error_return_type="list")
+@json_response
 async def list_groups(
     ctx: Context,
     search: str = "",
@@ -125,6 +127,7 @@ async def list_groups(
 @mcp.tool()
 @require_scopes("okta.groups.read", error_return_type="list")
 @validate_ids("group_id")
+@json_response
 async def get_group(group_id: str, ctx: Context = None) -> list:
     """Get a group by ID from the Okta organization
 
@@ -148,17 +151,27 @@ async def get_group(group_id: str, ctx: Context = None) -> list:
 
         if err:
             logger.error(f"Okta API error while getting group {group_id}: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
+
+        if group is None:
+            return [
+                none_body_error(
+                    "get_group",
+                    f"retrieving group {group_id!r}",
+                    "Verify the ID with list_groups().",
+                )
+            ]
 
         logger.info(f"Successfully retrieved group: {group_id}")
         return [group]
     except Exception as e:
         logger.error(f"Exception while getting group {group_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
 
 
 @mcp.tool()
 @require_scopes("okta.groups.manage", error_return_type="list")
+@json_response
 async def create_group(profile: dict, ctx: Context = None) -> list:
     """Create a group in the Okta organization.
 
@@ -184,7 +197,16 @@ async def create_group(profile: dict, ctx: Context = None) -> list:
 
         if err:
             logger.error(f"Okta API error while creating group: {err}")
-            return {"error": f"Error: {err}"}
+            return [{"error": str(err)}]
+
+        if group is None:
+            return [
+                none_body_error(
+                    "create_group",
+                    f"creating group {profile.get('name', 'N/A')!r}",
+                    "Use list_groups() to confirm and retrieve the new group.",
+                )
+            ]
 
         profile_instance = getattr(group.profile, "actual_instance", None) if hasattr(group, "profile") else None
         group_name = getattr(profile_instance, "name", "N/A") if profile_instance is not None else "N/A"
@@ -192,12 +214,13 @@ async def create_group(profile: dict, ctx: Context = None) -> list:
         return [group]
     except Exception as e:
         logger.error(f"Exception while creating group: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
 
 
 @mcp.tool()
 @require_scopes("okta.groups.manage", error_return_type="list")
 @validate_ids("group_id")
+@json_response
 async def delete_group(group_id: str, ctx: Context = None) -> list:
     """Delete a group by ID from the Okta organization.
 
@@ -261,6 +284,7 @@ async def delete_group(group_id: str, ctx: Context = None) -> list:
 @mcp.tool()
 @require_scopes("okta.groups.manage", error_return_type="list")
 @validate_ids("group_id")
+@json_response
 async def confirm_delete_group(group_id: str, confirmation: str, ctx: Context = None) -> list:
     """Confirm and execute group deletion after receiving confirmation.
 
@@ -308,6 +332,7 @@ async def confirm_delete_group(group_id: str, confirmation: str, ctx: Context = 
 @mcp.tool()
 @require_scopes("okta.groups.manage", error_return_type="list")
 @validate_ids("group_id")
+@json_response
 async def update_group(group_id: str, profile: dict, ctx: Context = None) -> list:
     """Update a group by ID in the Okta organization.
 
@@ -334,18 +359,28 @@ async def update_group(group_id: str, profile: dict, ctx: Context = None) -> lis
 
         if err:
             logger.error(f"Okta API error while updating group {group_id}: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
+
+        if group is None:
+            return [
+                none_body_error(
+                    "update_group",
+                    f"updating group {group_id!r}",
+                    "Re-fetch with get_group() to confirm the current state.",
+                )
+            ]
 
         logger.info(f"Successfully updated group: {group_id}")
         return [group]
     except Exception as e:
         logger.error(f"Exception while updating group {group_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
 
 
 @mcp.tool()
 @require_scopes("okta.groups.read", error_return_type="list")
 @validate_ids("group_id", error_return_type="dict")
+@json_response
 async def list_group_users(
     group_id: str,
     ctx: Context = None,
@@ -443,6 +478,7 @@ async def list_group_users(
 @mcp.tool()
 @require_scopes("okta.groups.read", error_return_type="dict")
 @validate_ids("group_id", error_return_type="dict")
+@json_response
 async def list_group_apps(
     group_id: str,
     ctx: Context = None,
@@ -522,6 +558,7 @@ async def list_group_apps(
 @mcp.tool()
 @require_scopes("okta.groups.manage", error_return_type="list")
 @validate_ids("group_id", "user_id")
+@json_response
 async def add_user_to_group(group_id: str, user_id: str, ctx: Context = None) -> list:
     """Add a user to a group by ID in the Okta organization.
 
@@ -553,7 +590,7 @@ async def add_user_to_group(group_id: str, user_id: str, ctx: Context = None) ->
         if not groups_err and user_groups:
             if any(g.id == group_id for g in user_groups):
                 logger.info(f"User {user_id} is already a member of group {group_id}")
-                return [f"User {user_id} is already a member of group {group_id}"]
+                return [{"message": f"User {user_id} is already a member of group {group_id}"}]
 
         logger.debug(f"Calling Okta API to add user {user_id} to group {group_id}")
         result = await client.assign_user_to_group(group_id, user_id)
@@ -561,18 +598,19 @@ async def add_user_to_group(group_id: str, user_id: str, ctx: Context = None) ->
 
         if err:
             logger.error(f"Okta API error while adding user {user_id} to group {group_id}: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
 
         logger.info(f"Successfully added user {user_id} to group {group_id}")
-        return [f"User {user_id} added to group {group_id} successfully"]
+        return [{"message": f"User {user_id} added to group {group_id} successfully"}]
     except Exception as e:
         logger.error(f"Exception while adding user {user_id} to group {group_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
 
 
 @mcp.tool()
 @require_scopes("okta.groups.manage", error_return_type="list")
 @validate_ids("group_id", "user_id")
+@json_response
 async def remove_user_from_group(group_id: str, user_id: str, ctx: Context = None) -> list:
     """Remove a user from a group by ID in the Okta organization.
 
@@ -598,10 +636,10 @@ async def remove_user_from_group(group_id: str, user_id: str, ctx: Context = Non
 
         if err:
             logger.error(f"Okta API error while removing user {user_id} from group {group_id}: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
 
         logger.info(f"Successfully removed user {user_id} from group {group_id}")
-        return [f"User {user_id} removed from group {group_id} successfully"]
+        return [{"message": f"User {user_id} removed from group {group_id} successfully"}]
     except Exception as e:
         logger.error(f"Exception while removing user {user_id} from group {group_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]

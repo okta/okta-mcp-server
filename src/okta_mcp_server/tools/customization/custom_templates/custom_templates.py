@@ -73,6 +73,7 @@ from okta_mcp_server.utils.messages import (
 )
 from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
 from okta_mcp_server.utils.scope_guard import require_scopes
+from okta_mcp_server.utils.serialization import json_response
 from okta_mcp_server.utils.validation import validate_ids
 
 
@@ -82,6 +83,20 @@ from okta_mcp_server.utils.validation import validate_ids
 
 def _serialize(obj) -> Any:
     """Recursively serialise SDK v3 models and lists to plain Python types.
+
+    Kept intentionally as a per-module helper (unlike the equivalent helpers
+    removed from ``brands.py`` / ``email_domains.py`` / ``themes.py`` in the
+    #14 refactor).  The central ``@json_response`` boundary in
+    ``utils/serialization.py`` would default to the SDK's ``to_dict`` path,
+    which is wrong for the preview models this module handles.
+
+    Contract note (PR #90 review, cross-module consistency): the other
+    customization modules now return ``{"error": "..."}`` when the SDK
+    returns ``(None, response, None)``; this module keeps the legacy ``{}``
+    contract via ``_serialize(x) or {}`` at every call site because empty
+    bodies are a legitimate response for some template-preview endpoints.
+    Unify with the error-dict pattern in a follow-up if operator feedback
+    shows the ``{}`` case is confusing.
 
     We explicitly use ``model_dump`` (Pydantic v2) rather than ``to_dict``.
     The SDK-generated ``to_dict`` on preview models (e.g. ``EmailPreview``)
@@ -154,6 +169,7 @@ def _check_no_content_response(result) -> Optional[str]:
 @mcp.tool()
 @require_scopes("okta.templates.read")
 @validate_ids("brand_id")
+@json_response
 async def list_email_templates(
     ctx: Context,
     brand_id: str,
@@ -238,6 +254,7 @@ async def list_email_templates(
 @mcp.tool()
 @require_scopes("okta.templates.read")
 @validate_ids("brand_id")
+@json_response
 async def get_email_template(
     ctx: Context,
     brand_id: str,
@@ -287,6 +304,7 @@ async def get_email_template(
 @mcp.tool()
 @require_scopes("okta.templates.read")
 @validate_ids("brand_id")
+@json_response
 async def list_email_customizations(
     ctx: Context,
     brand_id: str,
@@ -365,6 +383,7 @@ async def list_email_customizations(
 @mcp.tool()
 @require_scopes("okta.templates.manage")
 @validate_ids("brand_id")
+@json_response
 async def create_email_customization(
     ctx: Context,
     brand_id: str,
@@ -427,8 +446,12 @@ async def create_email_customization(
                 if _cx_err or not _cx_page:
                     break
                 all_existing_cx.extend(_cx_page)
+        # Language tags are compared case-insensitively per BCP 47 (RFC 5646) --
+        # subtag casing is a convention, not a distinguishing feature.
+        target_language = language.lower()
         for ex in all_existing_cx:
-            if getattr(ex, "language", None) == language:
+            ex_language = getattr(ex, "language", None)
+            if isinstance(ex_language, str) and ex_language.lower() == target_language:
                 ex_id = getattr(ex, "id", "unknown")
                 logger.warning(
                     f"A '{language}' customization already exists for template "
@@ -465,6 +488,7 @@ async def create_email_customization(
 @mcp.tool()
 @require_scopes("okta.templates.read")
 @validate_ids("brand_id", "customization_id")
+@json_response
 async def get_email_customization(
     ctx: Context,
     brand_id: str,
@@ -510,6 +534,7 @@ async def get_email_customization(
 @mcp.tool()
 @require_scopes("okta.templates.manage")
 @validate_ids("brand_id", "customization_id")
+@json_response
 async def replace_email_customization(
     ctx: Context,
     brand_id: str,
@@ -578,6 +603,7 @@ async def replace_email_customization(
 @mcp.tool()
 @require_scopes("okta.templates.manage")
 @validate_ids("brand_id", "customization_id")
+@json_response
 async def delete_email_customization(
     ctx: Context,
     brand_id: str,
@@ -643,6 +669,7 @@ async def delete_email_customization(
 @mcp.tool()
 @require_scopes("okta.templates.manage")
 @validate_ids("brand_id")
+@json_response
 async def delete_all_email_customizations(
     ctx: Context,
     brand_id: str,
@@ -702,6 +729,7 @@ async def delete_all_email_customizations(
 @mcp.tool()
 @require_scopes("okta.templates.read")
 @validate_ids("brand_id", "customization_id")
+@json_response
 async def get_email_customization_preview(
     ctx: Context,
     brand_id: str,
@@ -751,6 +779,7 @@ async def get_email_customization_preview(
 @mcp.tool()
 @require_scopes("okta.templates.read")
 @validate_ids("brand_id")
+@json_response
 async def get_email_default_content(
     ctx: Context,
     brand_id: str,
@@ -798,6 +827,7 @@ async def get_email_default_content(
 @mcp.tool()
 @require_scopes("okta.templates.read")
 @validate_ids("brand_id")
+@json_response
 async def get_email_default_content_preview(
     ctx: Context,
     brand_id: str,
@@ -868,6 +898,7 @@ async def get_email_default_content_preview(
 @mcp.tool()
 @require_scopes("okta.templates.read")
 @validate_ids("brand_id")
+@json_response
 async def get_email_settings(
     ctx: Context,
     brand_id: str,
@@ -910,6 +941,7 @@ async def get_email_settings(
 @mcp.tool()
 @require_scopes("okta.templates.manage")
 @validate_ids("brand_id")
+@json_response
 async def replace_email_settings(
     ctx: Context,
     brand_id: str,
@@ -962,6 +994,7 @@ async def replace_email_settings(
 @mcp.tool()
 @require_scopes("okta.templates.manage")
 @validate_ids("brand_id")
+@json_response
 async def send_test_email(
     ctx: Context,
     brand_id: str,

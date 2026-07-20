@@ -124,13 +124,13 @@ class TestConfirmDeleteApplicationDeprecated:
         result = await confirm_delete_application(ctx=ctx_elicit_accept_true, app_id=APP_ID, confirmation="DELETE")
 
         mock_okta_client.delete_application.assert_awaited_once_with(APP_ID)
-        assert "deleted successfully" in result[0]
+        assert "deleted successfully" in result[0]["message"]
 
     @pytest.mark.asyncio
     async def test_incorrect_confirmation_cancels(self, ctx_elicit_accept_true):
         result = await confirm_delete_application(ctx=ctx_elicit_accept_true, app_id=APP_ID, confirmation="wrong")
 
-        assert "cancelled" in result[0].lower() or "Deletion cancelled" in result[0]
+        assert "cancelled" in result[0]["error"].lower()
 
     @pytest.mark.asyncio
     @patch("okta_mcp_server.tools.applications.applications.get_okta_client")
@@ -141,7 +141,7 @@ class TestConfirmDeleteApplicationDeprecated:
 
         result = await confirm_delete_application(ctx=ctx_elicit_accept_true, app_id=APP_ID, confirmation="DELETE")
 
-        assert "Error" in result[0]
+        assert "error" in result[0]
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +159,7 @@ class TestDeactivateApplicationElicitation:
         result = await deactivate_application(ctx=ctx_elicit_accept_true, app_id=APP_ID)
 
         mock_okta_client.deactivate_application.assert_awaited_once_with(APP_ID)
-        assert "deactivated successfully" in result[0]
+        assert "deactivated successfully" in result[0]["message"]
 
     @pytest.mark.asyncio
     async def test_accept_not_confirmed_cancels(self, ctx_elicit_accept_false):
@@ -188,7 +188,7 @@ class TestDeactivateApplicationElicitation:
 
         result = await deactivate_application(ctx=ctx_elicit_accept_true, app_id=APP_ID)
 
-        assert "Error" in result[0]
+        assert "error" in result[0]
 
     @pytest.mark.asyncio
     @patch("okta_mcp_server.tools.applications.applications.get_okta_client")
@@ -197,7 +197,7 @@ class TestDeactivateApplicationElicitation:
 
         result = await deactivate_application(ctx=ctx_elicit_accept_true, app_id=APP_ID)
 
-        assert "Exception" in result[0]
+        assert "exception" in result[0]
 
 
 # ---------------------------------------------------------------------------
@@ -219,7 +219,7 @@ class TestDeactivateApplicationFallback:
         result = await deactivate_application(ctx=ctx_no_elicitation, app_id=APP_ID)
 
         mock_okta_client.deactivate_application.assert_awaited_once_with(APP_ID)
-        assert "deactivated successfully" in result[0]
+        assert "deactivated successfully" in result[0]["message"]
 
     @pytest.mark.asyncio
     @patch("okta_mcp_server.tools.applications.applications.get_okta_client")
@@ -229,4 +229,4 @@ class TestDeactivateApplicationFallback:
         result = await deactivate_application(ctx=ctx_elicit_exception, app_id=APP_ID)
 
         mock_okta_client.deactivate_application.assert_awaited_once_with(APP_ID)
-        assert "deactivated successfully" in result[0]
+        assert "deactivated successfully" in result[0]["message"]

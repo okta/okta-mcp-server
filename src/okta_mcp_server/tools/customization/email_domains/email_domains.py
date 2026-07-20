@@ -43,6 +43,7 @@ from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fall
 from okta_mcp_server.utils.messages import DELETE_EMAIL_DOMAIN
 from okta_mcp_server.utils.pagination import extract_after_cursor
 from okta_mcp_server.utils.scope_guard import require_scopes
+from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import validate_ids
 
 # ---------------------------------------------------------------------------
@@ -59,26 +60,12 @@ for _member in list(_DNSRecordType):
 
 
 # ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-def _serialize(obj) -> Any:
-    """Recursively serialise Pydantic SDK models to plain Python types."""
-    if obj is None:
-        return None
-    if hasattr(obj, "model_dump"):
-        return obj.model_dump(by_alias=True, exclude_none=True)
-    if isinstance(obj, list):
-        return [_serialize(item) for item in obj]
-    return obj
-
-
-# ---------------------------------------------------------------------------
 # list_email_domains
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
 @require_scopes("okta.emailDomains.read")
+@json_response
 async def list_email_domains(
     ctx: Context,
     expand_brands: bool = False,
@@ -127,11 +114,10 @@ async def list_email_domains(
             return {"error": str(err)}
 
         domains = domain_list or []
-        serialized = [_serialize(d) for d in domains]
-        logger.info(f"Successfully retrieved {len(serialized)} email domain(s)")
+        logger.info(f"Successfully retrieved {len(domains)} email domain(s)")
         return {
-            "email_domains": serialized,
-            "total_fetched": len(serialized),
+            "email_domains": domains,
+            "total_fetched": len(domains),
         }
 
     except Exception as e:
@@ -145,6 +131,7 @@ async def list_email_domains(
 
 @mcp.tool()
 @require_scopes("okta.emailDomains.manage")
+@json_response
 async def create_email_domain(
     ctx: Context,
     brand_id: str,
@@ -202,8 +189,11 @@ async def create_email_domain(
                 if _list_err or not _page:
                     break
                 all_existing.extend(_page)
+        # Case-insensitive per RFC 1035, matching the refetch fallback below.
+        target_domain = domain.lower()
         for existing in all_existing:
-            if getattr(existing, "domain", None) == domain:
+            existing_fqdn = getattr(existing, "domain", None)
+            if isinstance(existing_fqdn, str) and existing_fqdn.lower() == target_domain:
                 existing_id = getattr(existing, "id", "unknown")
                 logger.warning(
                     f"Email domain '{domain}' already exists (id: {existing_id})"
@@ -231,6 +221,9 @@ async def create_email_domain(
         # The Okta Python SDK may return None for `created` even on a successful
         # 201 response due to a known response-parsing bug.  Fall back to a
         # list-and-filter lookup so we always return a meaningful result.
+        # FQDN comparison is case-insensitive per RFC 1035 to guard against
+        # Okta normalizing the stored `domain` field, mirroring the same fix
+        # in custom_domains.create_custom_domain.
         if created is None:
             logger.warning(
                 f"SDK returned None for newly-created domain {domain!r}; "
@@ -238,13 +231,14 @@ async def create_email_domain(
             )
             domain_list, _, list_err = await client.list_email_domains()
             if not list_err and domain_list:
+                target_domain = domain.lower()
                 for d in domain_list:
-                    if getattr(d, "domain", None) == domain:
+                    candidate_fqdn = getattr(d, "domain", None)
+                    if isinstance(candidate_fqdn, str) and candidate_fqdn.lower() == target_domain:
                         created = d
                         break
 
-        result = _serialize(created)
-        if result is None:
+        if created is None:
             logger.error(
                 f"Could not retrieve created email domain {domain!r} after creation."
             )
@@ -256,9 +250,9 @@ async def create_email_domain(
             }
 
         logger.info(
-            f"Successfully created email domain {domain!r} with id: {result.get('id')}"
+            f"Successfully created email domain {domain!r} with id: {getattr(created, 'id', None)}"
         )
-        return result
+        return created
 
     except Exception as e:
         logger.error(f"Exception while creating email domain: {type(e).__name__}: {e}")
@@ -272,6 +266,7 @@ async def create_email_domain(
 @mcp.tool()
 @require_scopes("okta.emailDomains.read")
 @validate_ids("email_domain_id")
+@json_response
 async def get_email_domain(
     ctx: Context,
     email_domain_id: str,
@@ -309,10 +304,14 @@ async def get_email_domain(
             return {"error": str(err)}
 
         if domain is None:
-            return {"error": f"Email domain {email_domain_id!r} not found."}
+            return none_body_error(
+                "get_email_domain",
+                f"retrieving email domain {email_domain_id!r}",
+                "Verify the ID with list_email_domains().",
+            )
 
         logger.info(f"Successfully retrieved email domain: {email_domain_id}")
-        return _serialize(domain)
+        return domain
 
     except Exception as e:
         logger.error(
@@ -329,6 +328,7 @@ async def get_email_domain(
 @mcp.tool()
 @require_scopes("okta.emailDomains.manage")
 @validate_ids("email_domain_id")
+@json_response
 async def replace_email_domain(
     ctx: Context,
     email_domain_id: str,
@@ -373,9 +373,15 @@ async def replace_email_domain(
             )
             return {"error": str(err)}
 
-        result = _serialize(updated)
+        if updated is None:
+            return none_body_error(
+                "replace_email_domain",
+                f"replacing email domain {email_domain_id!r}",
+                "Re-fetch with get_email_domain() to confirm the current state.",
+            )
+
         logger.info(f"Successfully replaced email domain: {email_domain_id}")
-        return result
+        return updated
 
     except Exception as e:
         logger.error(
@@ -392,6 +398,7 @@ async def replace_email_domain(
 @mcp.tool()
 @require_scopes("okta.emailDomains.manage")
 @validate_ids("email_domain_id")
+@json_response
 async def delete_email_domain(
     ctx: Context,
     email_domain_id: str,
@@ -474,6 +481,7 @@ async def delete_email_domain(
 @mcp.tool()
 @require_scopes("okta.emailDomains.manage")
 @validate_ids("email_domain_id")
+@json_response
 async def verify_email_domain(
     ctx: Context,
     email_domain_id: str,
@@ -545,20 +553,20 @@ async def verify_email_domain(
                     f"Okta API error while verifying email domain {email_domain_id!r}: {err}"
                 )
                 return {"error": str(err)}
-            serialized = _serialize(current)
-            status = serialized.get("validationStatus", "unknown") if serialized else "unknown"
+            _current_status = getattr(current, "validation_status", None)
+            status = getattr(_current_status, "value", _current_status) or "unknown"
             logger.info(
                 f"Email domain {email_domain_id!r} verify triggered; "
                 f"current validationStatus={status!r} (via fallback GET)"
             )
-            return serialized or {}
+            return current
 
-        serialized = _serialize(result)
-        status = serialized.get("validationStatus", "unknown") if serialized else "unknown"
+        _result_status = getattr(result, "validation_status", None)
+        status = getattr(_result_status, "value", _result_status) or "unknown"
         logger.info(
             f"Email domain {email_domain_id!r} verify result: validationStatus={status!r}"
         )
-        return serialized or {}
+        return result
 
     except Exception as e:
         logger.error(

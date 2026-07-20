@@ -206,16 +206,24 @@ def create_paginated_response(
 ) -> Dict[str, Any]:
     """Create a standardized paginated response format.
 
+    The returned dict may still contain raw SDK models in ``items`` and
+    ``pagination_info``.  Every caller of this helper is a tool decorated
+    with :func:`okta_mcp_server.utils.serialization.json_response`, so the
+    single serialization boundary at the tool return already normalizes the
+    payload through :func:`to_jsonable`.  We deliberately do not re-normalize
+    here to avoid walking large ``fetch_all=True`` payloads twice.
+
     Args:
-        items: List of items to return
+        items: List of items to return (raw SDK models or already-dict payloads)
         response: OktaAPIResponse object
         fetch_all_used: Whether fetch_all was used
         pagination_info: Additional pagination metadata
 
     Returns:
-        Dict with standardized pagination response format
+        Dict with standardized pagination response format.  Nested SDK models
+        are flattened by the outer ``@json_response`` decorator.
     """
-    result = {
+    result: Dict[str, Any] = {
         "items": items,
         "total_fetched": len(items),
         "has_more": False,

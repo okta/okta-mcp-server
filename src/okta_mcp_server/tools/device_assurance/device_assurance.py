@@ -12,13 +12,14 @@ from loguru import logger
 from mcp.server.fastmcp import Context
 from okta.exceptions.exceptions import ForbiddenException, UnauthorizedException
 from okta.models.device_assurance import DeviceAssurance
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DELETE_DEVICE_ASSURANCE_POLICY
 from okta_mcp_server.utils.scope_guard import require_scopes
+from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import validate_ids, validate_os_version_params
 
 
@@ -337,6 +338,7 @@ def _get_implication(attr: str, before: Any, after: Any) -> str:
 @mcp.tool()
 @require_scopes("okta.deviceAssurance.read")
 @validate_os_version_params("version_threshold")
+@json_response
 async def list_device_assurance_policies(
     ctx: Context, version_threshold: Optional[str] = None
 ) -> Dict[str, Any]:
@@ -495,6 +497,7 @@ async def list_device_assurance_policies(
 @mcp.tool()
 @require_scopes("okta.deviceAssurance.read")
 @validate_ids("device_assurance_id", error_return_type="dict")
+@json_response
 async def get_device_assurance_policy(
     ctx: Context, device_assurance_id: str
 ) -> Optional[Dict[str, Any]]:
@@ -544,7 +547,11 @@ async def get_device_assurance_policy(
             return {"error": str(err)}
 
         if not policy:
-            return None
+            return none_body_error(
+                "get_device_assurance_policy",
+                f"retrieving device assurance policy {device_assurance_id!r}",
+                "Verify the ID with list_device_assurance_policies().",
+            )
         policy_dict = policy.to_dict()
         unverifiable = _detect_unverifiable_attributes(policy_dict, resp)
         return _enrich_policy_with_attribute_status(policy_dict, unverifiable)
@@ -560,8 +567,9 @@ async def get_device_assurance_policy(
 @mcp.tool()
 @require_scopes("okta.deviceAssurance.manage")
 @validate_os_version_params("user_stated_os_version")
+@json_response
 async def create_device_assurance_policy(
-    ctx: Context, policy_data: PolicyDataInput, user_stated_os_version: Optional[str] = None
+    ctx: Context, policy_data: Dict[str, Any], user_stated_os_version: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
     """Create a new Device Assurance Policy.
 
@@ -617,11 +625,22 @@ async def create_device_assurance_policy(
         return _build_scope_error("create", 403)
 
     try:
-        # AC2: Intercept osVersion when the function is called directly (e.g. in tests)
-        # without going through Pydantic/FastMCP.  In production FastMCP calls, the
-        # PolicyDataInput model_validator fires first and the function is never reached
-        # if osVersion is present.
-        raw = policy_data if isinstance(policy_data, dict) else policy_data.as_api_dict()
+        # ``policy_data`` is declared as a plain dict at the FastMCP boundary so
+        # that a caller passing something other than an object is rejected with a
+        # JSON error dict here instead of a plain-text Pydantic ValidationError
+        # emitted by FastMCP's own argument-validation layer.  We still enforce
+        # the ``PolicyDataInput`` schema (including the osVersion-in-policy_data
+        # rejection) inside the function.
+        if not isinstance(policy_data, dict):
+            return {"error": "policy_data must be an object (dict)."}
+        try:
+            raw = PolicyDataInput(**policy_data).as_api_dict()
+        except ValidationError as ve:
+            return {"error": str(ve)}
+
+        # AC2: Intercept osVersion when the function is called directly (e.g. in
+        # tests) without going through Pydantic/FastMCP.  In production FastMCP
+        # calls, the PolicyDataInput model_validator has already fired above.
         if raw.get("osVersion") and user_stated_os_version is None:
             return {"error": _OS_VERSION_IN_POLICY_DATA_ERROR}
 
@@ -643,8 +662,15 @@ async def create_device_assurance_policy(
                 return _build_scope_error("create", err.status)
             return {"error": str(err)}
 
-        logger.info(f"Successfully created device assurance policy {policy.id if policy else 'unknown'}")
-        return policy.to_dict() if policy else None
+        if policy is None:
+            return none_body_error(
+                "create_device_assurance_policy",
+                f"creating device assurance policy {raw.get('name', 'N/A')!r}",
+                "Use list_device_assurance_policies() to confirm and retrieve the new policy.",
+            )
+
+        logger.info(f"Successfully created device assurance policy {policy.id}")
+        return policy
 
     except (ForbiddenException, UnauthorizedException) as e:
         logger.error(f"Access denied creating device assurance policy: {e}")
@@ -658,8 +684,9 @@ async def create_device_assurance_policy(
 @require_scopes("okta.deviceAssurance.manage")
 @validate_ids("device_assurance_id", error_return_type="dict")
 @validate_os_version_params("user_stated_os_version")
+@json_response
 async def replace_device_assurance_policy(
-    ctx: Context, device_assurance_id: str, policy_data: PolicyDataInput,
+    ctx: Context, device_assurance_id: str, policy_data: Dict[str, Any],
     user_stated_os_version: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Replace (fully update) an existing Device Assurance Policy.
@@ -741,8 +768,16 @@ async def replace_device_assurance_policy(
         return _build_scope_error("replace", 403)
 
     try:
+        # ``policy_data`` is a plain dict at the FastMCP boundary — see the
+        # equivalent guard in create_device_assurance_policy for the rationale.
+        if not isinstance(policy_data, dict):
+            return {"error": "policy_data must be an object (dict)."}
+        try:
+            raw = PolicyDataInput(**policy_data).as_api_dict()
+        except ValidationError as ve:
+            return {"error": str(ve)}
+
         # AC2: same guard as create — intercept osVersion in direct-call paths.
-        raw = policy_data if isinstance(policy_data, dict) else policy_data.as_api_dict()
         if raw.get("osVersion") and user_stated_os_version is None:
             return {"error": _OS_VERSION_IN_POLICY_DATA_ERROR}
 
@@ -789,7 +824,11 @@ async def replace_device_assurance_policy(
             return {"error": str(err)}
 
         if not policy:
-            return None
+            return none_body_error(
+                "replace_device_assurance_policy",
+                f"replacing device assurance policy {device_assurance_id!r}",
+                "Re-fetch with get_device_assurance_policy() to confirm the current state.",
+            )
 
         after_dict = policy.to_dict()
         after_unverifiable = _detect_unverifiable_attributes(after_dict, replace_resp)
@@ -820,6 +859,7 @@ async def replace_device_assurance_policy(
 @mcp.tool()
 @require_scopes("okta.deviceAssurance.manage")
 @validate_ids("device_assurance_id", error_return_type="dict")
+@json_response
 async def delete_device_assurance_policy(
     ctx: Context, device_assurance_id: str
 ) -> Dict[str, Any]:

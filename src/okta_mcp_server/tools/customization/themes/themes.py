@@ -57,21 +57,13 @@ from okta_mcp_server.utils.messages import (
     DELETE_THEME_LOGO,
 )
 from okta_mcp_server.utils.scope_guard import require_scopes
+from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import InvalidFilePathError, validate_file_path, validate_ids
 
 
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
-
-def _serialize_theme(theme) -> Dict[str, Any]:
-    """Serialize a ThemeResponse Pydantic model to a plain camelCase dict."""
-    if theme is None:
-        return {}
-    if hasattr(theme, "model_dump"):
-        return theme.model_dump(by_alias=True, exclude_none=True)
-    return dict(theme)
-
 
 _SIGN_IN_VARIANTS = {e.value for e in SignInPageTouchPointVariant}
 _DASHBOARD_VARIANTS = {e.value for e in EndUserDashboardTouchPointVariant}
@@ -87,6 +79,7 @@ _LOADING_VARIANTS = {e.value for e in LoadingPageTouchPointVariant}
 @mcp.tool()
 @require_scopes("okta.brands.read")
 @validate_ids("brand_id")
+@json_response
 async def list_brand_themes(
     ctx: Context,
     brand_id: str,
@@ -118,11 +111,10 @@ async def list_brand_themes(
             return {"error": str(err)}
 
         themes = themes or []
-        serialized = [_serialize_theme(t) for t in themes]
-        logger.info(f"Successfully retrieved {len(serialized)} theme(s) for brand: {brand_id}")
+        logger.info(f"Successfully retrieved {len(themes)} theme(s) for brand: {brand_id}")
         return {
-            "themes": serialized,
-            "total_fetched": len(serialized),
+            "themes": themes,
+            "total_fetched": len(themes),
         }
 
     except Exception as e:
@@ -137,6 +129,7 @@ async def list_brand_themes(
 @mcp.tool()
 @require_scopes("okta.brands.read")
 @validate_ids("brand_id", "theme_id")
+@json_response
 async def get_brand_theme(
     ctx: Context,
     brand_id: str,
@@ -166,8 +159,17 @@ async def get_brand_theme(
             logger.error(f"Okta API error while retrieving theme {theme_id}: {err}")
             return {"error": str(err)}
 
+        if theme is None:
+            # Guard against (None, response, None) — the previous per-module
+            # ``_serialize_theme`` helper silently returned ``{}`` here.
+            return none_body_error(
+                "get_brand_theme",
+                f"retrieving theme {theme_id!r} on brand {brand_id!r}",
+                "Verify the IDs with list_brand_themes(brand_id=...).",
+            )
+
         logger.info(f"Successfully retrieved theme: {theme_id}")
-        return _serialize_theme(theme)
+        return theme
 
     except Exception as e:
         logger.error(f"Exception while retrieving theme {theme_id}: {type(e).__name__}: {e}")
@@ -181,6 +183,7 @@ async def get_brand_theme(
 @mcp.tool()
 @require_scopes("okta.brands.manage")
 @validate_ids("brand_id", "theme_id")
+@json_response
 async def replace_brand_theme(
     ctx: Context,
     brand_id: str,
@@ -276,8 +279,15 @@ async def replace_brand_theme(
             logger.error(f"Okta API error while replacing theme {theme_id}: {err}")
             return {"error": str(err)}
 
+        if theme is None:
+            return none_body_error(
+                "replace_brand_theme",
+                f"replacing theme {theme_id!r} on brand {brand_id!r}",
+                "Re-fetch with get_brand_theme() to confirm the current state.",
+            )
+
         logger.info(f"Successfully replaced theme: {theme_id}")
-        return _serialize_theme(theme)
+        return theme
 
     except Exception as e:
         logger.error(f"Exception while replacing theme {theme_id}: {type(e).__name__}: {e}")
@@ -291,6 +301,7 @@ async def replace_brand_theme(
 @mcp.tool()
 @require_scopes("okta.brands.manage")
 @validate_ids("brand_id", "theme_id")
+@json_response
 async def upload_brand_theme_logo(
     ctx: Context,
     brand_id: str,
@@ -354,6 +365,7 @@ async def upload_brand_theme_logo(
 @mcp.tool()
 @require_scopes("okta.brands.manage")
 @validate_ids("brand_id", "theme_id")
+@json_response
 async def delete_brand_theme_logo(
     ctx: Context,
     brand_id: str,
@@ -413,6 +425,7 @@ async def delete_brand_theme_logo(
 @mcp.tool()
 @require_scopes("okta.brands.manage")
 @validate_ids("brand_id", "theme_id")
+@json_response
 async def upload_brand_theme_favicon(
     ctx: Context,
     brand_id: str,
@@ -474,6 +487,7 @@ async def upload_brand_theme_favicon(
 @mcp.tool()
 @require_scopes("okta.brands.manage")
 @validate_ids("brand_id", "theme_id")
+@json_response
 async def delete_brand_theme_favicon(
     ctx: Context,
     brand_id: str,
@@ -533,6 +547,7 @@ async def delete_brand_theme_favicon(
 @mcp.tool()
 @require_scopes("okta.brands.manage")
 @validate_ids("brand_id", "theme_id")
+@json_response
 async def upload_brand_theme_background_image(
     ctx: Context,
     brand_id: str,
@@ -596,6 +611,7 @@ async def upload_brand_theme_background_image(
 @mcp.tool()
 @require_scopes("okta.brands.manage")
 @validate_ids("brand_id", "theme_id")
+@json_response
 async def delete_brand_theme_background_image(
     ctx: Context,
     brand_id: str,

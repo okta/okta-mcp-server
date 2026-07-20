@@ -25,6 +25,7 @@ from okta_mcp_server.utils.pagination import (
     paginate_all_results,
 )
 from okta_mcp_server.utils.scope_guard import require_scopes
+from okta_mcp_server.utils.serialization import json_response
 
 # Login-related eventTypes we care about for categorisation
 _LOGIN_EVENT_TYPES = {
@@ -123,6 +124,7 @@ async def _fetch_logs_for_outcome(
 
 @mcp.tool()
 @require_scopes("okta.logs.read")
+@json_response
 async def get_login_failures(
     ctx: Context = None,
     since: Optional[str] = None,

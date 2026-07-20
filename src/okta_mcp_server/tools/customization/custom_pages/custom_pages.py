@@ -73,6 +73,7 @@ from okta_mcp_server.utils.messages import (
     DELETE_PREVIEW_SIGN_IN_PAGE,
 )
 from okta_mcp_server.utils.scope_guard import require_scopes
+from okta_mcp_server.utils.serialization import json_response
 from okta_mcp_server.utils.validation import validate_ids
 
 
@@ -80,12 +81,30 @@ from okta_mcp_server.utils.validation import validate_ids
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+# Contract note (PR #90 review, cross-module consistency)
+# --------------------------------------------------------
+# The other customization modules (brands, custom_domains, email_domains,
+# themes) return an actionable ``{"error": "..."}`` dict when the SDK
+# returns ``(None, response, None)``.  This module intentionally preserves
+# the legacy ``{}`` return via ``_serialize(page) or {}`` because the SDK is
+# known to return empty bodies for some legitimate operations here (e.g.
+# preview endpoints when no customization has been created yet) and callers
+# already treat ``{}`` as ``"no data"``.  Unify with the error-dict pattern
+# in a follow-up if operator feedback shows the ``{}`` case is confusing.
 def _serialize(obj) -> Any:
-    """Recursively serialise Pydantic models and lists to plain Python types."""
+    """Recursively serialise Pydantic models and lists to plain Python types.
+
+    ``mode='json'`` is required so nested ``datetime`` / ``UUID`` / ``Enum``
+    values are emitted as RFC 3339 strings / primitive strings, matching the
+    guarantee the outer ``@json_response`` boundary makes for every other
+    tool.  Without it, raw ``datetime`` objects would fall through
+    ``to_jsonable`` to Python's default ``str(datetime)`` format (space
+    separator, not ``T``) and break the PR #14 RFC 3339 contract.
+    """
     if obj is None:
         return None
     if hasattr(obj, "model_dump"):
-        return obj.model_dump(by_alias=True, exclude_none=True)
+        return obj.model_dump(by_alias=True, exclude_none=True, mode="json")
     if isinstance(obj, list):
         return [_serialize(item) for item in obj]
     return obj
@@ -132,6 +151,7 @@ def _build_sign_in_page(
 @mcp.tool()
 @require_scopes("okta.brands.read")
 @validate_ids("brand_id")
+@json_response
 async def get_error_page_resources(
     ctx: Context,
     brand_id: str,
@@ -181,6 +201,7 @@ async def get_error_page_resources(
 @mcp.tool()
 @require_scopes("okta.brands.read")
 @validate_ids("brand_id")
+@json_response
 async def get_customized_error_page(
     ctx: Context,
     brand_id: str,
@@ -222,6 +243,7 @@ async def get_customized_error_page(
 @mcp.tool()
 @require_scopes("okta.brands.manage")
 @validate_ids("brand_id")
+@json_response
 async def replace_customized_error_page(
     ctx: Context,
     brand_id: str,
@@ -282,6 +304,7 @@ async def replace_customized_error_page(
 @mcp.tool()
 @require_scopes("okta.brands.manage")
 @validate_ids("brand_id")
+@json_response
 async def delete_customized_error_page(
     ctx: Context,
     brand_id: str,
@@ -334,6 +357,7 @@ async def delete_customized_error_page(
 @mcp.tool()
 @require_scopes("okta.brands.read")
 @validate_ids("brand_id")
+@json_response
 async def get_default_error_page(
     ctx: Context,
     brand_id: str,
@@ -378,6 +402,7 @@ async def get_default_error_page(
 @mcp.tool()
 @require_scopes("okta.brands.read")
 @validate_ids("brand_id")
+@json_response
 async def get_preview_error_page(
     ctx: Context,
     brand_id: str,
@@ -418,6 +443,7 @@ async def get_preview_error_page(
 @mcp.tool()
 @require_scopes("okta.brands.manage")
 @validate_ids("brand_id")
+@json_response
 async def replace_preview_error_page(
     ctx: Context,
     brand_id: str,
@@ -475,6 +501,7 @@ async def replace_preview_error_page(
 @mcp.tool()
 @require_scopes("okta.brands.manage")
 @validate_ids("brand_id")
+@json_response
 async def delete_preview_error_page(
     ctx: Context,
     brand_id: str,
@@ -527,6 +554,7 @@ async def delete_preview_error_page(
 @mcp.tool()
 @require_scopes("okta.brands.read")
 @validate_ids("brand_id")
+@json_response
 async def get_sign_in_page_resources(
     ctx: Context,
     brand_id: str,
@@ -576,6 +604,7 @@ async def get_sign_in_page_resources(
 @mcp.tool()
 @require_scopes("okta.brands.read")
 @validate_ids("brand_id")
+@json_response
 async def get_customized_sign_in_page(
     ctx: Context,
     brand_id: str,
@@ -617,6 +646,7 @@ async def get_customized_sign_in_page(
 @mcp.tool()
 @require_scopes("okta.brands.manage")
 @validate_ids("brand_id")
+@json_response
 async def replace_customized_sign_in_page(
     ctx: Context,
     brand_id: str,
@@ -692,6 +722,7 @@ async def replace_customized_sign_in_page(
 @mcp.tool()
 @require_scopes("okta.brands.manage")
 @validate_ids("brand_id")
+@json_response
 async def delete_customized_sign_in_page(
     ctx: Context,
     brand_id: str,
@@ -745,6 +776,7 @@ async def delete_customized_sign_in_page(
 @mcp.tool()
 @require_scopes("okta.brands.read")
 @validate_ids("brand_id")
+@json_response
 async def get_default_sign_in_page(
     ctx: Context,
     brand_id: str,
@@ -791,6 +823,7 @@ async def get_default_sign_in_page(
 @mcp.tool()
 @require_scopes("okta.brands.read")
 @validate_ids("brand_id")
+@json_response
 async def get_preview_sign_in_page(
     ctx: Context,
     brand_id: str,
@@ -832,6 +865,7 @@ async def get_preview_sign_in_page(
 @mcp.tool()
 @require_scopes("okta.brands.manage")
 @validate_ids("brand_id")
+@json_response
 async def replace_preview_sign_in_page(
     ctx: Context,
     brand_id: str,
@@ -896,6 +930,7 @@ async def replace_preview_sign_in_page(
 @mcp.tool()
 @require_scopes("okta.brands.manage")
 @validate_ids("brand_id")
+@json_response
 async def delete_preview_sign_in_page(
     ctx: Context,
     brand_id: str,
@@ -949,6 +984,7 @@ async def delete_preview_sign_in_page(
 @mcp.tool()
 @require_scopes("okta.brands.read")
 @validate_ids("brand_id")
+@json_response
 async def list_sign_in_widget_versions(
     ctx: Context,
     brand_id: str,
@@ -1002,6 +1038,7 @@ async def list_sign_in_widget_versions(
 @mcp.tool()
 @require_scopes("okta.brands.read")
 @validate_ids("brand_id")
+@json_response
 async def get_sign_out_page_settings(
     ctx: Context,
     brand_id: str,
@@ -1046,6 +1083,7 @@ async def get_sign_out_page_settings(
 @mcp.tool()
 @require_scopes("okta.brands.manage")
 @validate_ids("brand_id")
+@json_response
 async def replace_sign_out_page_settings(
     ctx: Context,
     brand_id: str,
