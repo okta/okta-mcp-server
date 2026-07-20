@@ -5,7 +5,7 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
 
-"""Scope-info stub tools for the Okta MCP Server.
+"""Scope-info stub tools for the Okta Open Source MCP Server.
 
 For each OAuth scope that is absent from ``OKTA_SCOPES``, this module registers
 exactly one lightweight stub tool. The stub appears in ``tools/list`` so the LLM

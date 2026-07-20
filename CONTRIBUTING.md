@@ -13,7 +13,7 @@ Summary
 This document covers how to contribute to an Okta Open Source project. These
 instructions assume you have a GitHub .com account, so if you don't have one
 you will have to create one. Your proposed code changes will be published to
-your own fork of the Okta MCP Server project and you will submit a Pull Request
+your own fork of the Okta Open Source MCP Server project and you will submit a Pull Request
 for your changes to be added.
 
 _Lets get started!!!_
@@ -32,7 +32,7 @@ the URL on the right hand side of the page under '**HTTPS** clone URL'.  You
 will paste this URL when doing the following `git clone` command.
 
 On your computer, follow these steps to setup a local repository for working on
-the Okta MCP Server:
+the Okta Open Source MCP Server:
 
 ``` bash
 $ git clone https://github.com/YOUR_ACCOUNT/okta-mcp-server.git
@@ -52,7 +52,7 @@ not change the `master` branch (other than to rebase in changes from
 changes to a branch called `feature_x`.  This `feature_x` branch will be
 created on your local repository and will be pushed to your forked repository
 on GitHub.  Once this branch is on your fork you will create a Pull Request for
-the changes to be added to the Okta MCP Server project.
+the changes to be added to the Okta Open Source MCP Server project.
 
 It is best practice to create a new branch each time you want to contribute to
 the project and only track the changes for that pull request in this branch.
@@ -109,7 +109,7 @@ Rebase `feature_x` to include updates from `upstream/master`
 
 It is important that you maintain an up-to-date `master` branch in your local
 repository.  This is done by rebasing in the code changes from
-`upstream/master` (the official Okta MCP Server project repository) into your
+`upstream/master` (the official Okta Open Source MCP Server project repository) into your
 local repository.  You will want to do this before you start working on a
 feature as well as right before you submit your changes as a pull request.  I
 recommend you do this process periodically while you work to make sure you are

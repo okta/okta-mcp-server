@@ -6,7 +6,7 @@
 # See the License for the specific language governing permissions and limitations under the License.
 
 """
-Input validation utilities for Okta MCP Server.
+Input validation utilities for Okta Open Source MCP Server.
 
 This module provides validation functions to prevent path traversal and SSRF attacks
 by ensuring user-supplied IDs do not contain malicious characters that could manipulate

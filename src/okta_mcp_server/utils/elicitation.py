@@ -5,7 +5,7 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
 
-"""Elicitation utilities for the Okta MCP server.
+"""Elicitation utilities for the Okta Open Source MCP Server.
 
 Provides shared Pydantic schemas, capability detection, and a fallback-aware
 helper for requesting user confirmation before destructive operations via the
