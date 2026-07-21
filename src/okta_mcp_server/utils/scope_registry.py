@@ -53,6 +53,7 @@ TOOL_SCOPE_REGISTRY: dict[str, str] = {
     # ------------------------------------------------------------------
     "list_applications":                    "okta.apps.read",
     "get_application":                      "okta.apps.read",
+    "get_app_saml_metadata":                "okta.apps.read",
     "create_application":                   "okta.apps.manage",
     "update_application":                   "okta.apps.manage",
     "delete_application":                   "okta.apps.manage",
