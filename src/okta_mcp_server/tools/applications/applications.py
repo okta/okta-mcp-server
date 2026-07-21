@@ -5,7 +5,9 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
 
+import json
 from typing import Any, Dict, Optional
+from urllib.parse import urlencode
 
 import okta.models as okta_models
 from loguru import logger
@@ -38,6 +40,39 @@ def _build_application_model(app_config: Dict[str, Any]) -> Any:
     model_cls = _SIGN_ON_MODE_MODEL_MAP.get(str(sign_on_mode).upper(), okta_models.Application)
     logger.debug(f"Using model class '{model_cls.__name__}' for signOnMode '{sign_on_mode}'")
     return model_cls(**app_config)
+
+
+def _camel_case_param(name: str) -> str:
+    """Convert a snake_case query-param name to the camelCase Okta expects.
+
+    build_query_params keeps tool argument names verbatim (e.g. include_non_deleted),
+    but the Okta API expects camelCase query keys (includeNonDeleted). The typed SDK
+    client performs this mapping internally; since the listing path now issues the
+    request directly, it must do the same. Names without underscores are unchanged.
+    """
+    head, *rest = name.split("_")
+    return head + "".join(part.capitalize() for part in rest)
+
+
+def _safe_parse_app(item: Dict[str, Any]) -> Any:
+    """Deserialize a single application dict, falling back to the raw dict.
+
+    The Okta SDK bulk-deserializes list responses into strict pydantic models and
+    aborts the entire page if any single record fails validation — for example a
+    SAML app whose ``settings.signOn`` omits fields the model marks required, or a
+    provisioning ``features`` value outside the SDK's enum. Parsing each record on
+    its own keeps one non-conforming app from breaking the whole listing; records
+    that fail strict parsing are returned as their raw dict with a warning marker.
+    """
+    try:
+        model = okta_models.Application.from_dict(item)
+        return model if model is not None else item
+    except Exception as e:
+        label = item.get("label") or item.get("name") or item.get("id", "<unknown>")
+        logger.warning(
+            f"Application '{label}' failed strict deserialization, returning raw dict: {type(e).__name__}: {e}"
+        )
+        return {**item, "_deserialization_warning": f"{type(e).__name__}: {e}"}
 
 
 from okta_mcp_server.utils.client import get_okta_client
@@ -110,8 +145,38 @@ async def list_applications(
             include_non_deleted=include_non_deleted,
         )
 
+        async def _fetch_apps_page(params):
+            """Fetch one page of /api/v1/apps and parse each app permissively.
+
+            The typed ``client.list_applications`` validates the whole page into
+            strict SDK models in one pass, so a single non-conforming app aborts
+            the entire response. Fetching the raw page through the request
+            executor and parsing per item via ``_safe_parse_app`` avoids that.
+            """
+            executor = client.get_request_executor()
+            query_string = urlencode(
+                {
+                    _camel_case_param(k): ("true" if v is True else "false" if v is False else v)
+                    for k, v in params.items()
+                }
+            )
+            url = "/api/v1/apps" + (f"?{query_string}" if query_string else "")
+            request, request_err = await executor.create_request(
+                method="GET", url=url, body={}, headers={}, oauth=False
+            )
+            if request_err:
+                return None, None, request_err
+
+            page_response, response_body, response_err = await executor.execute(request)
+            if response_err:
+                return None, page_response, response_err
+
+            raw_items = json.loads(response_body) if response_body else []
+            parsed_items = [_safe_parse_app(item) for item in raw_items]
+            return parsed_items, page_response, None
+
         logger.debug("Calling Okta API to list applications")
-        apps, response, err = await client.list_applications(**query_params)
+        apps, response, err = await _fetch_apps_page(query_params)
 
         if err:
             logger.error(f"Okta API error while listing applications: {err}")
@@ -131,7 +196,7 @@ async def list_applications(
             async def _next_page(cursor):
                 p = dict(query_params)
                 p["after"] = cursor
-                return await client.list_applications(**p)
+                return await _fetch_apps_page(p)
 
             async def _on_page(pages, total):
                 await ctx.info(f"Fetching applications... {total} fetched so far ({pages} pages)")
