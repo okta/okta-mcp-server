@@ -101,15 +101,11 @@ async def elicit_or_fallback(
     """Request user confirmation via elicitation, falling back gracefully.
 
     If the client supports elicitation the user is shown a structured form.
-    If it does not (older client, no capability, exception), the behaviour
-    depends on ``auto_confirm_on_fallback``:
-
-    * ``False`` (default) — return the ``fallback_payload`` so the caller
-      can direct the LLM to a legacy two-tool confirmation flow (e.g.
-      ``confirm_delete_group``).
-    * ``True`` — treat the operation as confirmed and let the caller
-      proceed immediately.  This restores the pre-elicitation behaviour
-      for tools that never had a separate confirmation step.
+    If it does not (older client, no capability, exception), the operation
+    is NOT confirmed — ``confirmed`` is always ``False`` when elicitation
+    cannot be completed.  The ``fallback_payload`` is returned so the caller
+    can direct the LLM to a legacy two-tool confirmation flow (e.g.
+    ``confirm_delete_group``).
 
     Parameters
     ----------
@@ -121,22 +117,18 @@ async def elicit_or_fallback(
         A Pydantic ``BaseModel`` subclass describing the form fields.
     fallback_payload:
         Optional dict to return when elicitation is not available.  If
-        ``None``, a generic payload is used.  Ignored when
-        ``auto_confirm_on_fallback`` is ``True``.
+        ``None``, a generic payload is used.
     auto_confirm_on_fallback:
-        When ``True`` and elicitation is unavailable, the returned
-        outcome has ``confirmed=True`` so the tool can proceed without
-        user interaction (pre-elicitation behaviour).
+        Deprecated and ignored.  Previously allowed auto-confirmation
+        when elicitation was unavailable, but this was a security risk
+        for destructive operations.  Kept for API compatibility.
 
     Returns
     -------
     ElicitationOutcome
     """
     if not supports_elicitation(ctx):
-        if auto_confirm_on_fallback:
-            logger.info("Client does not support elicitation — auto-confirming (pre-elicitation behaviour)")
-            return ElicitationOutcome(confirmed=True, used_elicitation=False)
-        logger.info("Client does not support elicitation — using fallback")
+        logger.info("Client does not support elicitation — operation requires explicit confirmation")
         return ElicitationOutcome(
             confirmed=False,
             used_elicitation=False,
@@ -165,9 +157,6 @@ async def elicit_or_fallback(
             logger.info("Elicitation not supported by client (METHOD_NOT_FOUND)")
         else:
             logger.warning(f"MCP error during elicitation: {exc}")
-        if auto_confirm_on_fallback:
-            logger.info("Auto-confirming after MCP error (pre-elicitation behaviour)")
-            return ElicitationOutcome(confirmed=True, used_elicitation=False)
         return ElicitationOutcome(
             confirmed=False,
             used_elicitation=False,
@@ -178,9 +167,6 @@ async def elicit_or_fallback(
         )
     except Exception as exc:
         logger.warning(f"Elicitation failed ({type(exc).__name__}: {exc}) — using fallback")
-        if auto_confirm_on_fallback:
-            logger.info("Auto-confirming after elicitation failure (pre-elicitation behaviour)")
-            return ElicitationOutcome(confirmed=True, used_elicitation=False)
         return ElicitationOutcome(
             confirmed=False,
             used_elicitation=False,
