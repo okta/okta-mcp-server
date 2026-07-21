@@ -1,4 +1,4 @@
-FROM python:3.13-slim
+FROM python:3.13-slim@sha256:6771159cd4fa5d9bba1258caf0b82e6b73458c694d178ad97c5e925c2d0e1a91
 
 LABEL Title="Okta Open Source MCP Server" \
       Description="Model Context Protocol server for Okta API integration" \
@@ -8,7 +8,9 @@ LABEL Title="Okta Open Source MCP Server" \
       Maintainer="Okta"
 
 # Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+# Digest pin is the latest uv release as of writing; it still bundles vulnerable quick-xml 0.39.2
+# (RUSTSEC-2026-0194/0195) pending https://github.com/astral-sh/uv/pull/20583 — re-pin once that ships.
+COPY --from=ghcr.io/astral-sh/uv:0.11.30@sha256:93b61e21202b1dab861092748e46bbd6e0e41dd84f59b9174efd2353186e1b47 /uv /usr/local/bin/uv
 
 WORKDIR /app
 
