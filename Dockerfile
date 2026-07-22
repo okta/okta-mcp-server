@@ -7,10 +7,8 @@ LABEL Title="Okta Open Source MCP Server" \
       Version="1.0.0" \
       Maintainer="Okta"
 
-# Install uv
-# Digest pin is the latest uv release as of writing; it still bundles vulnerable quick-xml 0.39.2
-# (RUSTSEC-2026-0194/0195) pending https://github.com/astral-sh/uv/pull/20583 — re-pin once that ships.
-COPY --from=ghcr.io/astral-sh/uv:0.11.30@sha256:93b61e21202b1dab861092748e46bbd6e0e41dd84f59b9174efd2353186e1b47 /uv /usr/local/bin/uv
+# Install uv (0.11.31+ carries the quick-xml 0.41.0 fix for RUSTSEC-2026-0194/0195)
+COPY --from=ghcr.io/astral-sh/uv:0.11.31@sha256:ecd4de2f060c64bea0ff8ecb182ddf46ba3fcccdc8a60cfdbaf20d1a047d7437 /uv /usr/local/bin/uv
 
 WORKDIR /app
 
