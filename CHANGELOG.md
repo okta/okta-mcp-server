@@ -1,7 +1,10 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v1.1.4
+
+### Documentation
+- Renamed the self-hosted server to **"Okta Open Source MCP Server"** and updated all existing references from "Okta MCP Server" to "Okta Open Source MCP Server" ([#91](https://github.com/okta/okta-mcp-server/pull/91)).
 
 ### Bug Fixes
 - Standardized MCP tool responses to valid JSON per RFC 8259 across all 109 tools; fixes [#14](https://github.com/okta/okta-mcp-server/issues/14). Tool responses no longer leak raw Python `repr` for `ApplicationSignOnMode.SAML_2_0`, `OktaAPIResponse` objects, SDK tuples, or other non-JSON types.
