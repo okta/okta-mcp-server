@@ -27,6 +27,58 @@ from okta_mcp_server.utils.scope_guard import require_scopes
 from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import validate_ids
 
+# Workaround for an SDK model gap: Okta's API returns `_embedded` on a Policy resource
+# as a flat map whose values aren't always nested objects — e.g. an ACCESS_POLICY that is
+# mapped to an app returns `_embedded: {"resourceType": "APP"}`, a plain string value. The
+# generated `Policy.embedded` field is typed `Dict[str, Dict[str, Any]]`, which requires
+# every value to itself be a dict, so this raises a ValidationError and aborts
+# `list_policies(type="ACCESS_POLICY")` and `get_policy` entirely, for every policy in the
+# tenant, any time at least one carries this kind of `_embedded` entry.
+# Fix: relax the annotation to Dict[str, Any] and force a Pydantic schema rebuild on the
+# base class and on AccessPolicy explicitly (the subclass this was actually observed on).
+# Pydantic v2 subclasses build their own core schema at class-definition time, so a
+# subclass whose module happened to already be imported elsewhere before this patch runs
+# would otherwise keep its stale, stricter schema even after the parent is rebuilt; we also
+# sweep any other Policy subclass already loaded at patch time so this isn't order-sensitive.
+try:
+    import typing as _typing
+    from okta.models.policy import Policy as _Policy
+    from okta.models.access_policy import AccessPolicy as _AccessPolicy
+
+    _embedded_patched_type = _typing.Optional[_typing.Dict[str, _typing.Any]]
+    _policy_classes = {_Policy, _AccessPolicy, *_Policy.__subclasses__()}
+    for _cls in _policy_classes:
+        _cls.__annotations__["embedded"] = _embedded_patched_type
+        if "embedded" in _cls.model_fields:
+            _cls.model_fields["embedded"].annotation = _embedded_patched_type
+        _cls.model_rebuild(force=True)
+    logger.debug("Applied Policy._embedded type workaround (flat non-dict _embedded values)")
+except Exception as _patch_err:
+    logger.warning(f"Could not apply Policy._embedded workaround: {_patch_err}")
+
+# Workaround for an SDK enum gap: `AuthenticatorEnrollmentPolicyAuthenticatorType` (used by
+# MFA_ENROLL policy authenticator settings) does not include `smart_card_idp`, even though
+# the SDK's own `AuthenticatorKeyEnum` recognizes it as a valid authenticator key elsewhere.
+# Smart-card / PIV-CAC authenticators are common in Okta for Government tenants and rare in
+# commercial Okta, which is presumably why this enum member was missed. Without this fix,
+# any MFA_ENROLL policy referencing a smart-card authenticator makes
+# `list_policies(type="MFA_ENROLL")` raise for the whole page.
+# Fix: relax the `key` field to a plain string so any authenticator key the API returns is
+# accepted, instead of maintaining a second, hand-kept enum that can drift from the API.
+try:
+    from okta.models.authenticator_enrollment_policy_authenticator_settings import (
+        AuthenticatorEnrollmentPolicyAuthenticatorSettings as _AuthenticatorEnrollmentPolicyAuthenticatorSettings,
+    )
+
+    _key_patched_type = _typing.Optional[str]
+    _AuthenticatorEnrollmentPolicyAuthenticatorSettings.__annotations__["key"] = _key_patched_type
+    if "key" in _AuthenticatorEnrollmentPolicyAuthenticatorSettings.model_fields:
+        _AuthenticatorEnrollmentPolicyAuthenticatorSettings.model_fields["key"].annotation = _key_patched_type
+    _AuthenticatorEnrollmentPolicyAuthenticatorSettings.model_rebuild(force=True)
+    logger.debug("Applied MFA_ENROLL authenticator 'key' type workaround (missing smart_card_idp enum member)")
+except Exception as _patch_err:
+    logger.warning(f"Could not apply MFA_ENROLL authenticator 'key' workaround: {_patch_err}")
+
 
 # Mapping from Okta policy rule type → typed SDK model class.
 # The base PolicyRule model silently drops type-specific fields like `actions` and
