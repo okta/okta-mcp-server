@@ -41,6 +41,13 @@ from okta.exceptions.exceptions import ForbiddenException, UnauthorizedException
 _DISABLED_TOOLS: dict[str, str] = {}
 #: The set of scopes that were present in the token at startup
 _CONFIGURED_SCOPES: set[str] = set()
+#: List of "*.manage configured without its *.read sibling" gaps detected at
+#: startup. Each entry is
+#: ``{"manage_scope": ..., "missing_read_scope": ..., "disabled_tools": [...]}``.
+#: Populated by ``prune_tools_by_scope`` — see the detection pass at the end
+#: of that function for why this is *not* the same thing as a `.manage` →
+#: `.read` hierarchy (there isn't one; see README "Scope-Based Tool Loading").
+_MANAGE_WITHOUT_READ_GAPS: list[dict[str, Any]] = []
 
 
 def get_disabled_tools() -> dict[str, str]:
@@ -51,6 +58,51 @@ def get_disabled_tools() -> dict[str, str]:
 def get_startup_scopes() -> set[str]:
     """Return the set of OAuth scopes that were present in the token at startup."""
     return set(_CONFIGURED_SCOPES)
+
+
+def get_manage_without_read_gaps() -> list[dict[str, Any]]:
+    """Return the `.manage`-without-`.read` gaps detected at startup.
+
+    Each returned entry describes a scope actually present in ``OKTA_SCOPES``
+    that ends in ``.manage`` whose sibling ``.read`` scope (same
+    ``okta.<resource>.`` prefix) is *absent*, where that absence actually
+    disabled at least one tool. Entries have the shape::
+
+        {
+            "manage_scope": "okta.users.manage",
+            "missing_read_scope": "okta.users.read",
+            "disabled_tools": ["get_user", "get_user_profile_attributes", "list_users"],
+        }
+
+    This does not indicate a bug — see the README's "Scope-Based Tool
+    Loading" section: this server deliberately requires every scope to be
+    listed explicitly and does not infer `.read` from `.manage`. It exists so
+    callers (e.g. the ``get_scope_status`` tool) can proactively surface the
+    situation to an LLM/operator instead of leaving it to be discovered only
+    via a missing-tool error.
+    """
+    return [dict(gap) for gap in _MANAGE_WITHOUT_READ_GAPS]
+
+
+def build_manage_without_read_status() -> dict[str, Any]:
+    """Build the additive status fragment for `.manage`-without-`.read` gaps.
+
+    Shaped to match the key-naming convention already used by the
+    ``get_scope_status`` MCP tool (see its ``by_scope`` entries, keyed on
+    ``missing_scope`` / ``disabled_tools``): each entry here mirrors that
+    with ``manage_scope`` / ``missing_read_scope`` / ``disabled_tools``.
+
+    Returns a single additive key, ``manage_without_read_gaps``, so a caller
+    can merge this straight into an existing status dict without disturbing
+    any existing keys, e.g.::
+
+        status = {...}  # existing get_scope_status() response
+        status.update(build_manage_without_read_status())
+
+    When nothing is wrong, ``manage_without_read_gaps`` is an empty list —
+    that is the clean/absent case.
+    """
+    return {"manage_without_read_gaps": get_manage_without_read_gaps()}
 
 # ---------------------------------------------------------------------------
 # Canonical error message
@@ -230,11 +282,12 @@ def prune_tools_by_scope(server: Any, manager: Any) -> None:
         return
 
     # Persist startup state so get_scope_status tool can surface it to the LLM.
-    # Reset both dicts first so repeated calls (e.g. in tests) don't accumulate
+    # Reset all three first so repeated calls (e.g. in tests) don't accumulate
     # stale state from a previous invocation.
-    global _DISABLED_TOOLS, _CONFIGURED_SCOPES
+    global _DISABLED_TOOLS, _CONFIGURED_SCOPES, _MANAGE_WITHOUT_READ_GAPS
     _DISABLED_TOOLS = {}
     _CONFIGURED_SCOPES = set(configured)
+    _MANAGE_WITHOUT_READ_GAPS = []
 
     # NOTE: FastMCP does not expose a public API for removing tools from the
     # registry at runtime.  We use the private ``_tool_manager`` attribute here
@@ -270,3 +323,62 @@ def prune_tools_by_scope(server: Any, manager: Any) -> None:
         f"based on OKTA_SCOPES. "
         f"{len(disabled)} tool(s) disabled: {sorted(disabled) if disabled else 'none'}."
     )
+
+    # ------------------------------------------------------------------
+    # Detection pass: *.manage configured without its *.read sibling.
+    #
+    # This does NOT change what was pruned above — the exact-match
+    # enforcement is intentional (see README "Scope-Based Tool Loading"):
+    # OKTA_SCOPES is meant to be an explicit, auditable declaration, and a
+    # `.manage` → `.read` hierarchy would make that declaration lossy. What
+    # was silent before is the *consequence*: an operator who configures only
+    # `okta.<resource>.manage` — reasonably expecting read+write, since the
+    # Okta API itself grants read access via `.manage` — gets the matching
+    # `.read` tools removed from tools/list with no signal as to why. This
+    # loop makes that loudly visible via logger.warning.
+    #
+    # The sibling relationship is derived generically from the scope string
+    # (swap the trailing "manage" component for "read") — no resource names
+    # are hardcoded, so this holds for every current and future scope in
+    # TOOL_SCOPE_REGISTRY, including resources (like "logs") that have no
+    # `.manage` counterpart at all: those scopes never end in ".manage", so
+    # they never enter this loop in the first place.
+    # ------------------------------------------------------------------
+    for scope in sorted(configured):
+        prefix, sep, suffix = scope.rpartition(".")
+        if suffix != "manage" or not sep:
+            continue  # not a "*.manage" scope (covers e.g. "okta.logs.read")
+
+        sibling_read = f"{prefix}.read"
+        if sibling_read in configured:
+            continue  # both declared explicitly — normal, nothing to warn about
+
+        tools_needing_sibling = sorted(
+            disabled_tool
+            for disabled_tool, required_scope in _DISABLED_TOOLS.items()
+            if required_scope == sibling_read
+        )
+        if not tools_needing_sibling:
+            # Nothing in TOOL_SCOPE_REGISTRY actually required the sibling
+            # `.read` scope (or it wasn't disabled for some other reason) —
+            # there is no real consequence here, so stay quiet.
+            continue
+
+        _MANAGE_WITHOUT_READ_GAPS.append(
+            {
+                "manage_scope": scope,
+                "missing_read_scope": sibling_read,
+                "disabled_tools": tools_needing_sibling,
+            }
+        )
+        logger.warning(
+            f"[scope-guard] Configured scope '{scope}' does NOT implicitly enable "
+            f"'{sibling_read}' for this server — '.manage' does not imply '.read' "
+            f"here, even though Okta's own API does grant read access via "
+            f"'.manage'. The following tool(s) remain disabled because "
+            f"'{sibling_read}' is missing from OKTA_SCOPES: "
+            f"{tools_needing_sibling}. "
+            f"Remediation: add '{sibling_read}' to OKTA_SCOPES — this server "
+            f"requires each scope to be listed explicitly; '.manage' does not "
+            f"imply '.read'."
+        )

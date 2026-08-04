@@ -16,7 +16,11 @@ tool name to the minimum OAuth 2.0 scope required to call it.  It is used by:
 Scope naming convention:
     ``okta.<resource>.read``    — GET operations (read-only).
     ``okta.<resource>.manage``  — POST / PUT / DELETE operations (write).
-    A token with ``*.manage`` implicitly covers ``*.read`` for the same resource.
+    These are treated as independent strings: ``*.manage`` does NOT satisfy a
+    ``*.read`` requirement here, even though Okta's own API does grant read access
+    to a ``*.manage``-scoped token. Tool registration is deliberately stricter so
+    that ``OKTA_SCOPES`` is an exact, auditable declaration of intent — list both
+    scopes explicitly if you want both read and write tools for a resource.
 
 Reference: https://developer.okta.com/docs/api/oauth2
 """

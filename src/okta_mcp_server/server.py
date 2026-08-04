@@ -15,7 +15,12 @@ from loguru import logger
 from mcp.server.fastmcp import FastMCP
 
 from okta_mcp_server.utils.auth.auth_manager import OktaAuthManager
-from okta_mcp_server.utils.scope_guard import get_disabled_tools, get_startup_scopes, prune_tools_by_scope
+from okta_mcp_server.utils.scope_guard import (
+    build_manage_without_read_status,
+    get_disabled_tools,
+    get_startup_scopes,
+    prune_tools_by_scope,
+)
 from okta_mcp_server.utils.serialization import json_response
 
 LOG_FILE = os.environ.get("OKTA_LOG_FILE")
@@ -84,6 +89,7 @@ async def get_scope_status() -> dict:
             "configured_scopes": configured,
             "disabled_tools": {},
             "instructions": "All tools are active. No missing scopes.",
+            **build_manage_without_read_status(),
         }
 
     # Group disabled tools by the scope they need
@@ -115,6 +121,7 @@ async def get_scope_status() -> dict:
         "disabled_tools": disabled,
         "by_scope": scope_summary,
         "instructions": instructions,
+        **build_manage_without_read_status(),
     }
 
 
