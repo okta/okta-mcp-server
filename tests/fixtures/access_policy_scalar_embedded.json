@@ -1,0 +1,19 @@
+{
+  "id": "rst000000000000000000",
+  "name": "Example Access Policy",
+  "description": "Synthetic access policy used for regression tests.",
+  "type": "ACCESS_POLICY",
+  "status": "ACTIVE",
+  "priority": 1,
+  "system": false,
+  "created": "2026-01-02T03:04:05.000Z",
+  "lastUpdated": "2026-01-02T03:04:05.000Z",
+  "_embedded": {
+    "resourceType": "APP"
+  },
+  "_links": {
+    "self": {
+      "href": "https://example.invalid/api/v1/policies/rst000000000000000000"
+    }
+  }
+}
