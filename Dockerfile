@@ -4,7 +4,7 @@ LABEL Title="Okta Open Source MCP Server" \
       Description="Model Context Protocol server for Okta API integration" \
       Authors="Okta" \
       Licenses="Apache-2.0" \
-      Version="1.0.0" \
+      Version="1.1.5" \
       Maintainer="Okta"
 
 # Install uv (0.11.31+ carries the quick-xml 0.41.0 fix for RUSTSEC-2026-0194/0195)

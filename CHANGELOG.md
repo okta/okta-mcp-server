@@ -1,6 +1,21 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## v1.1.5
+
+### Security
+- Bumped vulnerable dependencies and pinned the Docker base images by digest to raise the Docker Scout health score of the published `mcp/okta-mcp-server` image ([#94](https://github.com/okta/okta-mcp-server/pull/94)):
+  - Raised the `mcp[cli]` SDK floor to **1.28.1**.
+  - Added `[tool.uv]` `constraint-dependencies` floors for `urllib3>=2.7.0`, `cryptography>=48.0.1`, `starlette>=1.3.1`, `python-multipart>=0.0.31`, `click>=8.3.3`, `jaraco.context>=6.1.0`, `python-dotenv>=1.2.2`, and `idna>=3.15` to close the CVEs Docker Scout flagged transitively.
+  - Pinned both Dockerfile base images by digest for reproducibility: `python:3.13-slim` and `ghcr.io/astral-sh/uv:0.11.31` (uv 0.11.31 carries the quick-xml 0.41.0 fix for RUSTSEC-2026-0194/0195).
+  - Result: Docker Scout Critical/High/Medium dropped from 1/21/13 to only the residual base-image `perl` CVEs (no upstream fix available yet). All 529 existing tests pass unchanged.
+
+### Improvements
+- Upgraded the `pytest` dev dependency floor to **9.0.3**.
+
+### Documentation
+- Updated the logo thumbnail image ([#97](https://github.com/okta/okta-mcp-server/pull/97)).
+
 ## v1.1.4
 
 ### Documentation
