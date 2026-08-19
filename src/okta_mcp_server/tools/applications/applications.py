@@ -5,6 +5,7 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
 
+import asyncio
 import json
 from typing import Any, Dict, Optional
 from urllib.parse import urlencode
@@ -482,10 +483,83 @@ async def deactivate_application(ctx: Context, app_id: str) -> list:
 # OIN catalog & app installation
 # ---------------------------------------------------------------------------
 
+#: Server-side default page size for /api/v1/catalog/apps. The catalog
+#: endpoint paginates but, unlike the rest of the Okta API, emits no
+#: ``Link: rel="next"`` header (verified against a live org) — so a full page
+#: is the only "maybe more" signal, and the ``after`` cursor is the last
+#: item's catalog ``name``.
+_CATALOG_DEFAULT_PAGE_SIZE = 20
+
+#: Safety limits for fetch_all, mirroring paginate_all_results defaults.
+_CATALOG_MAX_PAGES = 500
+_CATALOG_PAGE_DELAY_SECONDS = 0.1
+
+
+async def _catalog_request(
+    client, method: str, url: str, body: Optional[Dict[str, Any]] = None, keep_empty_params: bool = False
+) -> tuple:
+    """Issue a raw request for catalog/OIN endpoints the typed SDK can't serve.
+
+    The typed SDK create path strips the catalog ``name`` key and exposes no
+    catalog-apps surface at all, so these tools go through the request
+    executor directly.
+
+    Args:
+        keep_empty_params: Pass True to forward the body verbatim — by default
+            the SDK's create_request prunes empty-string/list/dict values from
+            the body (``clear_empty_params``).
+
+    Returns:
+        Tuple of ``(response, parsed_body, error)`` — the transport response,
+        the JSON-decoded body (``None`` when the body is empty), and the SDK
+        error (``None`` on success). ``response`` and ``parsed_body`` are
+        ``None`` whenever ``error`` is set.
+    """
+    executor = client.get_request_executor()
+    request, err = await executor.create_request(
+        method=method, url=url, body=body or {}, headers={}, oauth=False, keep_empty_params=keep_empty_params
+    )
+    if err:
+        return None, None, err
+    response, response_body, err = await executor.execute(request)
+    if err:
+        return None, None, err
+    return response, json.loads(response_body) if response_body else None, None
+
+
+def _catalog_url(params: Dict[str, Any]) -> str:
+    query_string = urlencode(params)
+    return "/api/v1/catalog/apps" + (f"?{query_string}" if query_string else "")
+
+
+def _catalog_next_cursor(page: list, exhausted_below: int) -> Optional[str]:
+    """Synthesize the ``after`` cursor for the next catalog page.
+
+    A page shorter than ``exhausted_below`` means the catalog is exhausted;
+    otherwise there may be more, and the cursor is the last entry's ``name``.
+    The threshold is min(requested limit, server default) rather than the
+    requested limit itself: the server may silently cap an over-large limit,
+    and a page merely shorter than the request is not proof of exhaustion.
+    A page that exactly exhausts the catalog therefore yields a phantom
+    cursor whose next page is empty — callers must treat an empty page as
+    the true end.
+    """
+    if len(page) < exhausted_below:
+        return None
+    last = page[-1]
+    return last.get("name") if isinstance(last, dict) else None
+
 
 @mcp.tool()
 @require_scopes("okta.apps.read")
-async def list_catalog_apps(ctx: Context, q: Optional[str] = None, limit: Optional[int] = None) -> Any:
+@json_response
+async def list_catalog_apps(
+    ctx: Context,
+    q: Optional[str] = None,
+    after: Optional[str] = None,
+    limit: Optional[int] = None,
+    fetch_all: bool = False,
+) -> dict:
     """Browse the Okta Integration Network (OIN) app catalog.
 
     Use this to discover an app's ``name`` (the catalog key) to pass to
@@ -496,39 +570,116 @@ async def list_catalog_apps(ctx: Context, q: Optional[str] = None, limit: Option
 
     Parameters:
         q (str, optional): Filters the catalog by app name/keyword (e.g. "scim")
-        limit (int, optional): Maximum number of catalog entries to return
+        after (str, optional): Pagination cursor — the ``name`` of the last
+            entry of the previous page (returned as ``next_cursor``)
+        limit (int, optional): Number of catalog entries per page (server
+            default: 20)
+        fetch_all (bool, optional): If True, automatically fetch all pages of
+            results. The unfiltered catalog holds thousands of entries and can
+            take hundreds of sequential requests — strongly prefer combining
+            this with ``q``. Default: False.
+
+    Examples:
+        For pagination:
+        - First call: list_catalog_apps(q="scim")
+        - Next page: list_catalog_apps(q="scim", after="cursor_value")
+        - All pages: list_catalog_apps(q="scim", fetch_all=True)
 
     Returns:
-        Dict with a ``catalog_apps`` list (each has ``name``, ``displayName``,
-        ``features``, ``signOnModes``), or error information.
+        Dict containing:
+        - items: List of catalog entries (each has ``name``, ``displayName``,
+          ``features``, ``signOnModes``)
+        - total_fetched: Number of entries returned
+        - has_more: Boolean indicating if more results are available. May be
+          conservatively True when the final page is exactly full — an empty
+          next page then confirms the end.
+        - next_cursor: Cursor for the next page (if has_more is True). Also
+          set when fetch_all stopped early, as the resume point.
+        - fetch_all_used: Boolean indicating if fetch_all was used
+        - pagination_info: Additional pagination metadata (when fetch_all=True)
     """
-    logger.info(f"Browsing OIN catalog (q='{q}', limit={limit})")
+    logger.info(f"Browsing OIN catalog (q='{q}', limit={limit}, fetch_all={fetch_all})")
 
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
     try:
         client = await get_okta_client(manager)
-        params: Dict[str, Any] = {}
-        if q:
-            params["q"] = q
-        if limit:
-            params["limit"] = limit
-        query_string = urlencode(params)
-        url = "/api/v1/catalog/apps" + (f"?{query_string}" if query_string else "")
+        query_params = build_query_params(q=q, after=after, limit=limit)
+        page_size = limit if limit else _CATALOG_DEFAULT_PAGE_SIZE
+        exhausted_below = min(page_size, _CATALOG_DEFAULT_PAGE_SIZE)
 
-        executor = client.get_request_executor()
-        request, err = await executor.create_request(method="GET", url=url, body={}, headers={}, oauth=False)
-        if err:
-            logger.error(f"Error building catalog request: {err}")
-            return {"error": str(err)}
-
-        _, response_body, err = await executor.execute(request)
+        _, apps, err = await _catalog_request(client, "GET", _catalog_url(query_params))
         if err:
             logger.error(f"Okta API error while browsing catalog: {err}")
             return {"error": str(err)}
 
-        logger.info("Successfully retrieved OIN catalog page")
-        return {"catalog_apps": json.loads(response_body) if response_body else []}
+        apps = apps or []
+        cursor = _catalog_next_cursor(apps, exhausted_below)
+
+        if not fetch_all:
+            logger.info(f"Successfully retrieved {len(apps)} OIN catalog entries")
+            result = create_paginated_response(apps, None, fetch_all_used=False)
+            # The catalog endpoint sends no Link header, so has_more/next_cursor
+            # can't come from the transport response like other list_* tools.
+            result["has_more"] = cursor is not None
+            result["next_cursor"] = cursor
+            return result
+
+        all_apps = list(apps)
+        # Dedup by catalog name so a misbehaving `after` cursor (ignored,
+        # stripped, or inclusive instead of exclusive) can't duplicate entries
+        # or loop; names are the catalog's unique keys.
+        seen_names = {a["name"] for a in apps if isinstance(a, dict) and a.get("name")}
+        pages_fetched = 1
+        pagination_info: Dict[str, Any] = {"stopped_early": False, "stop_reason": None}
+
+        while cursor and pages_fetched < _CATALOG_MAX_PAGES:
+            await asyncio.sleep(_CATALOG_PAGE_DELAY_SECONDS)
+            next_params = dict(query_params)
+            next_params["after"] = cursor
+            _, page, page_err = await _catalog_request(client, "GET", _catalog_url(next_params))
+            if page_err:
+                logger.warning(f"Error fetching catalog page {pages_fetched + 1}: {page_err}")
+                pagination_info["stopped_early"] = True
+                pagination_info["stop_reason"] = f"API error: {page_err}"
+                break
+
+            page = page or []
+            if not page:
+                cursor = None
+                break
+
+            fresh = [a for a in page if not (isinstance(a, dict) and a.get("name") in seen_names)]
+            if not fresh:
+                pagination_info["stopped_early"] = True
+                pagination_info["stop_reason"] = "Pagination cursor did not advance"
+                break
+            seen_names.update(a["name"] for a in fresh if isinstance(a, dict) and a.get("name"))
+
+            all_apps.extend(fresh)
+            pages_fetched += 1
+            try:
+                await ctx.info(f"Fetching catalog apps... {len(all_apps)} fetched so far ({pages_fetched} pages)")
+            except Exception:
+                pass
+
+            cursor = _catalog_next_cursor(page, exhausted_below)
+
+        if cursor and pages_fetched >= _CATALOG_MAX_PAGES:
+            pagination_info["stopped_early"] = True
+            pagination_info["stop_reason"] = f"Reached maximum page limit ({_CATALOG_MAX_PAGES})"
+            logger.warning(f"Stopped catalog pagination at {_CATALOG_MAX_PAGES} pages limit")
+
+        pagination_info["pages_fetched"] = pages_fetched
+        pagination_info["total_items"] = len(all_apps)
+        logger.info(f"Successfully retrieved {len(all_apps)} OIN catalog entries across {pages_fetched} pages")
+        result = create_paginated_response(all_apps, None, fetch_all_used=True, pagination_info=pagination_info)
+        if pagination_info["stopped_early"] and cursor:
+            # Partial result — surface the resume point instead of implying
+            # the walk completed.
+            result["has_more"] = True
+            result["next_cursor"] = cursor
+        return result
     except Exception as e:
         logger.error(f"Exception while browsing OIN catalog: {type(e).__name__}: {e}")
         return {"error": str(e)}
@@ -537,7 +688,8 @@ async def list_catalog_apps(ctx: Context, q: Optional[str] = None, limit: Option
 @mcp.tool()
 @require_scopes("okta.apps.read")
 @validate_ids("app_name", error_return_type="dict")
-async def get_catalog_app(ctx: Context, app_name: str) -> Any:
+@json_response
+async def get_catalog_app(ctx: Context, app_name: str) -> dict:
     """Get a single OIN catalog app definition (including its provisioning schema).
 
     Parameters:
@@ -552,21 +704,20 @@ async def get_catalog_app(ctx: Context, app_name: str) -> Any:
 
     try:
         client = await get_okta_client(manager)
-        url = f"/api/v1/catalog/apps/{app_name}?expand=schema"
-
-        executor = client.get_request_executor()
-        request, err = await executor.create_request(method="GET", url=url, body={}, headers={}, oauth=False)
-        if err:
-            logger.error(f"Error building catalog-app request for {app_name}: {err}")
-            return {"error": str(err)}
-
-        _, response_body, err = await executor.execute(request)
+        _, app, err = await _catalog_request(client, "GET", f"/api/v1/catalog/apps/{app_name}?expand=schema")
         if err:
             logger.error(f"Okta API error while getting catalog app {app_name}: {err}")
             return {"error": str(err)}
 
+        if app is None:
+            return none_body_error(
+                "get_catalog_app",
+                f"retrieving catalog app {app_name!r}",
+                "Verify the name with list_catalog_apps().",
+            )
+
         logger.info(f"Successfully retrieved OIN catalog app: {app_name}")
-        return json.loads(response_body) if response_body else {}
+        return app
     except Exception as e:
         logger.error(f"Exception while getting catalog app {app_name}: {type(e).__name__}: {e}")
         return {"error": str(e)}
@@ -574,6 +725,8 @@ async def get_catalog_app(ctx: Context, app_name: str) -> Any:
 
 @mcp.tool()
 @require_scopes("okta.apps.manage")
+@validate_ids("name", error_return_type="dict")
+@json_response
 async def install_oin_app(
     ctx: Context,
     name: str,
@@ -581,7 +734,7 @@ async def install_oin_app(
     sign_on_mode: str,
     settings: Optional[Dict[str, Any]] = None,
     activate: bool = True,
-) -> Any:
+) -> dict:
     """Install an instance of an OIN catalog app (e.g. a provisioning-capable SCIM app).
 
     Unlike create_application (which builds custom apps), this preserves the
@@ -616,19 +769,22 @@ async def install_oin_app(
         query_string = urlencode({"activate": "true" if activate else "false"})
         url = f"/api/v1/apps?{query_string}"
 
-        executor = client.get_request_executor()
-        request, err = await executor.create_request(method="POST", url=url, body=app_body, headers={}, oauth=False)
-        if err:
-            logger.error(f"Error building OIN install request for '{name}': {err}")
-            return {"error": str(err)}
-
-        _, response_body, err = await executor.execute(request)
+        # keep_empty_params: some OIN apps require settings fields whose value
+        # is legitimately an empty string; the SDK would otherwise prune them.
+        _, app, err = await _catalog_request(client, "POST", url, body=app_body, keep_empty_params=True)
         if err:
             logger.error(f"Okta API error while installing OIN app '{name}': {err}")
             return {"error": str(err)}
 
+        if app is None:
+            return none_body_error(
+                "install_oin_app",
+                f"installing OIN app {name!r}",
+                "Verify the result with list_applications().",
+            )
+
         logger.info(f"Successfully installed OIN app '{name}'")
-        return json.loads(response_body) if response_body else {}
+        return app
     except Exception as e:
         logger.error(f"Exception while installing OIN app '{name}': {type(e).__name__}: {e}")
         return {"error": str(e)}
