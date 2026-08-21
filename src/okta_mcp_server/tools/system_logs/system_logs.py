@@ -83,11 +83,18 @@ async def get_logs(
         why a user can't log in, authentication errors, access denied, denied sign-ins,
         denied access, blocked logins, sign-in failures, access issues, etc.
 
-    CRITICAL — MFA challenge queries:
-        When the user asks about MFA challenges, MFA prompts, step-up auth, or authentication
-        challenges, ALWAYS use filter='outcome.result eq "CHALLENGE"'.
-        Do NOT use eventType filters or outcome.result eq "SUCCESS" for MFA challenges.
-        Using SUCCESS or eventType is WRONG for challenges — it will return incorrect results.
+    CRITICAL — MFA challenge queries vs. MFA factor lifecycle queries:
+        These are different categories — do not conflate them:
+        - MFA challenge / step-up prompts (a user was prompted for MFA during sign-in): there
+          is no dedicated eventType for this. ALWAYS use filter='outcome.result eq "CHALLENGE"'.
+          Do NOT use eventType filters for this — it will return incorrect results.
+        - MFA factor lifecycle events (enroll, activate, deactivate, reset — e.g. an admin or
+          user resetting/removing an MFA factor): these DO have dedicated eventTypes and MUST
+          be queried with an eventType filter, e.g.:
+          filter='eventType eq "user.mfa.factor.deactivate"' or
+          filter='eventType eq "user.mfa.factor.reset_all"'.
+          Do NOT use outcome.result eq "CHALLENGE" for these — that only matches sign-in
+          challenge prompts, not factor lifecycle events, and will return zero/wrong results.
 
     CRITICAL — invalid outcome value:
         If the user asks for an unrecognised outcome type (e.g. "INVALID_OUTCOME", "BLOCKED"):
@@ -110,10 +117,12 @@ async def get_logs(
             - "FAILURE"   – failed operations (e.g. wrong password, locked account)
             - "DENY"      – access blocked by a sign-on policy rule (policy-blocked logins)
             - "ALLOW"     – access explicitly allowed by a sign-on policy rule
-            - "CHALLENGE" – MFA or step-up challenge triggered.
+            - "CHALLENGE" – MFA or step-up challenge triggered during sign-in.
                             ALWAYS use filter='outcome.result eq "CHALLENGE"' for MFA challenges.
-                            Do NOT use eventType filters or user.authentication fields for this.
-                            Using outcome.result eq "SUCCESS" or eventType is WRONG for challenges.
+                            Do NOT use eventType filters for this — it is WRONG for challenges.
+                            NOTE: this is NOT for MFA factor lifecycle actions (reset/enroll/
+                            deactivate a factor) — those are separate eventTypes, e.g.
+                            filter='eventType eq "user.mfa.factor.deactivate"'.
             - "UNKNOWN"   – outcome could not be determined
             Any other value (e.g. "INVALID_OUTCOME", "BLOCKED", "DENIED") is NOT valid and
             will return an error. If the user asks for an unrecognised outcome type, you MUST
@@ -130,6 +139,7 @@ async def get_logs(
         - Policy-blocked logins: get_logs(filter='outcome.result eq "DENY"', fetch_all=True)
         - Authentication failures: get_logs(filter='outcome.result eq "FAILURE"', fetch_all=True)
         - MFA challenges: get_logs(filter='outcome.result eq "CHALLENGE"', fetch_all=True)
+        - MFA factor resets: get_logs(filter='eventType eq "user.mfa.factor.deactivate"', fetch_all=True)
         - Complete login failure investigation (ALWAYS do both):
             get_logs(filter='outcome.result eq "FAILURE"', since=..., until=..., fetch_all=True)
             get_logs(filter='outcome.result eq "DENY"', since=..., until=..., fetch_all=True)
@@ -159,12 +169,16 @@ async def get_logs(
             logger.warning(f"Limit {limit} exceeds maximum (100), setting to 100")
             limit = 100
 
-    # Detect MFA-related eventType filters that should use outcome.result eq "CHALLENGE" instead
-    _MFA_EVENT_TYPE_PATTERN = re.compile(
-        r'eventType\s+eq\s+["\'].*(?:mfa|factor|verify|challenge|step.?up|authentication).*["\']',
+    # Detect attempts to query MFA *challenge*/step-up prompts via eventType — there is no
+    # dedicated eventType for a challenge, so this must use outcome.result eq "CHALLENGE" instead.
+    # NOTE: this must NOT match MFA factor lifecycle eventTypes (e.g. user.mfa.factor.deactivate,
+    # user.mfa.factor.reset_all, user.mfa.factor.activate) — those are legitimate, valid eventType
+    # queries for factor enroll/reset/deactivate actions and are unrelated to challenge prompts.
+    _MFA_CHALLENGE_EVENT_TYPE_PATTERN = re.compile(
+        r'eventType\s+eq\s+["\'].*(?:challenge|step.?up).*["\']',
         re.IGNORECASE,
     )
-    if filter and _MFA_EVENT_TYPE_PATTERN.search(filter):
+    if filter and _MFA_CHALLENGE_EVENT_TYPE_PATTERN.search(filter):
         has_challenge_filter = bool(
             re.search(r'outcome\.result\s+eq\s+["\']CHALLENGE["\']', filter, re.IGNORECASE)
         )
