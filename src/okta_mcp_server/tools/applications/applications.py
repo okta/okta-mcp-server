@@ -5,6 +5,7 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
 
+import xml.etree.ElementTree as ET
 from typing import Any, Dict, Optional
 
 import okta.models as okta_models
@@ -194,6 +195,75 @@ async def get_application(ctx: Context, app_id: str, expand: Optional[str] = Non
         return app
     except Exception as e:
         logger.error(f"Exception while getting application {app_id}: {type(e).__name__}: {e}")
+        return {"error": str(e)}
+
+
+@mcp.tool()
+@require_scopes("okta.apps.read")
+@validate_ids("app_id", error_return_type="dict")
+async def get_app_saml_metadata(ctx: Context, app_id: str) -> Any:
+    """Get the SAML IdP metadata for an application.
+
+    Fetches GET /api/v1/apps/{app_id}/sso/saml/metadata server-side using the
+    stored token. That endpoint requires authentication and returns XML rather
+    than JSON, so it is retrieved through the SDK request executor and parsed
+    locally — the raw XML is always returned, along with the parsed entityID,
+    SSO URL, and signing certificate when they can be extracted.
+
+    Parameters:
+        app_id (str, required): The ID of the SAML application
+
+    Returns:
+        Dict with metadata_xml plus entity_id, sso_url, and x509_certificate,
+        or error information.
+    """
+    logger.info(f"Getting SAML IdP metadata for application: {app_id}")
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        executor = client.get_request_executor()
+        # oauth=False means "this is a normal API call" — the executor still
+        # attaches the cached bearer token. It does NOT disable authentication.
+        request, err = await executor.create_request(
+            method="GET",
+            url=f"/api/v1/apps/{app_id}/sso/saml/metadata",
+            body={},
+            headers={"Accept": "application/xml"},
+            oauth=False,
+        )
+        if err:
+            logger.error(f"Error building SAML metadata request for {app_id}: {err}")
+            return {"error": str(err)}
+
+        _, response_body, err = await executor.execute(request)
+        if err:
+            logger.error(f"Okta API error while getting SAML metadata for {app_id}: {err}")
+            return {"error": str(err)}
+
+        metadata_xml = response_body if isinstance(response_body, str) else str(response_body)
+        result: Dict[str, Any] = {"metadata_xml": metadata_xml}
+
+        try:
+            ns = {
+                "md": "urn:oasis:names:tc:SAML:2.0:metadata",
+                "ds": "http://www.w3.org/2000/09/xmldsig#",
+            }
+            root = ET.fromstring(metadata_xml)
+            result["entity_id"] = root.get("entityID")
+            sso = root.find(".//md:IDPSSODescriptor/md:SingleSignOnService", ns)
+            result["sso_url"] = sso.get("Location") if sso is not None else None
+            cert = root.find(".//md:IDPSSODescriptor//ds:X509Certificate", ns)
+            result["x509_certificate"] = cert.text.strip() if cert is not None and cert.text else None
+        except ET.ParseError as parse_err:
+            logger.warning(f"Could not parse SAML metadata XML for {app_id}: {parse_err}")
+            result["parse_error"] = str(parse_err)
+
+        logger.info(f"Successfully retrieved SAML metadata for application: {app_id}")
+        return result
+    except Exception as e:
+        logger.error(f"Exception while getting SAML metadata for {app_id}: {type(e).__name__}: {e}")
         return {"error": str(e)}
 
 
