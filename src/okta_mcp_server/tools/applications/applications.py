@@ -5,7 +5,9 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
 
+import json
 from typing import Any, Dict, Optional
+from urllib.parse import urlencode
 
 import okta.models as okta_models
 from loguru import logger
@@ -173,12 +175,25 @@ async def get_application(ctx: Context, app_id: str, expand: Optional[str] = Non
     try:
         client = await get_okta_client(manager)
 
-        query_params = {}
+        # Fetch the raw application JSON through the request executor rather than
+        # the typed client.get_application. The typed path deserializes into strict
+        # SDK models, which (a) raises on apps with a sparse settings.signOn, and
+        # (b) renders settings.signOn.attributeStatements as opaque anyOf union
+        # stubs (actual_instance/any_of_schemas) instead of their real
+        # type/name/namespace/values. Returning Okta's response verbatim avoids both.
+        executor = client.get_request_executor()
+        url = f"/api/v1/apps/{app_id}"
         if expand:
-            query_params["expand"] = expand
+            url += f"?{urlencode({'expand': expand})}"
 
-        app, _, err = await client.get_application(app_id, **query_params)
+        request, err = await executor.create_request(
+            method="GET", url=url, body={}, headers={}, oauth=False
+        )
+        if err:
+            logger.error(f"Error building get-application request for {app_id}: {err}")
+            return {"error": str(err)}
 
+        _, response_body, err = await executor.execute(request)
         if err:
             logger.error(f"Okta API error while getting application {app_id}: {err}")
             return {"error": str(err)}
@@ -191,7 +206,7 @@ async def get_application(ctx: Context, app_id: str, expand: Optional[str] = Non
             )
 
         logger.info(f"Successfully retrieved application: {app_id}")
-        return app
+        return json.loads(response_body) if response_body else {}
     except Exception as e:
         logger.error(f"Exception while getting application {app_id}: {type(e).__name__}: {e}")
         return {"error": str(e)}
