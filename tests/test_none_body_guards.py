@@ -90,7 +90,6 @@ from okta_mcp_server.tools.policies.policies import (
 )
 from okta_mcp_server.tools.users.users import create_user, get_user, update_user
 
-
 BRAND_ID = "bnd114iNkrcN6aR680g4"
 DOMAIN_ID = "OcDz6iRyjkaCTXkdo0g3"
 EMAIL_DOMAIN_ID = "OeD1a2b3c4d5"
@@ -441,8 +440,14 @@ class TestApplicationsNoneBodyGuards:
     async def test_get_application_none_body_returns_error_dict(
         self, mock_get_client, ctx_no_elicitation
     ):
-        client = AsyncMock()
-        client.get_application.return_value = (None, MagicMock(), None)
+        # get_application fetches the raw record through the request executor
+        # rather than the typed client (see #48), so the none-body case is an
+        # empty response body rather than a None first element.
+        executor = MagicMock()
+        executor.create_request = AsyncMock(return_value=({"method": "GET"}, None))
+        executor.execute = AsyncMock(return_value=(MagicMock(), None, None))
+        client = MagicMock()
+        client.get_request_executor = MagicMock(return_value=executor)
         mock_get_client.return_value = client
 
         result = await get_application(ctx=ctx_no_elicitation, app_id=APP_ID)
@@ -613,8 +618,11 @@ class TestPoliciesNoneBodyGuards:
     async def test_get_policy_none_body_returns_error_dict(
         self, mock_get_client, ctx_no_elicitation
     ):
-        client = AsyncMock()
-        client.get_policy.return_value = (None, MagicMock(), None)
+        executor = MagicMock()
+        executor.create_request = AsyncMock(return_value=({"method": "GET"}, None))
+        executor.execute = AsyncMock(return_value=(MagicMock(), "", None))
+        client = MagicMock()
+        client.get_request_executor = MagicMock(return_value=executor)
         mock_get_client.return_value = client
 
         result = await get_policy(ctx=ctx_no_elicitation, policy_id=POLICY_ID)
@@ -661,8 +669,11 @@ class TestPoliciesNoneBodyGuards:
     async def test_get_policy_rule_none_body_returns_error_dict(
         self, mock_get_client, ctx_no_elicitation
     ):
-        client = AsyncMock()
-        client.get_policy_rule.return_value = (None, MagicMock(), None)
+        executor = MagicMock()
+        executor.create_request = AsyncMock(return_value=({"method": "GET"}, None))
+        executor.execute = AsyncMock(return_value=(MagicMock(), "", None))
+        client = MagicMock()
+        client.get_request_executor = MagicMock(return_value=executor)
         mock_get_client.return_value = client
 
         result = await get_policy_rule(

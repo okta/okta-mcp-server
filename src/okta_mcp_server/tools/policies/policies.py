@@ -5,28 +5,33 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
 
+import json
 from typing import Any, Dict, Optional
-
-from loguru import logger
-from mcp.server.fastmcp import Context
+from urllib.parse import urlencode
 
 import okta.models as okta_models
+from loguru import logger
+from mcp.server.fastmcp import Context
 from okta.models.policy_rule import PolicyRule
 
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConfirmation, elicit_or_fallback
-from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
 from okta_mcp_server.utils.messages import (
     DEACTIVATE_POLICY,
     DEACTIVATE_POLICY_RULE,
     DELETE_POLICY,
     DELETE_POLICY_RULE,
 )
+from okta_mcp_server.utils.pagination import (
+    build_query_params,
+    create_paginated_response,
+    extract_after_cursor,
+    paginate_all_results,
+)
 from okta_mcp_server.utils.scope_guard import require_scopes
 from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import validate_ids
-
 
 # Mapping from Okta policy rule type → typed SDK model class.
 # The base PolicyRule model silently drops type-specific fields like `actions` and
@@ -56,6 +61,94 @@ def _build_policy_rule_model(rule_data: Dict[str, Any]) -> Any:
     model_cls = _POLICY_RULE_MODEL_MAP.get(rule_type, PolicyRule)
     logger.debug(f"Using model class '{model_cls.__name__}' for rule type '{rule_type}'")
     return model_cls.from_dict(rule_data)
+
+
+def _safe_parse_policy(item: Dict[str, Any]) -> Any:
+    """Deserialize one policy, falling back to its raw Okta JSON.
+
+    The generated SDK models are stricter than some live Policies API payloads.
+    In particular, Access Policy ``_embedded.resourceType`` can be a string even
+    though the SDK declares every value below ``_embedded`` as a dictionary. A
+    single such record must not make the entire policy page unreadable.
+    """
+    try:
+        model = okta_models.Policy.from_dict(item)
+        return model if model is not None else item
+    except Exception as e:
+        label = item.get("name") or item.get("id", "<unknown>")
+        logger.warning(
+            f"Policy '{label}' failed strict deserialization, returning raw dict: "
+            f"{type(e).__name__}: {e}"
+        )
+        return {**item, "_deserialization_warning": f"{type(e).__name__}: {e}"}
+
+
+def _safe_parse_policy_rule(item: Dict[str, Any]) -> Any:
+    """Deserialize one policy rule, falling back to its raw Okta JSON.
+
+    Live Access Policy rules may contain nullable condition members such as
+    ``userType.exclude`` while the generated SDK requires a list. Parse records
+    independently so one SDK schema mismatch cannot abort the whole page.
+    """
+    try:
+        return _build_policy_rule_model(item)
+    except Exception as e:
+        label = item.get("name") or item.get("id", "<unknown>")
+        logger.warning(
+            f"Policy rule '{label}' failed strict deserialization, returning raw dict: "
+            f"{type(e).__name__}: {e}"
+        )
+        return {**item, "_deserialization_warning": f"{type(e).__name__}: {e}"}
+
+
+async def _fetch_raw_json(okta_client: Any, path: str, params: Optional[Dict[str, Any]] = None):
+    """GET an Okta API resource without SDK response-model deserialization."""
+    query_string = urlencode(
+        {
+            key: ("true" if value is True else "false" if value is False else value)
+            for key, value in (params or {}).items()
+            if value is not None
+        }
+    )
+    url = path + (f"?{query_string}" if query_string else "")
+    executor = okta_client.get_request_executor()
+    request, request_err = await executor.create_request(
+        method="GET", url=url, body={}, headers={}, oauth=False
+    )
+    if request_err:
+        return None, None, request_err
+
+    response, response_body, response_err = await executor.execute(request)
+    if response_err:
+        return None, response, response_err
+
+    if not response_body:
+        return None, response, None
+
+    try:
+        return json.loads(response_body), response, None
+    except (TypeError, json.JSONDecodeError) as e:
+        return None, response, f"Invalid JSON returned by Okta: {e}"
+
+
+async def _fetch_policy_page(okta_client: Any, params: Dict[str, Any]):
+    items, response, err = await _fetch_raw_json(okta_client, "/api/v1/policies", params)
+    if err or items is None:
+        return items, response, err
+    if not isinstance(items, list):
+        return None, response, "Okta returned a non-list response when listing policies"
+    return [_safe_parse_policy(item) for item in items], response, None
+
+
+async def _fetch_policy_rule_page(okta_client: Any, policy_id: str, params: Dict[str, Any]):
+    items, response, err = await _fetch_raw_json(
+        okta_client, f"/api/v1/policies/{policy_id}/rules", params
+    )
+    if err or items is None:
+        return items, response, err
+    if not isinstance(items, list):
+        return None, response, "Okta returned a non-list response when listing policy rules"
+    return [_safe_parse_policy_rule(item) for item in items], response, None
 
 
 @mcp.tool()
@@ -118,8 +211,8 @@ async def list_policies(
         if status:
             params["status"] = status
 
-        logger.debug("Calling Okta API to list policies")
-        policies, response, err = await okta_client.list_policies(**params)
+        logger.debug("Calling Okta API to list policies through the raw response path")
+        policies, response, err = await _fetch_policy_page(okta_client, params)
 
         if err:
             logger.error(f"Error listing policies: {err}")
@@ -136,7 +229,7 @@ async def list_policies(
             async def _next_page(cursor):
                 p = {k: v for k, v in params.items() if k != "after"}
                 p["after"] = cursor
-                return await okta_client.list_policies(**p)
+                return await _fetch_policy_page(okta_client, p)
 
             async def _on_page(pages, total):
                 logger.info(f"[list_policies] Page {pages} fetched — {total} policies so far")
@@ -172,20 +265,25 @@ async def get_policy(ctx: Context, policy_id: str) -> Optional[Dict[str, Any]]:
     okta_client = await get_okta_client(manager)
 
     try:
-        policy, _, err = await okta_client.get_policy(policy_id)
+        policy_data, _, err = await _fetch_raw_json(
+            okta_client, f"/api/v1/policies/{policy_id}"
+        )
 
         if err:
             logger.error(f"Error getting policy {policy_id}: {err}")
             return {"error": str(err)}
 
-        if policy is None:
+        if policy_data is None:
             return none_body_error(
                 "get_policy",
                 f"retrieving policy {policy_id!r}",
                 "Verify the ID with list_policies(type=...).",
             )
 
-        return policy
+        if not isinstance(policy_data, dict):
+            return {"error": "Okta returned a non-object response when retrieving the policy"}
+
+        return _safe_parse_policy(policy_data)
 
     except Exception as e:
         logger.error(f"Exception getting policy: {e}")
@@ -432,7 +530,7 @@ async def list_policy_rules(
         if after:
             params["after"] = after
 
-        rules, resp, err = await okta_client.list_policy_rules(policy_id, **params)
+        rules, resp, err = await _fetch_policy_rule_page(okta_client, policy_id, params)
 
         if err:
             logger.error(f"Error listing policy rules: {err}")
@@ -447,7 +545,7 @@ async def list_policy_rules(
             logger.info(f"fetch_all=True, auto-paginating from initial {len(rules)} policy rules")
 
             async def _next_page(cursor):
-                return await okta_client.list_policy_rules(policy_id, after=cursor)
+                return await _fetch_policy_rule_page(okta_client, policy_id, {"after": cursor})
 
             async def _on_page(pages, total):
                 logger.info(f"[list_policy_rules] Page {pages} fetched — {total} rules so far")
@@ -484,20 +582,25 @@ async def get_policy_rule(ctx: Context, policy_id: str, rule_id: str) -> Optiona
     okta_client = await get_okta_client(manager)
 
     try:
-        rule, _, err = await okta_client.get_policy_rule(policy_id, rule_id)
+        rule_data, _, err = await _fetch_raw_json(
+            okta_client, f"/api/v1/policies/{policy_id}/rules/{rule_id}"
+        )
 
         if err:
             logger.error(f"Error getting policy rule: {err}")
             return {"error": str(err)}
 
-        if rule is None:
+        if rule_data is None:
             return none_body_error(
                 "get_policy_rule",
                 f"retrieving rule {rule_id!r} for policy {policy_id!r}",
                 "Verify the IDs with list_policy_rules(policy_id=...).",
             )
 
-        return rule
+        if not isinstance(rule_data, dict):
+            return {"error": "Okta returned a non-object response when retrieving the policy rule"}
+
+        return _safe_parse_policy_rule(rule_data)
 
     except Exception as e:
         logger.error(f"Exception getting policy rule: {e}")

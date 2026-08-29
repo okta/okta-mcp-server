@@ -25,15 +25,53 @@ def extract_after_cursor(response) -> Optional[str]:
     Returns:
         str: The 'after' cursor value, or None if no next page
     """
-    # --- Okta SDK v3: ApiResponse with Link header ---
-    if response and hasattr(response, "headers") and response.headers:
+    # --- Raw aiohttp response (returned by the request executor) ---
+    # The request executor returns aiohttp's response object directly. aiohttp
+    # pre-parses the (possibly multiple) Link headers into ``.links``, a mapping
+    # keyed by rel — e.g. ``links["next"]["url"]`` is a yarl URL. This is what the
+    # SDK itself uses (OktaAPIResponse.extract_pagination). Reading the raw
+    # ``headers.get("Link")`` is NOT enough: Okta sends ``self`` and ``next`` as
+    # SEPARATE Link headers, and a multidict ``.get`` returns only the first
+    # (self), so the next cursor would be missed.
+    links = getattr(response, "links", None) if response is not None else None
+    if links:
+        try:
+            nxt = links.get("next")
+            url = nxt.get("url") if nxt is not None and hasattr(nxt, "get") else None
+            if url is not None:
+                cursor = parse_qs(urlparse(str(url)).query).get("after", [None])[0]
+                if cursor:
+                    return cursor
+        except Exception as e:
+            logger.warning(f"Failed to parse aiohttp links cursor: {e}")
+
+    # --- Okta SDK v3: Link-header cursor ---
+    # Resolve a headers mapping from whichever response shape we got:
+    #   * ApiResponse exposes a ``.headers`` attribute
+    #   * OktaAPIResponse (what the request executor returns) exposes headers via
+    #     ``get_headers()`` / ``_resp_headers`` and does NOT have ``.headers``
+    # Reading both ensures the cursor is found regardless of how the page was
+    # fetched (typed client vs. raw request executor).
+    headers = None
+    if response is not None:
+        if getattr(response, "headers", None):
+            headers = response.headers
+        elif hasattr(response, "get_headers"):
+            try:
+                headers = response.get_headers()
+            except Exception:
+                headers = None
+        if not headers and getattr(response, "_resp_headers", None):
+            headers = response._resp_headers
+
+    if headers:
         link_header = ""
         try:
-            link_header = response.headers.get("Link", "") or response.headers.get("link", "")
+            link_header = headers.get("Link", "") or headers.get("link", "")
         except Exception:
-            for key in response.headers:
+            for key in headers:
                 if key.lower() == "link":
-                    link_header = response.headers[key]
+                    link_header = headers[key]
                     break
 
         if link_header and 'rel="next"' in link_header:
