@@ -30,7 +30,7 @@ This server is an [Model Context Protocol](https://modelcontextprotocol.io/intro
 * **Integration with Okta Admin Management APIs:** Leverages the official Okta APIs to ensure secure and reliable interaction with your Okta org.
 * **Extensible Architecture:** Designed to be easily extended with new functionalities and support for additional Okta API endpoints.
 * **Comprehensive Tool Support:** Full CRUD operations for users, groups, applications, policies, device assurance policies, brands, themes, custom pages, email templates, custom domains, email domains, and more.
-* **Scope-Based Tool Loading:** Tools are automatically enabled or disabled at server startup based on the OAuth 2.0 scopes configured in `OKTA_SCOPES`. Only tools for which your application has been granted the required scope are registered and visible to the LLM — tools without a matching scope are silently removed before the first request.
+* **Scope-Based Tool Loading:** Tools are automatically enabled or disabled at server startup based on the OAuth 2.0 scopes listed in `OKTA_SCOPES`. Only tools whose required scope is listed there are registered and visible to the LLM — tools without a matching scope are removed before the first request. Note this is matched against what you *declare* in `OKTA_SCOPES`, not what Okta has actually *granted*; see [Configured vs. granted scopes](#configured-vs-granted-scopes).
 
 This MCP server utilizes [Okta's Python SDK v3.4.1](https://github.com/okta/okta-sdk-python) to communicate with the Okta APIs, ensuring a robust and well-supported integration.
 
@@ -640,6 +640,7 @@ The Okta Open Source MCP Server provides the following tools for LLMs to interac
 | Tool        | Description                              | Usage Examples                                                                                                                                             |
 | ----------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `get_logs`  | Retrieve system logs from your Okta org | - `Show me recent login attempts` <br> - `Find failed logins from the past 24 hours` <br> - `Get authentication logs for user john.doe@company.com`     |
+| `get_login_failures` | Investigate why a user failed to log in — returns both authentication failures (`FAILURE`) and policy-blocked sign-ins (`DENY`) in a single call | - `Why couldn't john.doe@company.com log in?` <br> - `Show me failed logins in the last 24 hours` <br> - `What sign-ins were blocked by policy this week?` |
 
 ### Brands
 
@@ -769,14 +770,14 @@ The Okta Open Source MCP Server uses a **scope-based tool loading** mechanism to
 | `okta.users.read` | `list_users`, `get_user`, `get_user_profile_attributes`, `list_user_groups` |
 | `okta.users.manage` | `create_user`, `update_user`, `deactivate_user`, `delete_deactivated_user` |
 | `okta.groups.read` | `list_groups`, `get_group`, `list_group_users`, `list_group_apps` |
-| `okta.groups.manage` | `create_group`, `update_group`, `delete_group`, `add_user_to_group`, `remove_user_from_group` |
+| `okta.groups.manage` | `create_group`, `update_group`, `delete_group`, `add_user_to_group`, `remove_user_from_group`, `confirm_delete_group` |
 | `okta.apps.read` | `list_applications`, `get_application` |
-| `okta.apps.manage` | `create_application`, `update_application`, `delete_application`, `activate_application`, `deactivate_application` |
+| `okta.apps.manage` | `create_application`, `update_application`, `delete_application`, `activate_application`, `deactivate_application`, `confirm_delete_application` |
 | `okta.policies.read` | `list_policies`, `get_policy`, `list_policy_rules`, `get_policy_rule` |
 | `okta.policies.manage` | `create_policy`, `update_policy`, `delete_policy`, `activate_policy`, `deactivate_policy`, `create_policy_rule`, `update_policy_rule`, `delete_policy_rule`, `activate_policy_rule`, `deactivate_policy_rule` |
 | `okta.deviceAssurance.read` | `list_device_assurance_policies`, `get_device_assurance_policy` |
 | `okta.deviceAssurance.manage` | `create_device_assurance_policy`, `replace_device_assurance_policy`, `delete_device_assurance_policy` |
-| `okta.logs.read` | `get_logs` |
+| `okta.logs.read` | `get_logs`, `get_login_failures` |
 | `okta.brands.read` | `list_brands`, `get_brand`, `list_brand_domains`, `list_brand_themes`, `get_brand_theme`, `get_sign_in_page_resources`, `get_customized_sign_in_page`, `get_default_sign_in_page`, `get_preview_sign_in_page`, `list_sign_in_widget_versions`, `get_error_page_resources`, `get_customized_error_page`, `get_default_error_page`, `get_preview_error_page`, `get_sign_out_page_settings` |
 | `okta.brands.manage` | `create_brand`, `replace_brand`, `delete_brand`, `replace_brand_theme`, `upload_brand_theme_logo`, `delete_brand_theme_logo`, `upload_brand_theme_favicon`, `delete_brand_theme_favicon`, `upload_brand_theme_background_image`, `delete_brand_theme_background_image`, `replace_customized_sign_in_page`, `delete_customized_sign_in_page`, `replace_preview_sign_in_page`, `delete_preview_sign_in_page`, `replace_customized_error_page`, `delete_customized_error_page`, `replace_preview_error_page`, `delete_preview_error_page`, `replace_sign_out_page_settings` |
 | `okta.templates.read` | `list_email_templates`, `get_email_template`, `list_email_customizations`, `get_email_customization`, `get_email_customization_preview`, `get_email_default_content`, `get_email_default_content_preview`, `get_email_settings` |
@@ -785,6 +786,28 @@ The Okta Open Source MCP Server uses a **scope-based tool loading** mechanism to
 | `okta.domains.manage` | `create_custom_domain`, `replace_custom_domain`, `delete_custom_domain`, `upsert_custom_domain_certificate`, `verify_custom_domain` |
 | `okta.emailDomains.read` | `list_email_domains`, `get_email_domain` |
 | `okta.emailDomains.manage` | `create_email_domain`, `replace_email_domain`, `delete_email_domain`, `verify_email_domain` |
+
+### Ready-made scope profiles
+
+If you don't want to hand-pick individual scopes, here are two ready-made `OKTA_SCOPES` values, derived directly from every scope in `scope_registry.py`'s `TOOL_SCOPE_REGISTRY`. Paste one of these straight into your MCP client configuration.
+
+**Read-only / audit** — every `*.read` scope. Enables all list/get tools (including `get_logs` and `get_login_failures`) and no create/update/delete/activate tools. This is the minimum set for a read-only compliance audit:
+
+```json
+"OKTA_SCOPES": "okta.apps.read okta.brands.read okta.deviceAssurance.read okta.domains.read okta.emailDomains.read okta.groups.read okta.logs.read okta.policies.read okta.templates.read okta.users.read"
+```
+
+**Full read/write** — every scope in the registry. Enables every tool the server ships, including destructive operations (which still require interactive confirmation):
+
+```json
+"OKTA_SCOPES": "okta.apps.manage okta.apps.read okta.brands.manage okta.brands.read okta.deviceAssurance.manage okta.deviceAssurance.read okta.domains.manage okta.domains.read okta.emailDomains.manage okta.emailDomains.read okta.groups.manage okta.groups.read okta.logs.read okta.policies.manage okta.policies.read okta.templates.manage okta.templates.read okta.users.manage okta.users.read"
+```
+
+> [!TIP]
+> `okta.logs.read` has no corresponding `.manage` scope in either profile above — system logs are a read-only resource in the Okta API, so there is nothing to write.
+
+> [!IMPORTANT]
+> Pasting one of these strings into `OKTA_SCOPES` only controls which tools are *offered* by this MCP server — see [Configured vs. granted scopes](#configured-vs-granted-scopes) below. Each scope in the string must **also** be granted to your Okta application in the Admin Console, or matching tool calls will fail with an HTTP 403 at runtime instead of being hidden.
 
 ### What you need to do
 
@@ -810,7 +833,44 @@ Then restart your MCP client so the server picks up the new scope list.
 > Start with the minimum set of scopes your use-case requires. For example, if you only need to read users and brands, use `okta.users.read okta.brands.read`. Adding `okta.*.manage` scopes enables write operations — only grant those if needed.
 
 > [!NOTE]
-> Scopes follow the pattern `okta.<resource>.read` for read-only access and `okta.<resource>.manage` for full read+write access. You do **not** need both — `okta.users.manage` implicitly enables all read operations on users.
+> Scopes follow the pattern `okta.<resource>.read` for read-only access and `okta.<resource>.manage` for write access. `.read` and `.manage` are **independent strings** — this server does not treat one as implying the other, in either direction. If you want both read and write tools for a resource, you must list **both** scopes explicitly in `OKTA_SCOPES` (e.g. `okta.users.read okta.users.manage`). Declaring only `okta.users.manage` does **not** register `list_users`, `get_user`, or `get_user_profile_attributes` — those tools require `okta.users.read`, and without it they simply **will not appear in `tools/list` at all** (they do not error or 403; they are absent, as if they didn't exist). See the **Scope → Tool mapping** table above to assemble the exact combination you need, or copy one of the **Ready-made scope profiles** below, which already list every scope explicitly.
+>
+> This is deliberately stricter than the Okta API itself — a `.manage`-scoped token *does* grant read access when calling Okta's raw Management API directly. This server's tool registration does not mirror that behavior on purpose: `OKTA_SCOPES` is meant to be an exact, auditable declaration of intent, so every scope you want must be listed explicitly regardless of what the underlying Okta API would otherwise allow.
+
+### Configured vs. granted scopes
+
+`OKTA_SCOPES` and the Okta Admin Console control two **different** things, and it's easy to set one without the other:
+
+- **`OKTA_SCOPES`** (the environment variable) declares what your MCP client *wants*. The server reads this list once at startup and uses it — and only it — to decide which tools to prune (see "How it works" above).
+- **The Okta Admin Console** (Applications → your app → **Okta API Scopes** tab) controls what your OAuth application has actually been *granted*. Okta enforces this on every API call, completely independently of what you typed into `OKTA_SCOPES`.
+
+Startup pruning is based on the **declared** list only — the server has no way to see what's actually **granted** until it makes a real API call. That means a scope can be declared but not granted:
+
+| Declared in `OKTA_SCOPES`? | Granted in Admin Console? | What happens |
+| --- | --- | --- |
+| No | — | Tool is disabled at startup. It never appears in `tools/list`. |
+| Yes | Yes | Tool is enabled and works normally. |
+| Yes | **No** | Tool is enabled and **appears** in `tools/list` — but every call to it fails at runtime with an **HTTP 403**, because pruning never checked the Admin Console. |
+
+> [!WARNING]
+> Declaring a scope in `OKTA_SCOPES` does not grant it. If `okta.logs.read` is listed in `OKTA_SCOPES` but was never granted to the application in the Okta Admin Console, `get_logs` and `get_login_failures` will still show up as available tools — and will fail the first time they're actually called, not before.
+
+**What to do if a tool call fails with an HTTP 403**
+
+If a tool call returns an error containing the text:
+
+```
+Authorization error (HTTP 403): the OAuth client does not have the 'okta.logs.read' scope.
+```
+
+this is the configured-vs-granted mismatch above, not a bug. Fix it the same way you would enable any other scope:
+
+1. **Grant the scope to your Okta application** — Admin Console → **Applications** → your app → **Okta API Scopes** tab → click **Grant** next to the missing scope.
+2. **Restart the MCP server** so it re-authenticates and the newly granted scope takes effect.
+3. Re-run the tool call.
+
+> [!NOTE]
+> Reaching this error at all tells you the scope **is** declared in `OKTA_SCOPES` — otherwise the tool would have been pruned at startup and you could never have called it. So the fix is on the Okta side, not in your MCP client config. A missing grant is the most common cause, but it is not the only one: Okta also requires the API Services application to hold an **admin role** with permission over the resource. If the scope is already granted and the call still returns 403, check the role assigned to the application before assuming a scope problem.
 
 ## �🔐 Authentication
 
