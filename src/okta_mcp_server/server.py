@@ -15,8 +15,28 @@ from loguru import logger
 from mcp.server.fastmcp import FastMCP
 
 from okta_mcp_server.utils.auth.auth_manager import OktaAuthManager
+from okta_mcp_server.utils.okta_compat import apply_okta_model_compat
 from okta_mcp_server.utils.scope_guard import get_disabled_tools, get_startup_scopes, prune_tools_by_scope
 from okta_mcp_server.utils.serialization import json_response
+from okta_mcp_server.utils.tolerant_deserialization import install_tolerant_deserialization
+
+# Okta SDK compatibility, applied at import time so it is guaranteed to run
+# before any SDK deserialization: every tool module reaches the SDK only after
+# doing ``from okta_mcp_server.server import mcp``, which executes this module
+# top-to-bottom first.
+#
+#   1. apply_okta_model_compat()          relaxes specific over-strict generated
+#                                         models that reject valid API responses.
+#   2. install_tolerant_deserialization() is the general net for future spec
+#                                         drift: it drops and reports individual
+#                                         bad items in a list response instead of
+#                                         failing the whole request.
+#
+# See okta_mcp_server.utils.okta_compat and
+# okta_mcp_server.utils.tolerant_deserialization for the rationale and the
+# upstream issues that would make each removable.
+apply_okta_model_compat()
+install_tolerant_deserialization()
 
 LOG_FILE = os.environ.get("OKTA_LOG_FILE")
 
