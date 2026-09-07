@@ -1,0 +1,33 @@
+{
+  "id": "rst000000000000000002",
+  "name": "Example Enrollment Policy",
+  "description": "Synthetic MFA_ENROLL policy that offers a smart-card (PIV/CAC) authenticator.",
+  "type": "MFA_ENROLL",
+  "status": "ACTIVE",
+  "priority": 1,
+  "system": false,
+  "created": "2026-01-02T03:04:05.000Z",
+  "lastUpdated": "2026-01-02T03:04:05.000Z",
+  "settings": {
+    "type": "AUTHENTICATORS",
+    "authenticators": [
+      {
+        "key": "okta_password",
+        "enroll": {
+          "self": "REQUIRED"
+        }
+      },
+      {
+        "key": "smart_card_idp",
+        "enroll": {
+          "self": "OPTIONAL"
+        }
+      }
+    ]
+  },
+  "_links": {
+    "self": {
+      "href": "https://example.invalid/api/v1/policies/rst000000000000000002"
+    }
+  }
+}

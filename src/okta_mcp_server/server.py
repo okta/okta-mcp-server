@@ -15,8 +15,19 @@ from loguru import logger
 from mcp.server.fastmcp import FastMCP
 
 from okta_mcp_server.utils.auth.auth_manager import OktaAuthManager
+from okta_mcp_server.utils.okta_compat import apply_okta_model_compat
 from okta_mcp_server.utils.scope_guard import get_disabled_tools, get_startup_scopes, prune_tools_by_scope
 from okta_mcp_server.utils.serialization import json_response
+
+# Relax the over-strict generated Okta SDK models that reject valid API
+# responses.  Applied at import time so it is guaranteed to run before any SDK
+# deserialization: every tool module reaches the SDK only after doing
+# ``from okta_mcp_server.server import mcp``, which executes this module
+# top-to-bottom first.
+#
+# See okta_mcp_server.utils.okta_compat for the rationale, the exact fields
+# touched, and the upstream issue that would make each patch removable.
+apply_okta_model_compat()
 
 LOG_FILE = os.environ.get("OKTA_LOG_FILE")
 
