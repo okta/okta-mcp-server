@@ -5,11 +5,13 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
 
-import asyncio
-
 from . import server
 
 
 def main():
     """Run the server"""
-    asyncio.run(server.main())
+    # server.main() is synchronous and runs the MCP event loop itself via
+    # mcp.run(), so it must be called directly. Wrapping it in asyncio.run()
+    # crashed on startup with "a coroutine was expected, got None" whenever
+    # mcp.run() returned (e.g. when launched without a stdio client attached).
+    server.main()
