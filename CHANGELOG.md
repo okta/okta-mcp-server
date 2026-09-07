@@ -1,6 +1,19 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## v1.1.6
+
+### Features
+- Added `list_user_groups` to list every group a given user is a member of ([#115](https://github.com/okta/okta-mcp-server/pull/115)). The Okta endpoint returns the user's full group membership in a single response and does not paginate, so the tool exposes no pagination parameters — use `list_groups` for an org-wide listing. Introduces a new **User Resources** tool family at `tools/user_resources/`.
+- Added Okta Integration Network (OIN) catalog tools — `list_catalog_apps` and `get_catalog_app` (`okta.apps.read`) to browse the catalog and read an app definition with its provisioning schema, plus `install_oin_app` (`okta.apps.manage`) to install an instance ([#75](https://github.com/okta/okta-mcp-server/pull/75)). Outbound SCIM provisioning only works on an instance of a provisioning-capable catalog app: the capability is fixed by the catalog definition at install time and cannot be added to a plain custom SAML/OIDC app afterwards. `create_application` cannot install one because the typed SDK strips the catalog `name` key from the request body, so `install_oin_app` issues the request directly.
+
+### Improvements
+- `list_catalog_apps` supports `q` keyword filtering and `after` / `limit` / `fetch_all` pagination against an endpoint that paginates (default page size **20**) but, unlike the rest of the Okta API, sends no `Link: rel="next"` header — the cursor is synthesized from the last entry's catalog `name`, `fetch_all` dedups by name so a misbehaving cursor cannot duplicate entries or loop, and an early stop reports `stopped_early` with a resume cursor instead of implying the walk completed ([#75](https://github.com/okta/okta-mcp-server/pull/75)).
+- Added `tests/test_oin_catalog.py` (18 tests) and `tests/test_user_resources.py` (9 tests). Suite total: **529 → 556 tests**, all passing.
+
+### Documentation
+- Documented the four new tools in the README supported-tools tables and scope matrix. Tool total: **109 → 113**.
+
 ## v1.1.5
 
 ### Security
