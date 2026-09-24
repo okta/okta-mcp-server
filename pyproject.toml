@@ -1,6 +1,6 @@
 [project]
 name = "okta-mcp-server"
-version = "1.1.6"
+version = "1.1.7"
 description = "The Okta Open Source MCP Server integrates with LLMs and AI agents, allowing you to perform various Okta management operations using natural language and is Generally Available (GA)."
 readme = "README.md"
 requires-python = ">=3.13"
@@ -28,7 +28,7 @@ classifiers = [
 dependencies = [
     "loguru>=0.7.3",
     "mcp[cli]>=1.28.1,<2.0.0",
-    "okta==3.4.4",
+    "okta==3.4.6",
     "requests>=2.32.4",
     "keyring>=25.6.0",
     "keyrings.alt>=5.0.0",

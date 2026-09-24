@@ -1,6 +1,22 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## v1.1.7
+
+### Security
+- Raised transitive dependency floors in `[tool.uv] constraint-dependencies` to clear four Dependabot security advisories against pinned entries in `uv.lock` ([#121](https://github.com/okta/okta-mcp-server/pull/121)). None of the flagged packages are declared in `[project] dependencies` — they are pulled in through our direct deps — so the fix follows the v1.1.5 pattern of bounding transitive packages via `constraint-dependencies` and re-resolving once, making the floor durable against a future `uv lock` regression:
+  - `aiohttp>=3.14.3` — reached via `okta` (its async HTTP layer).
+  - `anyio>=4.15.1` — reached via `mcp` directly, and transitively through `httpx`, `starlette`, and `sse-starlette`.
+  - `pygments>=2.21.0` — reached via `rich` ← `typer` ← `mcp[cli]` (ships in the runtime image); also a `pytest` dependency in the dev group.
+  - `cryptography>=50.0.0` (was `>=48.0.1`) — reached via `jwcrypto` ← `okta` and `pyjwt[crypto]` ← `mcp`.
+  - Re-resolving updates `aiohttp` 3.14.1 → 3.14.3, `anyio` 4.9.0 → 4.15.1, `cryptography` 49.0.0 → 50.0.1, and `pygments` 2.19.1 → 2.21.0. Also drops `sniffio` 1.3.1 (no longer required by `anyio` ≥ 4.15), taking the locked graph from 77 → 76 packages. No source changes; full test suite passes unchanged.
+
+### Improvements
+- Upgraded the Okta Python SDK from **3.4.4 → 3.4.6** to pick up two upstream spec fixes:
+  - **3.4.6** ([okta-sdk-python#580](https://github.com/okta/okta-sdk-python/pull/580)) — relaxed the last five over-strict `required` boolean constraints on `SamlApplicationSettingsSignOn` (`allowMultipleAcsEndpoints`, `assertionSigned`, `honorForceAuthn`, `requestCompressed`, `responseSigned`). App Catalog / OIN SAML applications legitimately omit these on `GET`, so a single such app was raising `ValidationError` and failing entire paginated pages of `list_applications`. Completes the read-side fix started in SDK 3.4.3. Directly benefits the `list_applications` MCP tool and the new OIN catalog tools shipped in v1.1.6.
+  - **3.4.5** ([okta-sdk-python#575](https://github.com/okta/okta-sdk-python/pull/575)) — resolved a name collision where OpenAPI Generator promoted the inline `User.type` object into a `UserType` class that shadowed the real `components/schemas/UserType`, causing `/api/v1/meta/types/user/*` responses to silently drop every field except `id`. The spec now defines a dedicated `UserTypeRef` for `User.type` and `UserType` carries its full field set (`name`, `displayName`, `description`, `created`, `createdBy`, `default`, `lastUpdated`, `lastUpdatedBy`, `_links`). Note: the Python-level type of `User.type` changed from `UserType` to `UserTypeRef` upstream, but wire-format JSON is unchanged and no MCP tool relies on the Python type annotation, so tool signatures and response shapes are unaffected.
+  - Full test suite passes unchanged.
+
 ## v1.1.6
 
 ### Features

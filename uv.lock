@@ -698,7 +698,7 @@ wheels = [
 
 [[package]]
 name = "okta"
-version = "3.4.4"
+version = "3.4.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aenum" },
@@ -715,14 +715,14 @@ dependencies = [
     { name = "requests" },
     { name = "xmltodict" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ba/5e/fbb1eedea847a056c46703d6f5dff53baed4c1ebf3c10e057c5db9419507/okta-3.4.4.tar.gz", hash = "sha256:e7c82176b5afd2301e3b685e0715620dfd92513fc45999147e33d7485263a3f2", size = 2717483, upload-time = "2026-07-01T12:42:54.649Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/da/bc/f2bbc2767342b039095e6608f745531058f1bdf7de93599b4d70402a7d10/okta-3.4.6.tar.gz", hash = "sha256:068a91390c9b9f9998a84ee2d42cd5c08352ca3a2c447682ea604ff4050ccdf7", size = 3347086, upload-time = "2026-09-21T05:31:45.018Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/39/60/e9beb7de34841b2b2c1b2c378043df1a31f0c5710df8c06f93e37d4d29ea/okta-3.4.4-py3-none-any.whl", hash = "sha256:2f4c34ec241e586ce8f879f6b608356bbe719964e295440154b22810a76b5604", size = 3869793, upload-time = "2026-07-01T12:42:52.596Z" },
+    { url = "https://files.pythonhosted.org/packages/88/73/09ecb97feed562edd39ab1111f490949c1ed93dbe21e669e36b00eeee71e/okta-3.4.6-py3-none-any.whl", hash = "sha256:93ff7b8249fa0450ceffdedc39282dc2c306656a4e6d309e4b5ccc52a814d788", size = 3871876, upload-time = "2026-09-21T05:31:40.618Z" },
 ]
 
 [[package]]
 name = "okta-mcp-server"
-version = "1.1.6"
+version = "1.1.7"
 source = { editable = "." }
 dependencies = [
     { name = "flatdict" },
@@ -748,7 +748,7 @@ requires-dist = [
     { name = "keyrings-alt", specifier = ">=5.0.0" },
     { name = "loguru", specifier = ">=0.7.3" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.28.1,<2.0.0" },
-    { name = "okta", specifier = "==3.4.4" },
+    { name = "okta", specifier = "==3.4.6" },
     { name = "requests", specifier = ">=2.32.4" },
 ]
 
