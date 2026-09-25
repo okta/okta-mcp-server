@@ -146,6 +146,7 @@ def main():
     from okta_mcp_server.tools.customization.email_domains import email_domains  # noqa: F401
     from okta_mcp_server.tools.device_assurance import device_assurance  # noqa: F401
     from okta_mcp_server.tools.groups import groups  # noqa: F401
+    from okta_mcp_server.tools.mappings import mappings  # noqa: F401
     from okta_mcp_server.tools.policies import policies  # noqa: F401
     from okta_mcp_server.tools.system_logs import system_logs  # noqa: F401
     from okta_mcp_server.tools.system_logs import login_failures  # noqa: F401
