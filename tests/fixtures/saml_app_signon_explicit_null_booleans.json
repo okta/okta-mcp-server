@@ -1,0 +1,32 @@
+{
+  "id": "0oa000000000000000002",
+  "name": "generic_saml_template",
+  "label": "Example App Three",
+  "status": "ACTIVE",
+  "signOnMode": "SAML_2_0",
+  "created": "2026-01-02T03:04:05.000Z",
+  "lastUpdated": "2026-01-02T03:04:05.000Z",
+  "settings": {
+    "signOn": {
+      "allowMultipleAcsEndpoints": null,
+      "assertionSigned": null,
+      "honorForceAuthn": null,
+      "requestCompressed": null,
+      "responseSigned": null,
+      "ssoAcsUrl": "https://sso.example.invalid/saml/acs",
+      "audience": "https://sso.example.invalid/saml/metadata",
+      "recipient": "https://sso.example.invalid/saml/acs",
+      "destination": "https://sso.example.invalid/saml/acs",
+      "subjectNameIdTemplate": "${user.userName}",
+      "subjectNameIdFormat": "urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified",
+      "signatureAlgorithm": "RSA_SHA256",
+      "digestAlgorithm": "SHA256",
+      "attributeStatements": []
+    }
+  },
+  "_links": {
+    "self": {
+      "href": "https://example.invalid/api/v1/apps/0oa000000000000000002"
+    }
+  }
+}

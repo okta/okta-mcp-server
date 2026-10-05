@@ -1,0 +1,27 @@
+{
+  "id": "rst000000000000000003",
+  "name": "Example Forward Compatible Enrollment Policy",
+  "description": "Synthetic MFA_ENROLL policy carrying an authenticator key that does not exist yet, standing in for any future Okta authenticator type.",
+  "type": "MFA_ENROLL",
+  "status": "ACTIVE",
+  "priority": 2,
+  "system": false,
+  "created": "2026-01-02T03:04:05.000Z",
+  "lastUpdated": "2026-01-02T03:04:05.000Z",
+  "settings": {
+    "type": "AUTHENTICATORS",
+    "authenticators": [
+      {
+        "key": "some_future_authenticator",
+        "enroll": {
+          "self": "OPTIONAL"
+        }
+      }
+    ]
+  },
+  "_links": {
+    "self": {
+      "href": "https://example.invalid/api/v1/policies/rst000000000000000003"
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "id": "rst000000000000000001",
+  "name": "Example Control Access Policy",
+  "description": "Control fixture: `_embedded` holds only nested objects, the shape the generated model already accepted.",
+  "type": "ACCESS_POLICY",
+  "status": "ACTIVE",
+  "priority": 2,
+  "system": false,
+  "created": "2026-01-02T03:04:05.000Z",
+  "lastUpdated": "2026-01-02T03:04:05.000Z",
+  "_embedded": {
+    "mappings": {
+      "type": "APP",
+      "id": "0oa000000000000000000"
+    }
+  },
+  "_links": {
+    "self": {
+      "href": "https://example.invalid/api/v1/policies/rst000000000000000001"
+    }
+  }
+}
