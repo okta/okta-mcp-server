@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+import json
+import pathlib
 from dataclasses import dataclass
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -22,6 +24,29 @@ from okta_mcp_server.utils.elicitation import (
     DeleteConfirmation,
     DeactivateConfirmation,
 )
+
+
+# ---------------------------------------------------------------------------
+# JSON fixture loading
+# ---------------------------------------------------------------------------
+
+FIXTURES_DIR = pathlib.Path(__file__).parent / "fixtures"
+
+
+def load_fixture(name: str) -> dict:
+    """Return the parsed contents of ``tests/fixtures/<name>``.
+
+    Every fixture is synthetic: ``example.invalid`` hostnames and obviously-fake
+    Okta IDs only.  A fresh ``dict`` is returned on each call, so a test may
+    mutate the result without affecting any other test.
+    """
+    return json.loads((FIXTURES_DIR / name).read_text())
+
+
+@pytest.fixture()
+def fixture_loader():
+    """Expose :func:`load_fixture` as a pytest fixture."""
+    return load_fixture
 
 
 # ---------------------------------------------------------------------------

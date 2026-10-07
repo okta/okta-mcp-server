@@ -213,6 +213,21 @@ def create_paginated_response(
     payload through :func:`to_jsonable`.  We deliberately do not re-normalize
     here to avoid walking large ``fetch_all=True`` payloads twice.
 
+    Interaction with tolerant deserialization
+    -----------------------------------------
+    :mod:`okta_mcp_server.utils.tolerant_deserialization` may drop individual
+    items that the SDK's generated models reject, so ``items`` can be shorter
+    than the page Okta actually returned.  ``total_fetched`` is therefore
+    "items successfully returned to the caller", not "records Okta sent" — which
+    is the right number for a caller iterating ``items``, and keeps the two
+    fields mutually consistent.  The count of dropped records is *not* folded in
+    here: it is reported separately, with each raw payload, under the
+    ``"warnings"`` key that ``@json_response`` attaches to the tool result.  A
+    caller that needs an exact tenant-wide census must check for that key rather
+    than trusting ``total_fetched`` alone.  ``has_more`` and ``next_cursor``
+    are unaffected: they come from the response's own pagination headers, not
+    from ``len(items)``.
+
     Args:
         items: List of items to return (raw SDK models or already-dict payloads)
         response: OktaAPIResponse object

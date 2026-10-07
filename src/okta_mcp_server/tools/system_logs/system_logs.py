@@ -13,26 +13,24 @@ from mcp.server.fastmcp import Context
 
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
+from okta_mcp_server.utils.okta_compat import apply_okta_model_compat
 from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
 from okta_mcp_server.utils.scope_guard import require_scopes
 from okta_mcp_server.utils.serialization import json_response
 
-# Workaround for SDK v3.1.0 bug: when Behavior Detection is enabled the Okta API returns
-# `userBehaviors` as List[dict], but LogSecurityContext expects List[StrictStr], which
-# causes a ValidationError that crashes every get_logs call on sign-on/DENY events.
-# Fix: relax the annotation to Optional[List[Any]] and force a Pydantic schema rebuild.
-try:
-    import typing as _typing
-    from okta.models.log_security_context import LogSecurityContext as _LogSecurityContext
-
-    _patched_type = _typing.Optional[_typing.List[_typing.Any]]
-    _LogSecurityContext.__annotations__["user_behaviors"] = _patched_type
-    if "user_behaviors" in _LogSecurityContext.model_fields:
-        _LogSecurityContext.model_fields["user_behaviors"].annotation = _patched_type
-    _LogSecurityContext.model_rebuild(force=True)
-    logger.debug("Applied userBehaviors type workaround for LogSecurityContext (SDK v3.1.0 bug)")
-except Exception as _patch_err:
-    logger.warning(f"Could not apply userBehaviors workaround: {_patch_err}")
+# The `LogSecurityContext.user_behaviors` workaround that used to live inline here
+# now lives with every other Okta SDK model patch in
+# `okta_mcp_server.utils.okta_compat`. It is applied by `apply_okta_model_compat()`,
+# which `okta_mcp_server.server` runs at import time — i.e. before this module's
+# `from okta_mcp_server.server import mcp` above returns, and therefore before any
+# `get_logs` call can deserialize a response. The behavior is unchanged: when
+# Behavior Detection is enabled the API returns `userBehaviors` as List[dict] while
+# the generated model declares List[StrictStr], which crashed every `get_logs` call
+# covering sign-on/DENY events.
+#
+# Belt-and-braces for direct imports of this module in tests or scripts that never
+# touch `server`: applying the patch set again is idempotent and cheap.
+apply_okta_model_compat()
 
 
 @mcp.tool()
