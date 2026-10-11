@@ -34,6 +34,23 @@ try:
 except Exception as _patch_err:
     logger.warning(f"Could not apply userBehaviors workaround: {_patch_err}")
 
+# Workaround for SDK model strictness: allow extra fields and make all fields optional in
+# Application models to prevent a single bad record from poisoning the entire response.
+try:
+    import pydantic
+    from okta.models.application import Application
+
+    # Make Application model permissive: allow extra fields and make all fields optional.
+    for field_name, field_info in Application.model_fields.items():
+        if field_info.is_required():
+            field_info.default = None
+            field_info.annotation = _typing.Optional[field_info.annotation]
+    Application.model_config['extra'] = 'allow'
+    Application.model_rebuild(force=True)
+    logger.debug("Applied permissive config for Application model (workaround for strict validation)")
+except Exception as _patch_err:
+    logger.warning(f"Could not apply Application model workaround: {_patch_err}")
+
 
 @mcp.tool()
 @require_scopes("okta.logs.read")
