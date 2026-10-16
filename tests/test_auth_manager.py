@@ -10,12 +10,11 @@
 from __future__ import annotations
 
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import jwt
 import keyring.errors
 import pytest
-
 from okta_mcp_server.utils.auth.auth_manager import OktaAuthManager
 
 
@@ -49,7 +48,7 @@ def _keyring_returns(api_token=None, refresh_token=None):
 
 class TestIsValidToken:
     @pytest.mark.asyncio
-    @patch("okta_mcp_server.utils.auth.auth_manager.keyring")
+    @patch("okta_mcp_server.utils.auth.auth_manager.token_cache")
     async def test_cold_start_with_valid_cached_jwt_skips_auth(self, mock_keyring):
         mock_keyring.get_password.side_effect = _keyring_returns(api_token=_jwt_with_exp(3600))
         manager = OktaAuthManager()
@@ -63,7 +62,7 @@ class TestIsValidToken:
         mock_refresh.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("okta_mcp_server.utils.auth.auth_manager.keyring")
+    @patch("okta_mcp_server.utils.auth.auth_manager.token_cache")
     async def test_expired_jwt_with_refresh_token_uses_refresh(self, mock_keyring):
         mock_keyring.get_password.side_effect = _keyring_returns(
             api_token=_jwt_with_exp(-60), refresh_token="refresh-abc"
@@ -79,7 +78,7 @@ class TestIsValidToken:
         mock_auth.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("okta_mcp_server.utils.auth.auth_manager.keyring")
+    @patch("okta_mcp_server.utils.auth.auth_manager.token_cache")
     async def test_expired_jwt_without_refresh_token_invokes_authenticate(self, mock_keyring):
         mock_keyring.get_password.side_effect = _keyring_returns(api_token=_jwt_with_exp(-60), refresh_token=None)
         manager = OktaAuthManager()
@@ -92,7 +91,7 @@ class TestIsValidToken:
         mock_auth.assert_awaited_once()
 
     @pytest.mark.asyncio
-    @patch("okta_mcp_server.utils.auth.auth_manager.keyring")
+    @patch("okta_mcp_server.utils.auth.auth_manager.token_cache")
     async def test_expired_jwt_with_failed_refresh_invokes_authenticate(self, mock_keyring):
         mock_keyring.get_password.side_effect = _keyring_returns(
             api_token=_jwt_with_exp(-60), refresh_token="refresh-abc"
@@ -107,7 +106,7 @@ class TestIsValidToken:
         mock_auth.assert_awaited_once()
 
     @pytest.mark.asyncio
-    @patch("okta_mcp_server.utils.auth.auth_manager.keyring")
+    @patch("okta_mcp_server.utils.auth.auth_manager.token_cache")
     async def test_no_cached_token_triggers_device_flow(self, mock_keyring):
         mock_keyring.get_password.side_effect = _keyring_returns(api_token=None, refresh_token=None)
         manager = OktaAuthManager()
@@ -120,7 +119,7 @@ class TestIsValidToken:
         mock_auth.assert_awaited_once()
 
     @pytest.mark.asyncio
-    @patch("okta_mcp_server.utils.auth.auth_manager.keyring")
+    @patch("okta_mcp_server.utils.auth.auth_manager.token_cache")
     async def test_opaque_token_falls_through_to_refresh(self, mock_keyring):
         mock_keyring.get_password.side_effect = _keyring_returns(
             api_token="opaque-abc-123", refresh_token="refresh-abc"
@@ -134,7 +133,7 @@ class TestIsValidToken:
         mock_refresh.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("okta_mcp_server.utils.auth.auth_manager.keyring")
+    @patch("okta_mcp_server.utils.auth.auth_manager.token_cache")
     async def test_malformed_jwt_falls_through_to_refresh(self, mock_keyring):
         mock_keyring.get_password.side_effect = _keyring_returns(api_token="a.b.c", refresh_token="refresh-abc")
         manager = OktaAuthManager()
@@ -146,7 +145,7 @@ class TestIsValidToken:
         mock_refresh.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("okta_mcp_server.utils.auth.auth_manager.keyring")
+    @patch("okta_mcp_server.utils.auth.auth_manager.token_cache")
     async def test_jwt_without_exp_claim_falls_through(self, mock_keyring):
         mock_keyring.get_password.side_effect = _keyring_returns(
             api_token=_jwt_without_exp(), refresh_token="refresh-abc"
@@ -160,7 +159,7 @@ class TestIsValidToken:
         mock_refresh.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("okta_mcp_server.utils.auth.auth_manager.keyring")
+    @patch("okta_mcp_server.utils.auth.auth_manager.token_cache")
     async def test_browserless_with_valid_cached_jwt_skips_auth(self, mock_keyring, monkeypatch):
         monkeypatch.setenv("OKTA_PRIVATE_KEY", "fake-key")
         monkeypatch.setenv("OKTA_KEY_ID", "fake-kid")
@@ -177,7 +176,7 @@ class TestIsValidToken:
         mock_refresh.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("okta_mcp_server.utils.auth.auth_manager.keyring")
+    @patch("okta_mcp_server.utils.auth.auth_manager.token_cache")
     async def test_browserless_with_expired_jwt_reauths_without_refresh(self, mock_keyring, monkeypatch):
         monkeypatch.setenv("OKTA_PRIVATE_KEY", "fake-key")
         monkeypatch.setenv("OKTA_KEY_ID", "fake-kid")
@@ -211,38 +210,84 @@ class TestTokenIsUnexpired:
 
 
 class TestIsCachedTokenValid:
-    @patch("okta_mcp_server.utils.auth.auth_manager.keyring")
+    @patch("okta_mcp_server.utils.auth.auth_manager.token_cache")
     def test_returns_true_for_valid_cached_jwt(self, mock_keyring):
         mock_keyring.get_password.return_value = _jwt_with_exp(3600)
         assert OktaAuthManager().is_cached_token_valid() is True
 
-    @patch("okta_mcp_server.utils.auth.auth_manager.keyring")
+    @patch("okta_mcp_server.utils.auth.auth_manager.token_cache")
     def test_returns_false_when_no_token_cached(self, mock_keyring):
         mock_keyring.get_password.return_value = None
         assert OktaAuthManager().is_cached_token_valid() is False
 
-    @patch("okta_mcp_server.utils.auth.auth_manager.keyring")
+    @patch("okta_mcp_server.utils.auth.auth_manager.token_cache")
     def test_returns_false_for_expired_jwt(self, mock_keyring):
         mock_keyring.get_password.return_value = _jwt_with_exp(-60)
         assert OktaAuthManager().is_cached_token_valid() is False
 
-    @patch("okta_mcp_server.utils.auth.auth_manager.keyring")
+    @patch("okta_mcp_server.utils.auth.auth_manager.token_cache")
     def test_returns_false_for_opaque_token(self, mock_keyring):
         mock_keyring.get_password.return_value = "opaque-not-a-jwt"
         assert OktaAuthManager().is_cached_token_valid() is False
 
 
 class TestClearTokens:
-    @patch("okta_mcp_server.utils.auth.auth_manager.keyring")
+    @patch("okta_mcp_server.utils.auth.auth_manager.token_cache")
     def test_swallows_password_delete_errors(self, mock_keyring):
         mock_keyring.delete_password.side_effect = keyring.errors.PasswordDeleteError("missing")
-        mock_keyring.backend.errors.KeyringError = keyring.errors.KeyringError
         OktaAuthManager().clear_tokens()
         assert mock_keyring.delete_password.call_count == 2
 
-    @patch("okta_mcp_server.utils.auth.auth_manager.keyring")
+    @patch("okta_mcp_server.utils.auth.auth_manager.token_cache")
     def test_success_path(self, mock_keyring):
         mock_keyring.delete_password.return_value = None
-        mock_keyring.backend.errors.KeyringError = keyring.errors.KeyringError
         OktaAuthManager().clear_tokens()
         assert mock_keyring.delete_password.call_count == 2
+
+
+class TestTokenCacheWrites:
+    def test_browserless_auth_stores_token_through_cache(self):
+        manager = OktaAuthManager()
+        response = MagicMock(status_code=200)
+        response.json.return_value = {"access_token": "fake-access-token"}
+        with (
+            patch.object(manager, "_get_client_assertion", return_value="fake-assertion"),
+            patch("okta_mcp_server.utils.auth.auth_manager.requests.post", return_value=response),
+            patch("okta_mcp_server.utils.auth.auth_manager.token_cache.set_password") as store,
+        ):
+            assert manager._browserless_authenticate() == "fake-access-token"
+        store.assert_called_once_with("OktaAuthManager", "api_token", "fake-access-token")
+
+    def test_refresh_stores_both_tokens_through_cache(self):
+        manager = OktaAuthManager()
+        response = MagicMock(status_code=200)
+        response.json.return_value = {
+            "access_token": "fake-access-token",
+            "refresh_token": "fake-refresh-token",
+        }
+        with (
+            patch("okta_mcp_server.utils.auth.auth_manager.requests.post", return_value=response),
+            patch("okta_mcp_server.utils.auth.auth_manager.token_cache") as cache,
+        ):
+            cache.get_password.return_value = "fake-old-refresh-token"
+            assert manager.refresh_access_token() is True
+        assert cache.set_password.call_args_list == [
+            call("OktaAuthManager", "api_token", "fake-access-token"),
+            call("OktaAuthManager", "refresh_token", "fake-refresh-token"),
+        ]
+
+    def test_device_flow_stores_both_tokens_through_cache(self):
+        manager = OktaAuthManager()
+        response = MagicMock(status_code=200)
+        response.json.return_value = {
+            "access_token": "fake-access-token",
+            "refresh_token": "fake-refresh-token",
+        }
+        with (
+            patch("okta_mcp_server.utils.auth.auth_manager.requests.post", return_value=response),
+            patch("okta_mcp_server.utils.auth.auth_manager.token_cache") as cache,
+        ):
+            assert manager._poll_for_token(
+                {"device_code": "fake-device-code", "start_time": time.time(), "expires_in": 60}
+            ) == "fake-access-token"
+        assert cache.set_password.call_count == 2
