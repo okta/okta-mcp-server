@@ -12,7 +12,6 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from okta_mcp_server.utils.auth.auth_manager import OktaAuthManager
 from okta_mcp_server.utils.client import get_okta_client
 
@@ -43,7 +42,7 @@ class TestGetOktaClient:
             return MagicMock()
 
         with (
-            patch("okta_mcp_server.utils.client.keyring") as mock_kr,
+            patch("okta_mcp_server.utils.client.token_cache") as mock_kr,
             patch("okta_mcp_server.utils.client.OktaClient", side_effect=fake_okta_client),
         ):
             mock_kr.get_password.side_effect = lambda _s, k: keyring_state.get(k)
@@ -65,7 +64,7 @@ class TestGetOktaClient:
             return MagicMock()
 
         with (
-            patch("okta_mcp_server.utils.client.keyring") as mock_kr,
+            patch("okta_mcp_server.utils.client.token_cache") as mock_kr,
             patch("okta_mcp_server.utils.client.OktaClient", side_effect=fake_okta_client),
         ):
             mock_kr.get_password.side_effect = lambda _s, k: keyring_state.get(k)
