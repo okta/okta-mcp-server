@@ -32,6 +32,7 @@ Covered branches:
     themes.get_brand_theme
     themes.replace_brand_theme
     applications.get_application
+    applications.get_application_group_assignment
     applications.create_application
     applications.update_application
     groups.get_group
@@ -57,6 +58,7 @@ import pytest
 from okta_mcp_server.tools.applications.applications import (
     create_application,
     get_application,
+    get_application_group_assignment,
     update_application,
 )
 from okta_mcp_server.tools.customization.brands.brands import (
@@ -449,6 +451,21 @@ class TestApplicationsNoneBodyGuards:
 
         _assert_error_dict(result, must_contain="list_applications()")
         assert APP_ID in result["error"]
+
+    @pytest.mark.asyncio
+    @patch("okta_mcp_server.tools.applications.applications.get_okta_client")
+    async def test_get_application_group_assignment_none_body_returns_error_dict(
+        self, mock_get_client, ctx_no_elicitation
+    ):
+        client = AsyncMock()
+        client.get_application_group_assignment.return_value = (None, MagicMock(), None)
+        mock_get_client.return_value = client
+
+        result = await get_application_group_assignment(ctx=ctx_no_elicitation, app_id=APP_ID, group_id=GROUP_ID)
+
+        _assert_error_dict(result, must_contain="list_application_group_assignments()")
+        assert APP_ID in result["error"]
+        assert GROUP_ID in result["error"]
 
     @pytest.mark.asyncio
     @patch("okta_mcp_server.tools.applications.applications.get_okta_client")

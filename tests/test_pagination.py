@@ -1123,6 +1123,113 @@ class TestListGroupAppsFetchAll:
         assert "error" in result
 
 
+class TestListApplicationGroupAssignmentsFetchAll:
+    @pytest.mark.asyncio
+    async def test_fetch_all_true_paginates_all_pages(self):
+        """list_application_group_assignments with fetch_all=True stitches multiple pages together."""
+        from okta_mcp_server.tools.applications.applications import list_application_group_assignments
+
+        page1 = _make_items(3, "grp")
+        page2 = _make_items(2, "grp")
+
+        resp1 = _make_v3_response(after_cursor="g2")
+        resp2 = _make_v3_response(after_cursor=None)
+
+        client = AsyncMock()
+        client.list_application_group_assignments.side_effect = [
+            (page1, resp1, None),
+            (page2, resp2, None),
+        ]
+
+        ctx, _ = _make_ctx_with_client(client)
+        ctx.info = AsyncMock()
+
+        with patch("okta_mcp_server.tools.applications.applications.get_okta_client", return_value=client):
+            result = await list_application_group_assignments(ctx, app_id="app1", fetch_all=True)
+
+        assert result["fetch_all_used"] is True
+        assert result["total_fetched"] == 5
+        assert result["pagination_info"]["pages_fetched"] == 2
+        assert result["pagination_info"]["stopped_early"] is False
+        second_call = client.list_application_group_assignments.call_args_list[1]
+        assert second_call.args[0] == "app1"
+        assert second_call.kwargs["after"] == "g2"
+
+    @pytest.mark.asyncio
+    async def test_fetch_all_false_returns_single_page_with_cursor(self):
+        """list_application_group_assignments with fetch_all=False returns cursor."""
+        from okta_mcp_server.tools.applications.applications import list_application_group_assignments
+
+        groups = _make_items(4, "grp")
+        resp = _make_v3_response(after_cursor="gc")
+
+        client = AsyncMock()
+        client.list_application_group_assignments.return_value = (groups, resp, None)
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.applications.applications.get_okta_client", return_value=client):
+            result = await list_application_group_assignments(ctx, app_id="app1", fetch_all=False)
+
+        assert result["fetch_all_used"] is False
+        assert result["total_fetched"] == 4
+        assert result["has_more"] is True
+        assert result["next_cursor"] == "gc"
+        assert client.list_application_group_assignments.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_query_params_are_forwarded_and_limit_clamped(self):
+        """q, after, expand are forwarded; limit is clamped to the API's 20-200 range."""
+        from okta_mcp_server.tools.applications.applications import list_application_group_assignments
+
+        resp = _make_v3_response(after_cursor=None)
+        client = AsyncMock()
+        client.list_application_group_assignments.return_value = (_make_items(1, "grp"), resp, None)
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.applications.applications.get_okta_client", return_value=client):
+            await list_application_group_assignments(
+                ctx, app_id="app1", q="Eng", after="cur", limit=500, expand="group"
+            )
+
+        call = client.list_application_group_assignments.call_args
+        assert call.args[0] == "app1"
+        assert call.kwargs == {"q": "Eng", "after": "cur", "limit": 200, "expand": "group"}
+
+    @pytest.mark.asyncio
+    async def test_empty_result(self):
+        """Empty assignment list returns a valid paginated response."""
+        from okta_mcp_server.tools.applications.applications import list_application_group_assignments
+
+        resp = _make_v3_response(after_cursor=None)
+        client = AsyncMock()
+        client.list_application_group_assignments.return_value = ([], resp, None)
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.applications.applications.get_okta_client", return_value=client):
+            result = await list_application_group_assignments(ctx, app_id="app1")
+
+        assert result["total_fetched"] == 0
+        assert result["has_more"] is False
+
+    @pytest.mark.asyncio
+    async def test_api_error_returns_error_dict(self):
+        """An Okta API error is surfaced as an error key."""
+        from okta_mcp_server.tools.applications.applications import list_application_group_assignments
+
+        client = AsyncMock()
+        client.list_application_group_assignments.return_value = (None, None, "API error")
+
+        ctx, _ = _make_ctx_with_client(client)
+
+        with patch("okta_mcp_server.tools.applications.applications.get_okta_client", return_value=client):
+            result = await list_application_group_assignments(ctx, app_id="app1")
+
+        assert "error" in result
+
+
 class TestListEmailTemplatesFetchAll:
     @pytest.mark.asyncio
     async def test_fetch_all_true_paginates_all_pages(self):
