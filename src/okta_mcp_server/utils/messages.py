@@ -73,3 +73,24 @@ DEACTIVATE_POLICY_RULE = (
     "Are you sure you want to deactivate rule {rule_id} "
     "in policy {policy_id}?"
 )
+
+# ---------------------------------------------------------------------------
+# Group Rules
+# ---------------------------------------------------------------------------
+
+DELETE_GROUP_RULE = (
+    "Are you sure you want to delete group rule {rule_id}? "
+    "Users already assigned by this rule will remain in their groups. "
+    "This action cannot be undone."
+)
+
+DELETE_GROUP_RULE_REMOVE_USERS = (
+    "Are you sure you want to delete group rule {rule_id}? "
+    "Users assigned by this rule will also be removed from its groups. "
+    "This action cannot be undone."
+)
+
+DEACTIVATE_GROUP_RULE = (
+    "Are you sure you want to deactivate group rule {rule_id}? "
+    "Users will no longer be automatically assigned by this rule."
+)
