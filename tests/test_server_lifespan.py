@@ -22,10 +22,14 @@ def _okta_env(monkeypatch):
     monkeypatch.setenv("OKTA_CLIENT_ID", "test-client-id")
     monkeypatch.delenv("OKTA_PRIVATE_KEY", raising=False)
     monkeypatch.delenv("OKTA_KEY_ID", raising=False)
+    monkeypatch.delenv("OKTA_AUTH_MODE", raising=False)
 
 
-def _make_manager_mock(*, cached_valid: bool = True, auth_succeeds: bool = True) -> MagicMock:
+def _make_manager_mock(
+    *, cached_valid: bool = True, auth_succeeds: bool = True, user_auth: bool = False
+) -> MagicMock:
     manager = MagicMock()
+    manager.use_user_auth = user_auth
     manager.is_cached_token_valid = MagicMock(return_value=cached_valid)
     manager.is_valid_token = AsyncMock(return_value=auth_succeeds)
     manager.authenticate = AsyncMock()
@@ -109,3 +113,17 @@ class TestOktaAuthorisationFlow:
                 pass
         mock_prune.assert_not_called()
         manager.is_valid_token.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @patch("okta_mcp_server.server.prune_tools_by_scope")
+    @patch("okta_mcp_server.server.OktaAuthManager")
+    async def test_user_auth_mode_skips_server_auth_and_still_prunes(self, mock_cls, mock_prune):
+        manager = _make_manager_mock(user_auth=True)
+        mock_cls.return_value = manager
+        server = MagicMock()
+        async with okta_authorisation_flow(server) as ctx:
+            assert ctx.okta_auth_manager is manager
+        manager.is_cached_token_valid.assert_not_called()
+        manager.is_valid_token.assert_not_called()
+        manager.authenticate.assert_not_called()
+        mock_prune.assert_called_once_with(server, manager)

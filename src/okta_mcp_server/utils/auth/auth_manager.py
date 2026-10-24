@@ -33,6 +33,7 @@ class OktaAuthManager:
     private_key: str = field(init=False, default=None)
     key_id: str = field(init=False, default=None)
     use_browserless_auth: bool = field(init=False, default=False)
+    use_user_auth: bool = field(init=False, default=False)
 
     # TODO: Implement a way to set scopes dynamically by the user if needed.
 
@@ -47,7 +48,15 @@ class OktaAuthManager:
         self.private_key = os.environ.get("OKTA_PRIVATE_KEY")
         self.key_id = os.environ.get("OKTA_KEY_ID")
 
-        if self.private_key and self.key_id:
+        auth_mode = os.environ.get("OKTA_AUTH_MODE", "service").strip().lower()
+        if auth_mode not in ("service", "user"):
+            logger.error(f"OKTA_AUTH_MODE must be 'service' or 'user', got {auth_mode!r}")
+            sys.exit(1)
+
+        if auth_mode == "user":
+            self.use_user_auth = True
+            logger.info("User auth mode: Okta API calls use each caller's own access token")
+        elif self.private_key and self.key_id:
             self.use_browserless_auth = True
             logger.info("Browserless authentication is available and will be used")
             # Process private key if it contains escaped newlines

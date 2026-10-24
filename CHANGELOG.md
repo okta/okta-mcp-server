@@ -1,6 +1,15 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Features
+- Added a per-user OAuth mode for remote deployments (`OKTA_AUTH_MODE=user`). Every request must carry the caller's own Okta org authorization server access token, which the server validates against Okta's `userinfo` endpoint, checks was issued to `OKTA_CLIENT_ID`, and forwards to the Okta API, so each caller acts with their own Okta admin role instead of a shared service identity. The server advertises OAuth protected resource metadata (RFC 9728) when `OKTA_MCP_PUBLIC_URL` is set, and works with MCP gateways that run the OAuth flow per user, such as LiteLLM.
+- Added the `streamable-http` transport, selected with `OKTA_MCP_TRANSPORT` and bound with `OKTA_MCP_HOST` / `OKTA_MCP_PORT`. `stdio` remains the default.
+
+### Fixes
+- Scope-based tool pruning now keeps reporting tools removed by an earlier session when the lifespan runs again for a new HTTP session, so `get_scope_status` stays accurate over HTTP.
+
 ## v1.1.7
 
 ### Security

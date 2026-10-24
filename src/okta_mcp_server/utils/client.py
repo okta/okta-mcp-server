@@ -7,6 +7,7 @@
 
 import keyring
 from loguru import logger
+from mcp.server.auth.middleware.auth_context import get_access_token
 from okta.client import Client as OktaClient
 
 from okta_mcp_server.utils.auth.auth_manager import SERVICE_NAME, OktaAuthManager
@@ -15,10 +16,17 @@ from okta_mcp_server.utils.auth.auth_manager import SERVICE_NAME, OktaAuthManage
 async def get_okta_client(manager: OktaAuthManager) -> OktaClient:
     """Initialize and return an Okta client"""
     logger.debug("Initializing Okta client")
-    if not await manager.is_valid_token():
-        logger.warning("Token is invalid or expired, re-authenticating")
-        await manager.authenticate()
-    api_token = keyring.get_password(SERVICE_NAME, "api_token")
+    if manager.use_user_auth:
+        # The bearer token was already verified by OktaUserTokenVerifier for this request.
+        access_token = get_access_token()
+        if access_token is None:
+            raise RuntimeError("User auth mode is enabled but this request has no authenticated Okta user")
+        api_token = access_token.token
+    else:
+        if not await manager.is_valid_token():
+            logger.warning("Token is invalid or expired, re-authenticating")
+            await manager.authenticate()
+        api_token = keyring.get_password(SERVICE_NAME, "api_token")
     config = {
         "orgUrl": manager.org_url,
         "token": api_token,

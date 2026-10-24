@@ -64,6 +64,15 @@ _SCOPE_ERROR_TEMPLATE = (
 )
 
 
+_USER_PERMISSION_ERROR_TEMPLATE = (
+    "Okta rejected this request (HTTP {status}) for your account. "
+    "The server is running in user auth mode, so Okta API calls are limited by your own Okta admin role: "
+    "ask an Okta super admin for a role that allows this action. If you have just been granted one, "
+    "sign in to the MCP server again. If the problem persists for admins, the server's Okta app "
+    "may be missing scope(s): {scopes}."
+)
+
+
 def _scope_error_message(scopes: list[str]) -> str:
     """Return the canonical scope-error string for the given missing scopes."""
     return _SCOPE_ERROR_TEMPLATE.format(scopes=", ".join(sorted(scopes)))
@@ -190,6 +199,15 @@ def require_scopes(*required_scopes: str, error_return_type: str = "dict"):
                 return await fn(*args, **kwargs)
             except (ForbiddenException, UnauthorizedException) as exc:
                 status = getattr(exc, "status", 403)
+                if getattr(manager, "use_user_auth", False) is True:
+                    logger.warning(
+                        f"Tool '{fn.__name__}' received HTTP {status} from Okta API for the calling user — "
+                        "likely insufficient admin role"
+                    )
+                    msg = _USER_PERMISSION_ERROR_TEMPLATE.format(
+                        status=status, scopes=", ".join(sorted(required_scopes))
+                    )
+                    return [{"error": msg}] if error_return_type == "list" else {"error": msg}
                 logger.error(
                     f"Tool '{fn.__name__}' received HTTP {status} from Okta API — "
                     f"likely missing scope(s): {list(required_scopes)}"
@@ -233,6 +251,7 @@ def prune_tools_by_scope(server: Any, manager: Any) -> None:
     # Reset both dicts first so repeated calls (e.g. in tests) don't accumulate
     # stale state from a previous invocation.
     global _DISABLED_TOOLS, _CONFIGURED_SCOPES
+    previously_disabled = set(_DISABLED_TOOLS)
     _DISABLED_TOOLS = {}
     _CONFIGURED_SCOPES = set(configured)
 
@@ -247,7 +266,12 @@ def prune_tools_by_scope(server: Any, manager: Any) -> None:
 
     for tool_name, required_scope in TOOL_SCOPE_REGISTRY.items():
         if tool_name not in registered_names:
-            continue  # tool not loaded (shouldn't happen, but be safe)
+            # Over HTTP the lifespan runs once per session, so a tool removed by an
+            # earlier session is already gone; keep reporting it as disabled.
+            if required_scope not in configured and tool_name in previously_disabled:
+                _DISABLED_TOOLS[tool_name] = required_scope
+                disabled.append(tool_name)
+            continue
         if required_scope not in configured:
             try:
                 server._tool_manager.remove_tool(tool_name)

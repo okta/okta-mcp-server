@@ -15,10 +15,14 @@ from loguru import logger
 from mcp.server.fastmcp import FastMCP
 
 from okta_mcp_server.utils.auth.auth_manager import OktaAuthManager
+from okta_mcp_server.utils.auth.user_token_verifier import build_user_auth
 from okta_mcp_server.utils.scope_guard import get_disabled_tools, get_startup_scopes, prune_tools_by_scope
 from okta_mcp_server.utils.serialization import json_response
 
 LOG_FILE = os.environ.get("OKTA_LOG_FILE")
+TRANSPORT = os.environ.get("OKTA_MCP_TRANSPORT", "stdio").strip().lower()
+AUTH_MODE = os.environ.get("OKTA_AUTH_MODE", "service").strip().lower()
+_TRANSPORTS = ("stdio", "streamable-http")
 
 
 @dataclass
@@ -36,7 +40,9 @@ async def okta_authorisation_flow(server: FastMCP) -> AsyncIterator[OktaAppConte
     logger.info("Starting Okta authorization flow")
     manager = OktaAuthManager()
 
-    if manager.is_cached_token_valid():
+    if manager.use_user_auth:
+        logger.info("User auth mode: skipping server-side authentication; each request brings its own token")
+    elif manager.is_cached_token_valid():
         logger.info("Re-using cached Okta token from keyring; skipping interactive auth")
     else:
         if not await manager.is_valid_token():
@@ -49,7 +55,29 @@ async def okta_authorisation_flow(server: FastMCP) -> AsyncIterator[OktaAppConte
     yield OktaAppContext(okta_auth_manager=manager)
 
 
-mcp = FastMCP("Okta IDaaS MCP Server", lifespan=okta_authorisation_flow)
+def _server_options() -> dict:
+    """Build FastMCP options for the configured transport and auth mode."""
+    options = {
+        "host": os.environ.get("OKTA_MCP_HOST", "127.0.0.1"),
+        "port": int(os.environ.get("OKTA_MCP_PORT", "8000")),
+    }
+    if AUTH_MODE == "user":
+        org_url = os.environ.get("OKTA_ORG_URL")
+        client_id = os.environ.get("OKTA_CLIENT_ID")
+        if not org_url or not client_id:
+            logger.error("OKTA_ORG_URL and OKTA_CLIENT_ID must be set in environment variables")
+            sys.exit(1)
+        auth, token_verifier = build_user_auth(
+            org_url=org_url,
+            client_id=client_id,
+            scopes=os.environ.get("OKTA_SCOPES", "").split(),
+            public_url=os.environ.get("OKTA_MCP_PUBLIC_URL") or None,
+        )
+        options.update(auth=auth, token_verifier=token_verifier)
+    return options
+
+
+mcp = FastMCP("Okta IDaaS MCP Server", lifespan=okta_authorisation_flow, **_server_options())
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +164,20 @@ def main():
         sys.stderr, level=os.environ.get("OKTA_LOG_LEVEL", "INFO"), format="{time} {level} {message}", serialize=True
     )
 
-    logger.info("Starting Okta Open Source MCP Server")
+    if TRANSPORT not in _TRANSPORTS:
+        logger.error(f"OKTA_MCP_TRANSPORT must be one of {', '.join(_TRANSPORTS)}, got {TRANSPORT!r}")
+        sys.exit(1)
+    if AUTH_MODE == "user":
+        if TRANSPORT == "stdio":
+            logger.error("OKTA_AUTH_MODE=user requires OKTA_MCP_TRANSPORT=streamable-http")
+            sys.exit(1)
+        if not os.environ.get("OKTA_MCP_PUBLIC_URL"):
+            logger.warning(
+                "OKTA_MCP_PUBLIC_URL is not set; OAuth protected resource metadata will not be served, "
+                "so MCP clients must be configured with the Okta authorization and token URLs explicitly"
+            )
+
+    logger.info(f"Starting Okta Open Source MCP Server (transport={TRANSPORT}, auth_mode={AUTH_MODE})")
     from okta_mcp_server.tools.applications import applications  # noqa: F401
     from okta_mcp_server.tools.customization.brands import brands  # noqa: F401
     from okta_mcp_server.tools.customization.custom_domains import custom_domains  # noqa: F401
@@ -154,4 +195,4 @@ def main():
     from okta_mcp_server.tools.users import users  # noqa: F401
     from okta_mcp_server.utils import scope_stubs  # noqa: F401
 
-    mcp.run()
+    mcp.run(transport=TRANSPORT)

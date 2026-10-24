@@ -4,6 +4,8 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: okta-mcp-server
+    env_file:
+      - .env
     environment:
       # Required: Okta Organization URL
       - OKTA_ORG_URL=${OKTA_ORG_URL}
@@ -18,10 +20,22 @@ services:
       - OKTA_PRIVATE_KEY=${OKTA_PRIVATE_KEY:-}
       - OKTA_KEY_ID=${OKTA_KEY_ID:-}
 
+      # Optional: Transport. "stdio" (default) or "streamable-http" to serve MCP at http://<host>:8000/mcp
+      - OKTA_MCP_TRANSPORT=${OKTA_MCP_TRANSPORT:-stdio}
+      - OKTA_MCP_HOST=${OKTA_MCP_HOST:-0.0.0.0}
+      - OKTA_MCP_PORT=${OKTA_MCP_PORT:-8000}
+
+      # Optional: "service" (default) uses the app's own token; "user" uses each caller's
+      # Okta access token so callers act with their own admin role (requires streamable-http)
+      - OKTA_AUTH_MODE=${OKTA_AUTH_MODE:-service}
+      # Public URL of the MCP endpoint, e.g. https://okta-mcp.example.com/mcp (user mode)
+      - OKTA_MCP_PUBLIC_URL=${OKTA_MCP_PUBLIC_URL:-}
+
       # Optional: Logging configuration
       - OKTA_LOG_LEVEL=${OKTA_LOG_LEVEL:-INFO}
       - OKTA_LOG_FILE=${OKTA_LOG_FILE:-}
-
+    ports:
+      - "8003:8000"
     # Use stdin_open and tty for interactive sessions
     stdin_open: true
     tty: true
@@ -29,5 +43,4 @@ services:
     # restart: "no"
 
     volumes:
-      - okta-keyring:/root/.local/share/python_keyring
       - ./logs:/app/logs

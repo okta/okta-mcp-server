@@ -32,6 +32,7 @@ from okta_mcp_server.utils.elicitation import (
 class FakeOktaAuthManager:
     """Minimal stand-in for OktaAuthManager."""
     org_url: str = "https://test.okta.com"
+    use_user_auth: bool = False
 
     async def is_valid_token(self):
         return True

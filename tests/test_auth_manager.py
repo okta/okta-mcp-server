@@ -26,6 +26,7 @@ def _okta_env(monkeypatch):
     monkeypatch.delenv("OKTA_PRIVATE_KEY", raising=False)
     monkeypatch.delenv("OKTA_KEY_ID", raising=False)
     monkeypatch.delenv("OKTA_SCOPES", raising=False)
+    monkeypatch.delenv("OKTA_AUTH_MODE", raising=False)
 
 
 def _jwt_with_exp(exp_offset_seconds: int) -> str:
@@ -246,3 +247,23 @@ class TestClearTokens:
         mock_keyring.backend.errors.KeyringError = keyring.errors.KeyringError
         OktaAuthManager().clear_tokens()
         assert mock_keyring.delete_password.call_count == 2
+
+
+class TestAuthMode:
+    def test_defaults_to_service_mode(self):
+        manager = OktaAuthManager()
+        assert manager.use_user_auth is False
+
+    def test_user_mode_takes_precedence_over_private_key(self, monkeypatch):
+        monkeypatch.setenv("OKTA_AUTH_MODE", "user")
+        monkeypatch.setenv("OKTA_PRIVATE_KEY", "fake-key")
+        monkeypatch.setenv("OKTA_KEY_ID", "fake-kid")
+        manager = OktaAuthManager()
+        assert manager.use_user_auth is True
+        assert manager.use_browserless_auth is False
+
+    def test_unknown_mode_exits(self, monkeypatch):
+        monkeypatch.setenv("OKTA_AUTH_MODE", "bogus")
+        with pytest.raises(SystemExit) as exc_info:
+            OktaAuthManager()
+        assert exc_info.value.code == 1

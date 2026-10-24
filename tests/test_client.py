@@ -12,6 +12,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from mcp.server.auth.provider import AccessToken
 
 from okta_mcp_server.utils.auth.auth_manager import OktaAuthManager
 from okta_mcp_server.utils.client import get_okta_client
@@ -20,6 +21,7 @@ from okta_mcp_server.utils.client import get_okta_client
 def _build_manager_mock() -> MagicMock:
     manager = MagicMock(spec=OktaAuthManager)
     manager.org_url = "https://test.okta.com"
+    manager.use_user_auth = False
     manager.authenticate = AsyncMock()
     return manager
 
@@ -73,3 +75,43 @@ class TestGetOktaClient:
 
         assert captured_config["token"] == "valid-cached-token"
         manager.authenticate.assert_not_awaited()
+
+
+class TestGetOktaClientUserAuth:
+    @pytest.mark.asyncio
+    async def test_uses_the_callers_token_not_the_keyring(self):
+        manager = _build_manager_mock()
+        manager.use_user_auth = True
+        manager.is_valid_token = AsyncMock()
+
+        captured_config: dict = {}
+
+        def fake_okta_client(config):
+            captured_config.update(config)
+            return MagicMock()
+
+        caller = AccessToken(token="caller-token", client_id="cid", scopes=["openid"])
+        with (
+            patch("okta_mcp_server.utils.client.get_access_token", return_value=caller),
+            patch("okta_mcp_server.utils.client.keyring") as mock_kr,
+            patch("okta_mcp_server.utils.client.OktaClient", side_effect=fake_okta_client),
+        ):
+            await get_okta_client(manager)
+
+        assert captured_config["token"] == "caller-token"
+        mock_kr.get_password.assert_not_called()
+        manager.is_valid_token.assert_not_awaited()
+        manager.authenticate.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_raises_when_request_has_no_authenticated_user(self):
+        manager = _build_manager_mock()
+        manager.use_user_auth = True
+
+        with (
+            patch("okta_mcp_server.utils.client.get_access_token", return_value=None),
+            patch("okta_mcp_server.utils.client.OktaClient") as mock_client,
+            pytest.raises(RuntimeError),
+        ):
+            await get_okta_client(manager)
+        mock_client.assert_not_called()
