@@ -12,6 +12,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from okta.models import GroupRule
 
 from okta_mcp_server.tools.group_rules.group_rules import (
     activate_group_rule,
@@ -32,11 +33,8 @@ RULE_DATA = {
 }
 
 
-def _make_rule(rule_id: str = RULE_ID) -> MagicMock:
-    rule = MagicMock()
-    rule.id = rule_id
-    rule.as_dict.return_value = {"id": rule_id, "name": RULE_DATA["name"]}
-    return rule
+def _make_rule(rule_id: str = RULE_ID) -> GroupRule:
+    return GroupRule.from_dict({**RULE_DATA, "id": rule_id})
 
 
 def _make_response(has_next: bool = False) -> MagicMock:
@@ -64,7 +62,7 @@ class TestListGroupRules:
         )
 
         client.list_group_rules.assert_awaited_once_with(
-            {"search": "Engineering", "limit": "50", "expand": "groupIdToGroupNameMap"}
+            search="Engineering", limit=50, expand="groupIdToGroupNameMap"
         )
         assert result["total_fetched"] == 1
 
@@ -77,7 +75,7 @@ class TestListGroupRules:
 
         await list_group_rules(ctx_no_elicitation, limit=500)
 
-        client.list_group_rules.assert_awaited_once_with({"limit": "100"})
+        client.list_group_rules.assert_awaited_once_with(limit=100)
 
     @pytest.mark.asyncio
     @patch(PATCH_CLIENT)
@@ -127,7 +125,7 @@ class TestGetGroupRule:
 
         result = await get_group_rule(RULE_ID, ctx=ctx_no_elicitation)
 
-        client.get_group_rule.assert_awaited_once_with(RULE_ID, {})
+        client.get_group_rule.assert_awaited_once_with(RULE_ID)
         assert result["id"] == RULE_ID
 
     @pytest.mark.asyncio
@@ -139,7 +137,7 @@ class TestGetGroupRule:
 
         await get_group_rule(RULE_ID, ctx=ctx_no_elicitation, expand="groupIdToGroupNameMap")
 
-        client.get_group_rule.assert_awaited_once_with(RULE_ID, {"expand": "groupIdToGroupNameMap"})
+        client.get_group_rule.assert_awaited_once_with(RULE_ID, expand="groupIdToGroupNameMap")
 
     @pytest.mark.asyncio
     @patch(PATCH_CLIENT)
@@ -151,6 +149,17 @@ class TestGetGroupRule:
         result = await get_group_rule(RULE_ID, ctx=ctx_no_elicitation)
 
         assert result == {"error": "Error: Not found"}
+
+    @pytest.mark.asyncio
+    @patch(PATCH_CLIENT)
+    async def test_none_body_returns_error(self, mock_get_client, ctx_no_elicitation):
+        client = AsyncMock()
+        client.get_group_rule.return_value = (None, None, None)
+        mock_get_client.return_value = client
+
+        result = await get_group_rule(RULE_ID, ctx=ctx_no_elicitation)
+
+        assert "error" in result
 
     @pytest.mark.asyncio
     async def test_invalid_id_rejected(self, ctx_no_elicitation):
@@ -227,19 +236,19 @@ class TestUpdateGroupRule:
     @patch(PATCH_CLIENT)
     async def test_updates_rule(self, mock_get_client, ctx_no_elicitation):
         client = AsyncMock()
-        client.update_group_rule.return_value = (_make_rule(), None, None)
+        client.replace_group_rule.return_value = (_make_rule(), None, None)
         mock_get_client.return_value = client
 
         result = await update_group_rule(RULE_ID, RULE_DATA, ctx=ctx_no_elicitation)
 
-        client.update_group_rule.assert_awaited_once_with(RULE_ID, RULE_DATA)
+        client.replace_group_rule.assert_awaited_once_with(RULE_ID, RULE_DATA)
         assert result["id"] == RULE_ID
 
     @pytest.mark.asyncio
     @patch(PATCH_CLIENT)
     async def test_okta_api_error(self, mock_get_client, ctx_no_elicitation):
         client = AsyncMock()
-        client.update_group_rule.return_value = (None, None, "Rule is active")
+        client.replace_group_rule.return_value = (None, None, "Rule is active")
         mock_get_client.return_value = client
 
         result = await update_group_rule(RULE_ID, RULE_DATA, ctx=ctx_no_elicitation)

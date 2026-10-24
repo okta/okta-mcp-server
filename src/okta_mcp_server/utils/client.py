@@ -15,11 +15,10 @@ from okta_mcp_server.utils.auth.auth_manager import SERVICE_NAME, OktaAuthManage
 async def get_okta_client(manager: OktaAuthManager) -> OktaClient:
     """Initialize and return an Okta client"""
     logger.debug("Initializing Okta client")
-    api_token = keyring.get_password(SERVICE_NAME, "api_token")
     if not await manager.is_valid_token():
         logger.warning("Token is invalid or expired, re-authenticating")
         await manager.authenticate()
-        api_token = keyring.get_password(SERVICE_NAME, "api_token")
+    api_token = keyring.get_password(SERVICE_NAME, "api_token")
     config = {
         "orgUrl": manager.org_url,
         "token": api_token,

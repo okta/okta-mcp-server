@@ -18,11 +18,20 @@ from okta_mcp_server.utils.messages import (
     DELETE_GROUP_RULE,
     DELETE_GROUP_RULE_REMOVE_USERS,
 )
-from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, paginate_all_results
+from okta_mcp_server.utils.pagination import (
+    build_query_params,
+    create_paginated_response,
+    extract_after_cursor,
+    paginate_all_results,
+)
+from okta_mcp_server.utils.scope_guard import require_scopes
+from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import validate_ids
 
 
 @mcp.tool()
+@require_scopes("okta.groups.read")
+@json_response
 async def list_group_rules(
     ctx: Context,
     search: str = "",
@@ -70,7 +79,7 @@ async def list_group_rules(
         query_params = build_query_params(search=search, after=after, limit=limit, expand=expand)
 
         logger.debug("Calling Okta API to list group rules")
-        rules, response, err = await client.list_group_rules(query_params)
+        rules, response, err = await client.list_group_rules(**query_params)
 
         if err:
             logger.error(f"Okta API error while listing group rules: {err}")
@@ -78,11 +87,18 @@ async def list_group_rules(
 
         if not rules:
             logger.info("No group rules found")
-            return create_paginated_response([], response, fetch_all)
+            return create_paginated_response([], response, fetch_all_used=fetch_all)
 
-        if fetch_all and response and hasattr(response, "has_next") and response.has_next():
+        has_more = (hasattr(response, "has_next") and response.has_next()) or bool(extract_after_cursor(response))
+        if fetch_all and response and has_more:
             logger.info(f"fetch_all=True, auto-paginating from initial {len(rules)} group rules")
-            all_rules, pagination_info = await paginate_all_results(response, rules)
+
+            async def _next_page(cursor):
+                p = {k: v for k, v in query_params.items() if k != "after"}
+                p["after"] = cursor
+                return await client.list_group_rules(**p)
+
+            all_rules, pagination_info = await paginate_all_results(response, rules, next_page_fn=_next_page)
 
             logger.info(
                 f"Successfully retrieved {len(all_rules)} group rules across {pagination_info['pages_fetched']} pages"
@@ -98,7 +114,9 @@ async def list_group_rules(
 
 
 @mcp.tool()
+@require_scopes("okta.groups.read")
 @validate_ids("rule_id", error_return_type="dict")
+@json_response
 async def get_group_rule(rule_id: str, ctx: Context = None, expand: Optional[str] = None) -> dict:
     """Get a group rule by ID from the Okta organization.
 
@@ -120,20 +138,29 @@ async def get_group_rule(rule_id: str, ctx: Context = None, expand: Optional[str
         logger.debug(f"Calling Okta API to get group rule {rule_id}")
 
         query_params = build_query_params(expand=expand)
-        rule, _, err = await client.get_group_rule(rule_id, query_params)
+        rule, _, err = await client.get_group_rule(rule_id, **query_params)
 
         if err:
             logger.error(f"Okta API error while getting group rule {rule_id}: {err}")
             return {"error": f"Error: {err}"}
 
+        if rule is None:
+            return none_body_error(
+                "get_group_rule",
+                f"retrieving group rule {rule_id!r}",
+                "Verify the ID with list_group_rules().",
+            )
+
         logger.info(f"Successfully retrieved group rule: {rule_id}")
-        return rule.as_dict() if rule else {}
+        return rule
     except Exception as e:
         logger.error(f"Exception while getting group rule {rule_id}: {type(e).__name__}: {e}")
         return {"error": f"Exception: {e}"}
 
 
 @mcp.tool()
+@require_scopes("okta.groups.manage")
+@json_response
 async def create_group_rule(rule_data: Dict[str, Any], ctx: Context = None, activate: bool = True) -> dict:
     """Create a new group rule in the Okta organization.
 
@@ -185,26 +212,35 @@ async def create_group_rule(rule_data: Dict[str, Any], ctx: Context = None, acti
             logger.error(f"Okta API error while creating group rule: {err}")
             return {"error": f"Error: {err}"}
 
-        logger.info(f"Successfully created group rule: {rule.id if rule else 'N/A'}")
+        if rule is None:
+            return none_body_error(
+                "create_group_rule",
+                f"creating group rule {rule_data.get('name', 'N/A')!r}",
+                "Use list_group_rules(search=...) to confirm and retrieve the new rule.",
+            )
 
-        if activate and rule and hasattr(rule, "id"):
+        logger.info(f"Successfully created group rule: {rule.id}")
+
+        if activate:
             logger.info(f"Activating newly created group rule: {rule.id}")
-            _, activate_err = await client.activate_group_rule(rule.id)
+            activate_err = (await client.activate_group_rule(rule.id))[-1]
             if activate_err:
                 logger.warning(f"Rule created but activation failed: {activate_err}")
                 return {
-                    "rule": rule.as_dict(),
+                    "rule": rule,
                     "warning": f"Rule created but activation failed: {activate_err}",
                 }
 
-        return rule.as_dict() if rule else {}
+        return rule
     except Exception as e:
         logger.error(f"Exception while creating group rule: {type(e).__name__}: {e}")
         return {"error": f"Exception: {e}"}
 
 
 @mcp.tool()
+@require_scopes("okta.groups.manage")
 @validate_ids("rule_id", error_return_type="dict")
+@json_response
 async def update_group_rule(rule_id: str, rule_data: Dict[str, Any], ctx: Context = None) -> dict:
     """Update an existing group rule in the Okta organization.
 
@@ -231,21 +267,30 @@ async def update_group_rule(rule_id: str, rule_data: Dict[str, Any], ctx: Contex
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to update group rule {rule_id}")
 
-        rule, _, err = await client.update_group_rule(rule_id, rule_data)
+        rule, _, err = await client.replace_group_rule(rule_id, rule_data)
 
         if err:
             logger.error(f"Okta API error while updating group rule {rule_id}: {err}")
             return {"error": f"Error: {err}"}
 
+        if rule is None:
+            return none_body_error(
+                "update_group_rule",
+                f"updating group rule {rule_id!r}",
+                "Use get_group_rule() to confirm the current state of the rule.",
+            )
+
         logger.info(f"Successfully updated group rule: {rule_id}")
-        return rule.as_dict() if rule else {}
+        return rule
     except Exception as e:
         logger.error(f"Exception while updating group rule {rule_id}: {type(e).__name__}: {e}")
         return {"error": f"Exception: {e}"}
 
 
 @mcp.tool()
+@require_scopes("okta.groups.manage")
 @validate_ids("rule_id", error_return_type="dict")
+@json_response
 async def delete_group_rule(rule_id: str, ctx: Context = None, remove_users: bool = False) -> dict:
     """Delete a group rule by ID from the Okta organization.
 
@@ -282,8 +327,11 @@ async def delete_group_rule(rule_id: str, ctx: Context = None, remove_users: boo
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to delete group rule {rule_id}")
 
-        query_params = {"removeUsers": "true"} if remove_users else {}
-        _, err = await client.delete_group_rule(rule_id, query_params)
+        if remove_users:
+            result = await client.delete_group_rule(rule_id, remove_users=True)
+        else:
+            result = await client.delete_group_rule(rule_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Okta API error while deleting group rule {rule_id}: {err}")
@@ -297,7 +345,9 @@ async def delete_group_rule(rule_id: str, ctx: Context = None, remove_users: boo
 
 
 @mcp.tool()
+@require_scopes("okta.groups.manage")
 @validate_ids("rule_id", error_return_type="dict")
+@json_response
 async def activate_group_rule(rule_id: str, ctx: Context = None) -> dict:
     """Activate a group rule in the Okta organization.
 
@@ -318,7 +368,8 @@ async def activate_group_rule(rule_id: str, ctx: Context = None) -> dict:
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to activate group rule {rule_id}")
 
-        _, err = await client.activate_group_rule(rule_id)
+        result = await client.activate_group_rule(rule_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Okta API error while activating group rule {rule_id}: {err}")
@@ -332,7 +383,9 @@ async def activate_group_rule(rule_id: str, ctx: Context = None) -> dict:
 
 
 @mcp.tool()
+@require_scopes("okta.groups.manage")
 @validate_ids("rule_id", error_return_type="dict")
+@json_response
 async def deactivate_group_rule(rule_id: str, ctx: Context = None) -> dict:
     """Deactivate a group rule in the Okta organization.
 
@@ -364,7 +417,8 @@ async def deactivate_group_rule(rule_id: str, ctx: Context = None) -> dict:
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to deactivate group rule {rule_id}")
 
-        _, err = await client.deactivate_group_rule(rule_id)
+        result = await client.deactivate_group_rule(rule_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Okta API error while deactivating group rule {rule_id}: {err}")

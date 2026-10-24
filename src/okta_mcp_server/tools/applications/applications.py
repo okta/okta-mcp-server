@@ -5,19 +5,56 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
 
+import asyncio
+import json
 from typing import Any, Dict, Optional
+from urllib.parse import urlencode
 
+import okta.models as okta_models
 from loguru import logger
 from mcp.server.fastmcp import Context
 
 from okta_mcp_server.server import mcp
+
+# Mapping of signOnMode -> Okta SDK model class for proper serialization
+_SIGN_ON_MODE_MODEL_MAP: Dict[str, Any] = {
+    "BOOKMARK": okta_models.BookmarkApplication,
+    "AUTO_LOGIN": okta_models.AutoLoginApplication,
+    "BASIC_AUTH": okta_models.BasicAuthApplication,
+    "BROWSER_PLUGIN": okta_models.BrowserPluginApplication,
+    "OPENID_CONNECT": okta_models.OpenIdConnectApplication,
+    "SAML_1_1": okta_models.Saml11Application,
+    "SAML_2_0": okta_models.SamlApplication,
+    "SECURE_PASSWORD_STORE": okta_models.SecurePasswordStoreApplication,
+    "WS_FEDERATION": okta_models.WsFederationApplication,
+}
+
+
+def _build_application_model(app_config: Dict[str, Any]) -> Any:
+    """Convert a plain dict to the appropriate Okta SDK Application model.
+
+    The SDK v3 requires typed model objects, not plain dicts. Without this,
+    subclass-specific fields like `name`, `settings`, and `visibility` are
+    silently dropped by the base Application model, causing API validation errors.
+    """
+    sign_on_mode = app_config.get("signOnMode") or app_config.get("sign_on_mode", "")
+    model_cls = _SIGN_ON_MODE_MODEL_MAP.get(str(sign_on_mode).upper(), okta_models.Application)
+    logger.debug(f"Using model class '{model_cls.__name__}' for signOnMode '{sign_on_mode}'")
+    return model_cls(**app_config)
+
+
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DEACTIVATE_APPLICATION, DELETE_APPLICATION
+from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
+from okta_mcp_server.utils.scope_guard import require_scopes
+from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import validate_ids
 
 
 @mcp.tool()
+@require_scopes("okta.apps.read", error_return_type="list")
+@json_response
 async def list_applications(
     ctx: Context,
     q: Optional[str] = None,
@@ -26,7 +63,8 @@ async def list_applications(
     filter: Optional[str] = None,
     expand: Optional[str] = None,
     include_non_deleted: Optional[bool] = None,
-) -> list:
+    fetch_all: bool = False,
+) -> dict:
     """List all applications from the Okta organization.
 
     Parameters:
@@ -37,12 +75,25 @@ async def list_applications(
         expand (str, optional): Expands the app user object to include the user's profile or expand the app group
         object to include the group's profile
         include_non_deleted (bool, optional): Include non-deleted applications in the results
+        fetch_all (bool, optional): If True, automatically fetch all pages of results. Default: False.
+
+    Examples:
+        For pagination:
+        - First call: list_applications()
+        - Next page: list_applications(after="cursor_value")
+        - All pages: list_applications(fetch_all=True)
 
     Returns:
-        List containing the applications from the Okta organization.
+        Dict containing:
+        - items: List of application objects
+        - total_fetched: Number of applications returned
+        - has_more: Boolean indicating if more results are available
+        - next_cursor: Cursor for the next page (if has_more is True)
+        - fetch_all_used: Boolean indicating if fetch_all was used
+        - pagination_info: Additional pagination metadata (when fetch_all=True)
     """
     logger.info("Listing applications from Okta organization")
-    logger.debug(f"Query parameters: q='{q}', filter='{filter}', limit={limit}")
+    logger.debug(f"Query parameters: q='{q}', filter='{filter}', limit={limit}, fetch_all={fetch_all}")
 
     # Validate limit parameter range
     if limit is not None:
@@ -57,41 +108,56 @@ async def list_applications(
 
     try:
         client = await get_okta_client(manager)
-        query_params = {}
-
-        if q:
-            query_params["q"] = q
-        if after:
-            query_params["after"] = after
-        if limit:
-            query_params["limit"] = limit
-        if filter:
-            query_params["filter"] = filter
-        if expand:
-            query_params["expand"] = expand
-        if include_non_deleted is not None:
-            query_params["includeNonDeleted"] = include_non_deleted
+        query_params = build_query_params(
+            q=q, after=after, limit=limit, filter=filter, expand=expand,
+            include_non_deleted=include_non_deleted,
+        )
 
         logger.debug("Calling Okta API to list applications")
-        apps, _, err = await client.list_applications(query_params)
+        apps, response, err = await client.list_applications(**query_params)
 
         if err:
             logger.error(f"Okta API error while listing applications: {err}")
-            return [f"Error: {err}"]
+            return {"error": str(err)}
 
         if not apps:
             logger.info("No applications found")
-            return []
+            return create_paginated_response([], response, fetch_all)
 
-        logger.info(f"Successfully retrieved {len(apps)} applications")
-        return [app for app in apps]
+        app_count = len(apps)
+        logger.debug(f"Retrieved {app_count} applications in first page")
+
+        _has_more = (hasattr(response, "has_next") and response.has_next()) or bool(extract_after_cursor(response))
+        if fetch_all and response and _has_more:
+            logger.info(f"fetch_all=True, auto-paginating from initial {app_count} applications")
+
+            async def _next_page(cursor):
+                p = dict(query_params)
+                p["after"] = cursor
+                return await client.list_applications(**p)
+
+            async def _on_page(pages, total):
+                await ctx.info(f"Fetching applications... {total} fetched so far ({pages} pages)")
+
+            all_apps, pagination_info = await paginate_all_results(
+                response, apps, next_page_fn=_next_page, on_page=_on_page
+            )
+            logger.info(
+                f"Successfully retrieved {len(all_apps)} applications across {pagination_info['pages_fetched']} pages"
+            )
+            return create_paginated_response(all_apps, response, fetch_all_used=True, pagination_info=pagination_info)
+        else:
+            logger.info(f"Successfully retrieved {app_count} applications")
+            return create_paginated_response(apps, response, fetch_all_used=fetch_all)
     except Exception as e:
         logger.error(f"Exception while listing applications: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return {"error": str(e)}
 
 
 @mcp.tool()
+@require_scopes("okta.apps.read")
 @validate_ids("app_id", error_return_type="dict")
+@json_response
 async def get_application(ctx: Context, app_id: str, expand: Optional[str] = None) -> Any:
     """Get an application by ID from the Okta organization.
 
@@ -114,11 +180,18 @@ async def get_application(ctx: Context, app_id: str, expand: Optional[str] = Non
         if expand:
             query_params["expand"] = expand
 
-        app, _, err = await client.get_application(app_id, query_params)
+        app, _, err = await client.get_application(app_id, **query_params)
 
         if err:
             logger.error(f"Okta API error while getting application {app_id}: {err}")
             return {"error": str(err)}
+
+        if app is None:
+            return none_body_error(
+                "get_application",
+                f"retrieving application {app_id!r}",
+                "Verify the ID with list_applications().",
+            )
 
         logger.info(f"Successfully retrieved application: {app_id}")
         return app
@@ -128,6 +201,8 @@ async def get_application(ctx: Context, app_id: str, expand: Optional[str] = Non
 
 
 @mcp.tool()
+@require_scopes("okta.apps.manage")
+@json_response
 async def create_application(ctx: Context, app_config: Dict[str, Any], activate: bool = True) -> Any:
     """Create a new application in the Okta organization.
 
@@ -146,14 +221,20 @@ async def create_application(ctx: Context, app_config: Dict[str, Any], activate:
     try:
         client = await get_okta_client(manager)
 
-        query_params = {"activate": activate}
-
+        application_model = _build_application_model(app_config)
         logger.debug("Calling Okta API to create application")
-        app, _, err = await client.create_application(app_config, query_params)
+        app, _, err = await client.create_application(application_model, activate)
 
         if err:
             logger.error(f"Okta API error while creating application: {err}")
             return {"error": str(err)}
+
+        if app is None:
+            return none_body_error(
+                "create_application",
+                "creating the application",
+                "Use list_applications() to confirm and retrieve the new application.",
+            )
 
         logger.info(f"Successfully created application")
         return app
@@ -163,7 +244,9 @@ async def create_application(ctx: Context, app_config: Dict[str, Any], activate:
 
 
 @mcp.tool()
+@require_scopes("okta.apps.manage")
 @validate_ids("app_id", error_return_type="dict")
+@json_response
 async def update_application(ctx: Context, app_id: str, app_config: Dict[str, Any]) -> Any:
     """Update an application by ID in the Okta organization.
 
@@ -181,12 +264,20 @@ async def update_application(ctx: Context, app_id: str, app_config: Dict[str, An
     try:
         client = await get_okta_client(manager)
 
+        application_model = _build_application_model(app_config)
         logger.debug(f"Calling Okta API to update application {app_id}")
-        app, _, err = await client.update_application(app_id, app_config)
+        app, _, err = await client.replace_application(app_id, application_model)
 
         if err:
             logger.error(f"Okta API error while updating application {app_id}: {err}")
             return {"error": str(err)}
+
+        if app is None:
+            return none_body_error(
+                "update_application",
+                f"updating application {app_id!r}",
+                "Re-fetch with get_application() to confirm the current state.",
+            )
 
         logger.info(f"Successfully updated application: {app_id}")
         return app
@@ -196,7 +287,9 @@ async def update_application(ctx: Context, app_id: str, app_config: Dict[str, An
 
 
 @mcp.tool()
+@require_scopes("okta.apps.manage", error_return_type="list")
 @validate_ids("app_id")
+@json_response
 async def delete_application(ctx: Context, app_id: str) -> list:
     """Delete an application by ID from the Okta organization.
 
@@ -243,7 +336,8 @@ async def delete_application(ctx: Context, app_id: str) -> list:
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to delete application {app_id}")
 
-        _, err = await client.delete_application(app_id)
+        result = await client.delete_application(app_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Okta API error while deleting application {app_id}: {err}")
@@ -257,7 +351,9 @@ async def delete_application(ctx: Context, app_id: str) -> list:
 
 
 @mcp.tool()
+@require_scopes("okta.apps.manage", error_return_type="list")
 @validate_ids("app_id")
+@json_response
 async def confirm_delete_application(ctx: Context, app_id: str, confirmation: str) -> list:
     """Confirm and execute application deletion after receiving confirmation.
 
@@ -280,7 +376,7 @@ async def confirm_delete_application(ctx: Context, app_id: str, confirmation: st
 
     if confirmation != "DELETE":
         logger.warning(f"Application deletion cancelled for {app_id} - incorrect confirmation")
-        return ["Error: Deletion cancelled. Confirmation 'DELETE' was not provided correctly."]
+        return [{"error": "Deletion cancelled. Confirmation 'DELETE' was not provided correctly."}]
 
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
@@ -288,21 +384,24 @@ async def confirm_delete_application(ctx: Context, app_id: str, confirmation: st
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to delete application {app_id}")
 
-        _, err = await client.delete_application(app_id)
+        result = await client.delete_application(app_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Okta API error while deleting application {app_id}: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
 
         logger.info(f"Successfully deleted application: {app_id}")
-        return [f"Application {app_id} deleted successfully"]
+        return [{"message": f"Application {app_id} deleted successfully"}]
     except Exception as e:
         logger.error(f"Exception while deleting application {app_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
 
 
 @mcp.tool()
+@require_scopes("okta.apps.manage", error_return_type="list")
 @validate_ids("app_id")
+@json_response
 async def activate_application(ctx: Context, app_id: str) -> list:
     """Activate an application in the Okta organization.
 
@@ -320,21 +419,24 @@ async def activate_application(ctx: Context, app_id: str) -> list:
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to activate application {app_id}")
 
-        _, err = await client.activate_application(app_id)
+        result = await client.activate_application(app_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Okta API error while activating application {app_id}: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
 
         logger.info(f"Successfully activated application: {app_id}")
-        return [f"Application {app_id} activated successfully"]
+        return [{"message": f"Application {app_id} activated successfully"}]
     except Exception as e:
         logger.error(f"Exception while activating application {app_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
 
 
 @mcp.tool()
+@require_scopes("okta.apps.manage", error_return_type="list")
 @validate_ids("app_id")
+@json_response
 async def deactivate_application(ctx: Context, app_id: str) -> list:
     """Deactivate an application in the Okta organization.
 
@@ -363,14 +465,326 @@ async def deactivate_application(ctx: Context, app_id: str) -> list:
         client = await get_okta_client(manager)
         logger.debug(f"Calling Okta API to deactivate application {app_id}")
 
-        _, err = await client.deactivate_application(app_id)
+        result = await client.deactivate_application(app_id)
+        err = result[-1]
 
         if err:
             logger.error(f"Okta API error while deactivating application {app_id}: {err}")
-            return [f"Error: {err}"]
+            return [{"error": str(err)}]
 
         logger.info(f"Successfully deactivated application: {app_id}")
-        return [f"Application {app_id} deactivated successfully"]
+        return [{"message": f"Application {app_id} deactivated successfully"}]
     except Exception as e:
         logger.error(f"Exception while deactivating application {app_id}: {type(e).__name__}: {e}")
-        return [f"Exception: {e}"]
+        return [{"exception": str(e)}]
+
+
+# ---------------------------------------------------------------------------
+# OIN catalog & app installation
+# ---------------------------------------------------------------------------
+
+#: Server-side default page size for /api/v1/catalog/apps. The catalog
+#: endpoint paginates but, unlike the rest of the Okta API, emits no
+#: ``Link: rel="next"`` header (verified against a live org) — so a full page
+#: is the only "maybe more" signal, and the ``after`` cursor is the last
+#: item's catalog ``name``.
+_CATALOG_DEFAULT_PAGE_SIZE = 20
+
+#: Safety limits for fetch_all, mirroring paginate_all_results defaults.
+_CATALOG_MAX_PAGES = 500
+_CATALOG_PAGE_DELAY_SECONDS = 0.1
+
+
+async def _catalog_request(
+    client, method: str, url: str, body: Optional[Dict[str, Any]] = None, keep_empty_params: bool = False
+) -> tuple:
+    """Issue a raw request for catalog/OIN endpoints the typed SDK can't serve.
+
+    The typed SDK create path strips the catalog ``name`` key and exposes no
+    catalog-apps surface at all, so these tools go through the request
+    executor directly.
+
+    Args:
+        keep_empty_params: Pass True to forward the body verbatim — by default
+            the SDK's create_request prunes empty-string/list/dict values from
+            the body (``clear_empty_params``).
+
+    Returns:
+        Tuple of ``(response, parsed_body, error)`` — the transport response,
+        the JSON-decoded body (``None`` when the body is empty), and the SDK
+        error (``None`` on success). ``response`` and ``parsed_body`` are
+        ``None`` whenever ``error`` is set.
+    """
+    executor = client.get_request_executor()
+    request, err = await executor.create_request(
+        method=method, url=url, body=body or {}, headers={}, oauth=False, keep_empty_params=keep_empty_params
+    )
+    if err:
+        return None, None, err
+    response, response_body, err = await executor.execute(request)
+    if err:
+        return None, None, err
+    return response, json.loads(response_body) if response_body else None, None
+
+
+def _catalog_url(params: Dict[str, Any]) -> str:
+    query_string = urlencode(params)
+    return "/api/v1/catalog/apps" + (f"?{query_string}" if query_string else "")
+
+
+def _catalog_next_cursor(page: list, exhausted_below: int) -> Optional[str]:
+    """Synthesize the ``after`` cursor for the next catalog page.
+
+    A page shorter than ``exhausted_below`` means the catalog is exhausted;
+    otherwise there may be more, and the cursor is the last entry's ``name``.
+    The threshold is min(requested limit, server default) rather than the
+    requested limit itself: the server may silently cap an over-large limit,
+    and a page merely shorter than the request is not proof of exhaustion.
+    A page that exactly exhausts the catalog therefore yields a phantom
+    cursor whose next page is empty — callers must treat an empty page as
+    the true end.
+    """
+    if len(page) < exhausted_below:
+        return None
+    last = page[-1]
+    return last.get("name") if isinstance(last, dict) else None
+
+
+@mcp.tool()
+@require_scopes("okta.apps.read")
+@json_response
+async def list_catalog_apps(
+    ctx: Context,
+    q: Optional[str] = None,
+    after: Optional[str] = None,
+    limit: Optional[int] = None,
+    fetch_all: bool = False,
+) -> dict:
+    """Browse the Okta Integration Network (OIN) app catalog.
+
+    Use this to discover an app's ``name`` (the catalog key) to pass to
+    install_oin_app. Apps that support outbound provisioning list a provisioning
+    capability in their ``features`` (e.g. a SCIM 2.0 test app). A plain custom
+    SAML/OIDC app created with create_application cannot do provisioning; you need
+    an installed instance of a provisioning-capable catalog app.
+
+    Parameters:
+        q (str, optional): Filters the catalog by app name/keyword (e.g. "scim")
+        after (str, optional): Pagination cursor — the ``name`` of the last
+            entry of the previous page (returned as ``next_cursor``)
+        limit (int, optional): Number of catalog entries per page (server
+            default: 20)
+        fetch_all (bool, optional): If True, automatically fetch all pages of
+            results. The unfiltered catalog holds thousands of entries and can
+            take hundreds of sequential requests — strongly prefer combining
+            this with ``q``. Default: False.
+
+    Examples:
+        For pagination:
+        - First call: list_catalog_apps(q="scim")
+        - Next page: list_catalog_apps(q="scim", after="cursor_value")
+        - All pages: list_catalog_apps(q="scim", fetch_all=True)
+
+    Returns:
+        Dict containing:
+        - items: List of catalog entries (each has ``name``, ``displayName``,
+          ``features``, ``signOnModes``)
+        - total_fetched: Number of entries returned
+        - has_more: Boolean indicating if more results are available. May be
+          conservatively True when the final page is exactly full — an empty
+          next page then confirms the end.
+        - next_cursor: Cursor for the next page (if has_more is True). Also
+          set when fetch_all stopped early, as the resume point.
+        - fetch_all_used: Boolean indicating if fetch_all was used
+        - pagination_info: Additional pagination metadata (when fetch_all=True)
+    """
+    logger.info(f"Browsing OIN catalog (q='{q}', limit={limit}, fetch_all={fetch_all})")
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        query_params = build_query_params(q=q, after=after, limit=limit)
+        page_size = limit if limit else _CATALOG_DEFAULT_PAGE_SIZE
+        exhausted_below = min(page_size, _CATALOG_DEFAULT_PAGE_SIZE)
+
+        _, apps, err = await _catalog_request(client, "GET", _catalog_url(query_params))
+        if err:
+            logger.error(f"Okta API error while browsing catalog: {err}")
+            return {"error": str(err)}
+
+        apps = apps or []
+        cursor = _catalog_next_cursor(apps, exhausted_below)
+
+        if not fetch_all:
+            logger.info(f"Successfully retrieved {len(apps)} OIN catalog entries")
+            result = create_paginated_response(apps, None, fetch_all_used=False)
+            # The catalog endpoint sends no Link header, so has_more/next_cursor
+            # can't come from the transport response like other list_* tools.
+            result["has_more"] = cursor is not None
+            result["next_cursor"] = cursor
+            return result
+
+        all_apps = list(apps)
+        # Dedup by catalog name so a misbehaving `after` cursor (ignored,
+        # stripped, or inclusive instead of exclusive) can't duplicate entries
+        # or loop; names are the catalog's unique keys.
+        seen_names = {a["name"] for a in apps if isinstance(a, dict) and a.get("name")}
+        pages_fetched = 1
+        pagination_info: Dict[str, Any] = {"stopped_early": False, "stop_reason": None}
+
+        while cursor and pages_fetched < _CATALOG_MAX_PAGES:
+            await asyncio.sleep(_CATALOG_PAGE_DELAY_SECONDS)
+            next_params = dict(query_params)
+            next_params["after"] = cursor
+            _, page, page_err = await _catalog_request(client, "GET", _catalog_url(next_params))
+            if page_err:
+                logger.warning(f"Error fetching catalog page {pages_fetched + 1}: {page_err}")
+                pagination_info["stopped_early"] = True
+                pagination_info["stop_reason"] = f"API error: {page_err}"
+                break
+
+            page = page or []
+            if not page:
+                cursor = None
+                break
+
+            fresh = [a for a in page if not (isinstance(a, dict) and a.get("name") in seen_names)]
+            if not fresh:
+                pagination_info["stopped_early"] = True
+                pagination_info["stop_reason"] = "Pagination cursor did not advance"
+                break
+            seen_names.update(a["name"] for a in fresh if isinstance(a, dict) and a.get("name"))
+
+            all_apps.extend(fresh)
+            pages_fetched += 1
+            try:
+                await ctx.info(f"Fetching catalog apps... {len(all_apps)} fetched so far ({pages_fetched} pages)")
+            except Exception:
+                pass
+
+            cursor = _catalog_next_cursor(page, exhausted_below)
+
+        if cursor and pages_fetched >= _CATALOG_MAX_PAGES:
+            pagination_info["stopped_early"] = True
+            pagination_info["stop_reason"] = f"Reached maximum page limit ({_CATALOG_MAX_PAGES})"
+            logger.warning(f"Stopped catalog pagination at {_CATALOG_MAX_PAGES} pages limit")
+
+        pagination_info["pages_fetched"] = pages_fetched
+        pagination_info["total_items"] = len(all_apps)
+        logger.info(f"Successfully retrieved {len(all_apps)} OIN catalog entries across {pages_fetched} pages")
+        result = create_paginated_response(all_apps, None, fetch_all_used=True, pagination_info=pagination_info)
+        if pagination_info["stopped_early"] and cursor:
+            # Partial result — surface the resume point instead of implying
+            # the walk completed.
+            result["has_more"] = True
+            result["next_cursor"] = cursor
+        return result
+    except Exception as e:
+        logger.error(f"Exception while browsing OIN catalog: {type(e).__name__}: {e}")
+        return {"error": str(e)}
+
+
+@mcp.tool()
+@require_scopes("okta.apps.read")
+@validate_ids("app_name", error_return_type="dict")
+@json_response
+async def get_catalog_app(ctx: Context, app_name: str) -> dict:
+    """Get a single OIN catalog app definition (including its provisioning schema).
+
+    Parameters:
+        app_name (str, required): The catalog app key (from list_catalog_apps)
+
+    Returns:
+        Dict with the catalog app definition, or error information.
+    """
+    logger.info(f"Getting OIN catalog app: {app_name}")
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        _, app, err = await _catalog_request(client, "GET", f"/api/v1/catalog/apps/{app_name}?expand=schema")
+        if err:
+            logger.error(f"Okta API error while getting catalog app {app_name}: {err}")
+            return {"error": str(err)}
+
+        if app is None:
+            return none_body_error(
+                "get_catalog_app",
+                f"retrieving catalog app {app_name!r}",
+                "Verify the name with list_catalog_apps().",
+            )
+
+        logger.info(f"Successfully retrieved OIN catalog app: {app_name}")
+        return app
+    except Exception as e:
+        logger.error(f"Exception while getting catalog app {app_name}: {type(e).__name__}: {e}")
+        return {"error": str(e)}
+
+
+@mcp.tool()
+@require_scopes("okta.apps.manage")
+@validate_ids("name", error_return_type="dict")
+@json_response
+async def install_oin_app(
+    ctx: Context,
+    name: str,
+    label: str,
+    sign_on_mode: str,
+    settings: Optional[Dict[str, Any]] = None,
+    activate: bool = True,
+) -> dict:
+    """Install an instance of an OIN catalog app (e.g. a provisioning-capable SCIM app).
+
+    Unlike create_application (which builds custom apps), this preserves the
+    catalog ``name`` key. The typed SDK create path strips ``name`` from the
+    request body, so a catalog/OIN app can't be installed through create_application;
+    this issues the request directly. Provisioning capability is determined by the
+    catalog app definition at install time — it cannot be added to a custom app
+    afterwards. Discover ``name`` and the allowed ``signOnMode`` values via
+    list_catalog_apps / get_catalog_app.
+
+    Parameters:
+        name (str, required): The OIN catalog app key (e.g. from list_catalog_apps)
+        label (str, required): Display label for the installed instance
+        sign_on_mode (str, required): A sign-on mode the catalog app supports
+            (e.g. SAML_2_0, OPENID_CONNECT, SECURE_PASSWORD_STORE, BOOKMARK)
+        settings (dict, optional): Additional app settings/profile some OIN apps require
+        activate (bool, optional): Activate the app on creation. Defaults to True.
+
+    Returns:
+        Dict with the installed application, or error information.
+    """
+    logger.info(f"Installing OIN app '{name}' (label='{label}', signOnMode='{sign_on_mode}')")
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        app_body: Dict[str, Any] = {"name": name, "label": label, "signOnMode": sign_on_mode}
+        if settings:
+            app_body["settings"] = settings
+
+        query_string = urlencode({"activate": "true" if activate else "false"})
+        url = f"/api/v1/apps?{query_string}"
+
+        # keep_empty_params: some OIN apps require settings fields whose value
+        # is legitimately an empty string; the SDK would otherwise prune them.
+        _, app, err = await _catalog_request(client, "POST", url, body=app_body, keep_empty_params=True)
+        if err:
+            logger.error(f"Okta API error while installing OIN app '{name}': {err}")
+            return {"error": str(err)}
+
+        if app is None:
+            return none_body_error(
+                "install_oin_app",
+                f"installing OIN app {name!r}",
+                "Verify the result with list_applications().",
+            )
+
+        logger.info(f"Successfully installed OIN app '{name}'")
+        return app
+    except Exception as e:
+        logger.error(f"Exception while installing OIN app '{name}': {type(e).__name__}: {e}")
+        return {"error": str(e)}

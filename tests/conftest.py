@@ -5,7 +5,7 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
 
-"""Shared fixtures for Okta MCP Server tests."""
+"""Shared fixtures for Okta Open Source MCP Server tests."""
 
 from __future__ import annotations
 
@@ -189,12 +189,13 @@ def mock_okta_client():
     """Return a ``MagicMock`` with async Okta client methods pre-configured."""
     client = AsyncMock()
     # Defaults: success, no error
+    client.delete_device_assurance_policy.return_value = (None, None)
     client.delete_group.return_value = (None, None)
     client.delete_application.return_value = (None, None)
     client.delete_policy.return_value = (None, None)
     client.delete_policy_rule.return_value = (None, None)
     client.deactivate_user.return_value = (None, None)
-    client.deactivate_or_delete_user.return_value = (None, None)
+    client.delete_user.return_value = (None, None)
     client.deactivate_application.return_value = (None, None)
     client.deactivate_policy.return_value = (None, None)
     client.deactivate_policy_rule.return_value = (None, None)

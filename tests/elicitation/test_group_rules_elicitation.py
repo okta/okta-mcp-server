@@ -33,7 +33,7 @@ class TestDeleteGroupRuleElicitation:
 
         result = await delete_group_rule(RULE_ID, ctx=ctx_elicit_accept_true)
 
-        mock_okta_client.delete_group_rule.assert_awaited_once_with(RULE_ID, {})
+        mock_okta_client.delete_group_rule.assert_awaited_once_with(RULE_ID)
         assert result["message"] == f"Group rule {RULE_ID} deleted successfully"
         assert result["success"] is True
 
@@ -44,7 +44,7 @@ class TestDeleteGroupRuleElicitation:
 
         result = await delete_group_rule(RULE_ID, ctx=ctx_elicit_accept_true, remove_users=True)
 
-        mock_okta_client.delete_group_rule.assert_awaited_once_with(RULE_ID, {"removeUsers": "true"})
+        mock_okta_client.delete_group_rule.assert_awaited_once_with(RULE_ID, remove_users=True)
         assert "also be removed" in ctx_elicit_accept_true.elicit.call_args.kwargs["message"]
         assert result["success"] is True
 
@@ -105,7 +105,7 @@ class TestDeleteGroupRuleFallback:
 
         result = await delete_group_rule(RULE_ID, ctx=ctx_no_elicitation)
 
-        mock_okta_client.delete_group_rule.assert_awaited_once_with(RULE_ID, {})
+        mock_okta_client.delete_group_rule.assert_awaited_once_with(RULE_ID)
         assert result["success"] is True
 
     @pytest.mark.asyncio
@@ -115,7 +115,7 @@ class TestDeleteGroupRuleFallback:
 
         result = await delete_group_rule(RULE_ID, ctx=ctx_elicit_exception)
 
-        mock_okta_client.delete_group_rule.assert_awaited_once_with(RULE_ID, {})
+        mock_okta_client.delete_group_rule.assert_awaited_once_with(RULE_ID)
         assert result["success"] is True
 
 
