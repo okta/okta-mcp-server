@@ -26,7 +26,7 @@ This server is an [Model Context Protocol](https://modelcontextprotocol.io/intro
 * **Interactive Confirmation via Elicitation:** Destructive operations (deletes, deactivations) prompt the user for confirmation through the [MCP Elicitation API](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation) before proceeding, with automatic fallback for clients that do not yet support the feature.
 * **Integration with Okta Admin Management APIs:** Leverages the official Okta APIs to ensure secure and reliable interaction with your Okta org.
 * **Extensible Architecture:** Designed to be easily extended with new functionalities and support for additional Okta API endpoints.
-* **Comprehensive Tool Support:** Full CRUD operations for users, groups, applications, policies, and more.
+* **Comprehensive Tool Support:** Full CRUD operations for users, groups, group rules, applications, policies, and more.
 
 This MCP server utilizes [Okta's Python SDK](https://github.com/okta/okta-sdk-python) to communicate with the Okta APIs, ensuring a robust and well-supported integration.
 
@@ -469,6 +469,20 @@ The Okta MCP Server provides the following tools for LLMs to interact with your 
 | `add_user_to_group`     | Add a user to a group                             | - `Add john.doe@company.com to the Engineering group` <br> - `Give Jane Smith access to the Finance applications` <br> - `Add the new hire to the Sales team` |
 | `remove_user_from_group`| Remove a user from a group                        | - `Remove john.doe@company.com from the Engineering group` <br> - `Revoke Jane's admin privileges` <br> - `Remove the contractor from the Finance group`      |
 
+### Group Rules
+
+Group rules assign users to groups automatically based on user profile attributes or membership in other groups.
+
+| Tool                    | Description                                                  | Usage Examples                                                                                                                                                |
+| ----------------------- | ------------------------------------------------------------ |---------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `list_group_rules`      | List all group rules in your Okta organization              | - `Show me the group rules in my Okta org` <br> - `Which group rules are inactive?` <br> - `List the rules that assign users based on department`             |
+| `get_group_rule`        | Get detailed information about a specific group rule         | - `Show me the conditions for the Engineering group rule` <br> - `What groups does rule 0pr1a2b3c4 assign to?` <br> - `Why isn't this user picked up by that rule?` |
+| `create_group_rule`     | Create a group rule (activates it by default)                | - `Create a rule that adds Engineering users to the Eng Apps group` <br> - `Set up a rule for contractors with the Acme vendor` <br> - `Assign site supervisors by title` |
+| `update_group_rule`     | Update an existing group rule (inactive rules only)          | - `Change the expression on the Contractors rule` <br> - `Add another target group to the Sales rule` <br> - `Rename the vendor assignment rule`              |
+| `delete_group_rule`     | Delete a group rule (prompts for confirmation)               | - `Delete the old contractor rule` <br> - `Remove the deprecated vendor rule and its members` <br> - `Clean up unused group rules`                            |
+| `activate_group_rule`   | Activate a group rule                                        | - `Activate the new Engineering rule` <br> - `Start assigning users with the vendors rule` <br> - `Turn on the rule I just created`                            |
+| `deactivate_group_rule` | Deactivate a group rule (prompts for confirmation)           | - `Stop the site supervisors rule from running` <br> - `Pause the vendor assignment rule temporarily` <br> - `Turn off this rule while I fix the expression`   |
+
 ### Applications
 
 | Tool                          | Description                                       | Usage Examples                                                                                                                                                |
@@ -508,7 +522,7 @@ The Okta MCP Server provides the following tools for LLMs to interact with your 
 
 ### Confirmation for Destructive Operations
 
-All destructive operations (deleting groups, applications, policies, policy rules and deactivating/deleting users) use the **[MCP Elicitation API](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation)** to prompt the user for explicit confirmation before proceeding.
+All destructive operations (deleting groups, applications, policies, policy rules, group rules and deactivating/deleting users) use the **[MCP Elicitation API](https://modelcontextprotocol.io/specification/2025-06-18/client/elicitation)** to prompt the user for explicit confirmation before proceeding.
 
 - **Clients that support elicitation** (e.g., Claude Desktop with MCP SDK ≥ 1.26): The user sees a confirmation dialog directly in the chat UI. They can accept, decline, or cancel.
 - **Clients that do not yet support elicitation**: The tool returns a JSON payload describing the pending action so the LLM can relay the confirmation request to the user. The deprecated `confirm_delete_group` / `confirm_delete_application` tools remain available as a fallback for these clients.
