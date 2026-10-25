@@ -15,6 +15,11 @@ from loguru import logger
 from mcp.server.fastmcp import FastMCP
 
 from okta_mcp_server.utils.auth.auth_manager import OktaAuthManager
+from okta_mcp_server.utils.auth.token_refresh import (
+    REFRESH_TOKEN_HEADER,
+    OktaRefreshTokenBroker,
+    OktaRefreshTokenMiddleware,
+)
 from okta_mcp_server.utils.auth.user_token_verifier import build_user_auth
 from okta_mcp_server.utils.scope_guard import get_disabled_tools, get_startup_scopes, prune_tools_by_scope
 from okta_mcp_server.utils.serialization import json_response
@@ -78,6 +83,43 @@ def _server_options() -> dict:
 
 
 mcp = FastMCP("Okta IDaaS MCP Server", lifespan=okta_authorisation_flow, **_server_options())
+
+
+def _refresh_broker() -> OktaRefreshTokenBroker | None:
+    """Build the per-caller refresh broker, or None when OKTA_CLIENT_SECRET is not configured."""
+    client_secret = os.environ.get("OKTA_CLIENT_SECRET", "").strip()
+    if not client_secret:
+        logger.info(
+            f"OKTA_CLIENT_SECRET is not set, so {REFRESH_TOKEN_HEADER} cannot be honoured: "
+            "callers must refresh their own access tokens"
+        )
+        return None
+    logger.info(f"Per-caller access token refresh enabled; send refresh tokens in {REFRESH_TOKEN_HEADER}")
+    return OktaRefreshTokenBroker(
+        org_url=os.environ["OKTA_ORG_URL"],
+        client_id=os.environ["OKTA_CLIENT_ID"],
+        client_secret=client_secret,
+    )
+
+
+def _run_http() -> None:
+    """Serve the streamable-http app, wrapped with per-caller token refresh in user mode.
+
+    FastMCP exposes no hook for extra middleware, so the app is built and served here instead of
+    through ``mcp.run()``, which would build a fresh app and drop the wrapper.
+    """
+    import uvicorn
+
+    app = mcp.streamable_http_app()
+    if AUTH_MODE == "user":
+        app.add_middleware(OktaRefreshTokenMiddleware, broker=_refresh_broker())
+
+    uvicorn.run(
+        app,
+        host=mcp.settings.host,
+        port=mcp.settings.port,
+        log_level=mcp.settings.log_level.lower(),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -195,4 +237,7 @@ def main():
     from okta_mcp_server.tools.users import users  # noqa: F401
     from okta_mcp_server.utils import scope_stubs  # noqa: F401
 
-    mcp.run(transport=TRANSPORT)
+    if TRANSPORT == "streamable-http":
+        _run_http()
+    else:
+        mcp.run(transport=TRANSPORT)

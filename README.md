@@ -563,6 +563,7 @@ Methods 1 and 2 give the server a single Okta identity, so everyone who can reac
    OKTA_MCP_HOST=0.0.0.0
    OKTA_AUTH_MODE=user
    OKTA_MCP_PUBLIC_URL=https://okta-mcp.example.com/mcp
+   OKTA_CLIENT_SECRET=<web app client secret>   # optional, enables server-side refresh (step 8)
    ```
    The MCP endpoint is served at `/mcp`. Requests without a valid token get `401` with a `WWW-Authenticate` header pointing at `/.well-known/oauth-protected-resource/mcp`, which names your Okta org as the authorization server.
 7. **Configure the MCP client.** For LiteLLM:
@@ -578,6 +579,17 @@ Methods 1 and 2 give the server a single Okta identity, so everyone who can reac
        token_url: https://your-org.okta.com/oauth2/v1/token
        scopes: [openid, profile, email, offline_access, okta.users.read, okta.groups.read]
    ```
+8. **Keep long sessions alive (optional).** Okta access tokens expire after an hour, so a caller whose token lapses starts getting `401`s even though its refresh token is still valid. With `OKTA_CLIENT_SECRET` set, a client can hand the server that refresh token instead of refreshing on its own:
+
+   ```
+   POST /mcp HTTP/1.1
+   Authorization: Bearer <access token>
+   X-Okta-Refresh-Token: <refresh token>
+   ```
+
+   When the bearer token is expired or about to expire, the server runs the `refresh_token` grant, uses the new access token for that request, and returns the rotated refresh token — if Okta rotated one — in the same `X-Okta-Refresh-Token` response header. Requests whose bearer token is still valid never reach the token endpoint, and requests without the header are untouched, so clients that refresh themselves (like the LiteLLM configuration above) need no changes. Okta issues a refresh token only when the client asked for `offline_access`, which that configuration already requests.
+
+   A caller's refresh token is held in process memory only — never in the keyring or on disk — and is dropped as soon as Okta refuses it. Callers that keep presenting a refresh token they already rotated still work: the server holds the rotated value for that session. Because the server runs the grant with the app's own secret, it will reissue tokens for any refresh token it is handed, so keep the MCP endpoint reachable only from your own MCP clients — as you must anyway, since any request it accepts runs Okta calls as that caller.
 
 How tokens are checked:
 
@@ -585,7 +597,7 @@ How tokens are checked:
 * Each token is validated by Okta's `/oauth2/v1/userinfo` endpoint, and its `cid` claim must equal `OKTA_CLIENT_ID`, so tokens minted for other apps are rejected. Successful checks are cached for up to five minutes.
 * Every token must carry `openid` and **all** of `OKTA_SCOPES`; request all of them in the client's scope list, or the server answers `403 insufficient_scope`.
 * An Okta API `403` in this mode means the caller's admin role does not allow the action, and the tool error says so.
-* The server holds no Okta credentials of its own in this mode: `OKTA_PRIVATE_KEY` and `OKTA_KEY_ID` are ignored and nothing is written to the keyring.
+* The server holds no admin credentials of its own in this mode: `OKTA_PRIVATE_KEY` and `OKTA_KEY_ID` are ignored and nothing is written to the keyring. `OKTA_CLIENT_SECRET`, when set, is used only to run the `refresh_token` grant for callers whose access token has expired.
 
 ### Verify your integration
 

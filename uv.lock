@@ -732,6 +732,7 @@ dependencies = [
     { name = "mcp", extra = ["cli"] },
     { name = "okta" },
     { name = "requests" },
+    { name = "uvicorn" },
 ]
 
 [package.dev-dependencies]
@@ -750,6 +751,7 @@ requires-dist = [
     { name = "mcp", extras = ["cli"], specifier = ">=1.28.1,<2.0.0" },
     { name = "okta", specifier = "==3.4.6" },
     { name = "requests", specifier = ">=2.32.4" },
+    { name = "uvicorn", specifier = ">=0.31.1" },
 ]
 
 [package.metadata.requires-dev]

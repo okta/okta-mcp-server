@@ -23,6 +23,33 @@ from loguru import logger
 SERVICE_NAME = "OktaAuthManager"
 _TOKEN_EXPIRY_SAFETY_MARGIN_SECONDS = 60
 
+
+def token_is_unexpired(token: str) -> bool:
+    """Return True if ``token`` is a JWT whose ``exp`` claim is more than 60s in the future.
+
+    Opaque tokens (non-JWT), JWTs missing an ``exp`` claim, or JWTs that fail to decode
+    return False, causing callers to fall through to refresh/reauth.
+    """
+    try:
+        claims = jwt.decode(token, options={"verify_signature": False})
+    except jwt.DecodeError:
+        logger.debug("Token is not a JWT (opaque); treating as expired")
+        return False
+
+    exp = claims.get("exp")
+    if exp is None:
+        logger.debug("JWT has no exp claim; treating as expired")
+        return False
+
+    seconds_remaining = exp - time.time()
+    if seconds_remaining > _TOKEN_EXPIRY_SAFETY_MARGIN_SECONDS:
+        logger.debug(f"JWT is valid for {seconds_remaining:.0f}s more")
+        return True
+
+    logger.debug(f"JWT expires in {seconds_remaining:.0f}s, within safety margin; treating as expired")
+    return False
+
+
 @dataclass
 class OktaAuthManager:
     """Manages Okta configuration, authentication, and token state."""
@@ -333,7 +360,7 @@ class OktaAuthManager:
 
         api_token = keyring.get_password(SERVICE_NAME, "api_token")
 
-        if api_token and self._token_is_unexpired(api_token):
+        if api_token and token_is_unexpired(api_token):
             logger.debug("Cached token is valid")
             return True
 
@@ -352,29 +379,8 @@ class OktaAuthManager:
 
     @staticmethod
     def _token_is_unexpired(token: str) -> bool:
-        """Return True if ``token`` is a JWT whose ``exp`` claim is more than 60s in the future.
-
-        Opaque tokens (non-JWT), JWTs missing an ``exp`` claim, or JWTs that fail to decode
-        return False, causing callers to fall through to refresh/reauth.
-        """
-        try:
-            claims = jwt.decode(token, options={"verify_signature": False})
-        except jwt.DecodeError:
-            logger.debug("Token is not a JWT (opaque); treating as expired")
-            return False
-
-        exp = claims.get("exp")
-        if exp is None:
-            logger.debug("JWT has no exp claim; treating as expired")
-            return False
-
-        seconds_remaining = exp - time.time()
-        if seconds_remaining > _TOKEN_EXPIRY_SAFETY_MARGIN_SECONDS:
-            logger.debug(f"JWT is valid for {seconds_remaining:.0f}s more")
-            return True
-
-        logger.debug(f"JWT expires in {seconds_remaining:.0f}s, within safety margin; treating as expired")
-        return False
+        """Alias for the module-level :func:`token_is_unexpired`, kept for existing callers."""
+        return token_is_unexpired(token)
 
     def is_cached_token_valid(self) -> bool:
         """Return True if a valid (unexpired) JWT api_token is cached in the keyring.
@@ -384,7 +390,7 @@ class OktaAuthManager:
         so callers (e.g. the lifespan handler) can log accurately.
         """
         api_token = keyring.get_password(SERVICE_NAME, "api_token")
-        return bool(api_token and self._token_is_unexpired(api_token))
+        return bool(api_token and token_is_unexpired(api_token))
 
     def clear_tokens(self):
         """Clear all stored tokens from keyring."""
