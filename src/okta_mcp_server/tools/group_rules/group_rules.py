@@ -5,6 +5,8 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
 
+import csv
+import os
 from typing import Any, Dict, Optional
 
 from loguru import logger
@@ -429,3 +431,166 @@ async def deactivate_group_rule(rule_id: str, ctx: Context = None) -> dict:
     except Exception as e:
         logger.error(f"Exception while deactivating group rule {rule_id}: {type(e).__name__}: {e}")
         return {"error": f"Exception: {e}"}
+
+
+@mcp.tool()
+@require_scopes("okta.groups.read")
+@json_response
+async def export_group_rules_csv(
+    ctx: Context,
+    output_path: str = "/tmp/okta_group_rules_export.csv",
+    search: str = "",
+    expand: Optional[str] = None,
+) -> dict:
+    """Fetch all group rules from the Okta organization and save them to a CSV file on disk.
+
+    Uses the same pagination logic as list_group_rules (fetch_all=True) but writes results
+    directly to a CSV file instead of returning them, avoiding response size limits.
+
+    Parameters:
+        output_path (str): Absolute path where the CSV file will be written.
+            Defaults to /tmp/okta_group_rules_export.csv.
+        search (str, optional): Only include rules whose name contains this keyword.
+        expand (str, optional): "groupIdToGroupNameMap" to include group names alongside IDs.
+
+    Returns:
+        Dict containing:
+        - output_path: Path to the written CSV file
+        - total_rules: Total number of rules written
+        - pages_fetched: Number of pages fetched
+        - stopped_early: Whether pagination hit the page cap
+        - stop_reason: Reason pagination stopped (if stopped_early)
+    """
+    logger.info(f"export_group_rules_csv: starting export to {output_path}")
+
+    CSV_FIELDS = [
+        "id",
+        "name",
+        "status",
+        "type",
+        "created",
+        "lastUpdated",
+        "expression",
+        "targetGroupIds",
+        "groupConditionExclude",
+        "userConditionExclude",
+        "usersExclude",
+    ]
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        query_params = build_query_params(search=search, limit=200, expand=expand)
+
+        logger.debug("Calling Okta API — first page of group rules")
+        rules, response, err = await client.list_group_rules(**query_params)
+
+        if err:
+            logger.error(f"Okta API error: {err}")
+            return {"error": str(err)}
+
+        if not rules:
+            logger.info("No group rules found")
+            return {"output_path": output_path, "total_rules": 0, "pages_fetched": 1}
+
+        has_more = (hasattr(response, "has_next") and response.has_next()) or bool(extract_after_cursor(response))
+
+        all_rules = list(rules)
+        pagination_info = {
+            "pages_fetched": 1,
+            "total_items": len(all_rules),
+            "stopped_early": False,
+            "stop_reason": None,
+        }
+
+        if has_more:
+
+            async def _next_page(cursor):
+                p = {k: v for k, v in query_params.items() if k != "after"}
+                p["after"] = cursor
+                return await client.list_group_rules(**p)
+
+            async def _on_page(pages, total):
+                logger.info(f"[export_group_rules_csv] Page {pages} fetched — {total} rules so far")
+                if pages % 5 == 0:
+                    await ctx.info(f"Exporting group rules... {total} written so far ({pages} pages)")
+
+            all_rules, pagination_info = await paginate_all_results(
+                response, rules, next_page_fn=_next_page, on_page=_on_page
+            )
+
+        # Write CSV
+        os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
+        with open(output_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=CSV_FIELDS, extrasaction="ignore")
+            writer.writeheader()
+            for rule in all_rules:
+                row = _flatten_group_rule(rule)
+                writer.writerow(row)
+
+        total = len(all_rules)
+        logger.info(f"export_group_rules_csv: wrote {total} rules to {output_path}")
+        await ctx.info(f"Export complete! {total} group rules written to {output_path}")
+
+        return {
+            "output_path": output_path,
+            "total_rules": total,
+            "pages_fetched": pagination_info["pages_fetched"],
+            "stopped_early": pagination_info["stopped_early"],
+            "stop_reason": pagination_info.get("stop_reason"),
+        }
+
+    except Exception as e:
+        logger.error(f"Exception in export_group_rules_csv: {type(e).__name__}: {e}")
+        return {"error": f"Exception: {e}"}
+
+
+def _flatten_group_rule(rule) -> dict:
+    """Flatten a GroupRule SDK model into a flat dict suitable for CSV output.
+
+    Handles both SDK v3 Pydantic models and plain dicts (e.g. from expand).
+    """
+    if isinstance(rule, dict):
+        data = rule
+    else:
+        try:
+            data = rule.model_dump(by_alias=True, exclude_none=True)
+        except (AttributeError, TypeError):
+            data = rule.to_dict() if hasattr(rule, "to_dict") else {}
+
+    conditions = data.get("conditions") or {}
+    expression_obj = conditions.get("expression") or {}
+    people = conditions.get("people") or {}
+    people_groups = people.get("groups") or {}
+    people_users = people.get("users") or {}
+
+    actions = data.get("actions") or {}
+    assign_obj = actions.get("assignUserToGroups") or {}
+    target_group_ids = assign_obj.get("groupIds") or []
+
+    group_condition = conditions.get("groupCondition") or {}
+    user_condition = conditions.get("userCondition") or {}
+    group_exclude = group_condition.get("exclude") or people_groups.get("exclude") or []
+    user_exclude = user_condition.get("exclude") or people_users.get("exclude") or []
+
+    created = data.get("created") or ""
+    last_updated = data.get("lastUpdated") or ""
+    if hasattr(created, "isoformat"):
+        created = created.isoformat()
+    if hasattr(last_updated, "isoformat"):
+        last_updated = last_updated.isoformat()
+
+    return {
+        "id": data.get("id", ""),
+        "name": data.get("name", ""),
+        "status": data.get("status", ""),
+        "type": data.get("type", ""),
+        "created": created,
+        "lastUpdated": last_updated,
+        "expression": expression_obj.get("value", ""),
+        "targetGroupIds": ";".join(str(g) for g in target_group_ids),
+        "groupConditionExclude": ";".join(str(g) for g in group_exclude),
+        "userConditionExclude": ";".join(str(u) for u in user_exclude),
+        "usersExclude": ";".join(str(u) for u in people_users.get("exclude") or []),
+    }
