@@ -16,7 +16,7 @@ Design rationale
 - Real tools are pruned by ``prune_tools_by_scope`` when their scope is missing.
 - Without stubs, the LLM has no signal that the capability exists at all and says
   "I cannot do that" with no actionable guidance.
-- One stub *per scope group* (≤17 stubs maximum) keeps the tool list short while
+- One stub *per scope group* (at most one per scope in TOOL_SCOPE_REGISTRY) keeps the tool list short while
   giving the LLM enough information to explain exactly what is missing and how to
   fix it.
 - Stubs are registered only for *missing* scopes — servers with all scopes loaded
@@ -30,7 +30,7 @@ for use by tests.
 
 import os
 import re
-from typing import Any
+from typing import Any, Iterable
 
 from okta_mcp_server.utils.scope_registry import TOOL_SCOPE_REGISTRY
 from okta_mcp_server.utils.serialization import json_response
@@ -42,17 +42,41 @@ SCOPE_STUB_REGISTRY: dict[str, str] = {}
 def _scope_to_stub_name(scope: str) -> str:
     """Convert a scope string to a valid snake_case tool name.
 
+    Every dot-separated part after the leading ``okta`` is kept, so four-part
+    scopes such as ``okta.accessRequests.condition.read`` and
+    ``okta.accessRequests.condition.manage`` get distinct names. Three-part
+    scopes keep the names they have always had.
+
     Examples::
 
-        'okta.brands.read'          → 'brands_read_scope_info'
-        'okta.deviceAssurance.read' → 'device_assurance_read_scope_info'
-        'okta.emailDomains.manage'  → 'email_domains_manage_scope_info'
+        'okta.brands.read'                    → 'brands_read_scope_info'
+        'okta.deviceAssurance.read'           → 'device_assurance_read_scope_info'
+        'okta.emailDomains.manage'            → 'email_domains_manage_scope_info'
+        'okta.accessRequests.condition.read'  → 'access_requests_condition_read_scope_info'
     """
-    parts = scope.split(".")
-    resource = parts[1]   # e.g. 'deviceAssurance'
-    access = parts[2]     # e.g. 'read'
-    resource_snake = re.sub(r"(?<!^)(?=[A-Z])", "_", resource).lower()
-    return f"{resource_snake}_{access}_scope_info"
+    parts = scope.split(".")[1:]
+    snake_parts = [re.sub(r"(?<!^)(?=[A-Z])", "_", part).lower() for part in parts]
+    return "_".join(snake_parts) + "_scope_info"
+
+
+def _stub_names_by_scope(scopes: Iterable[str]) -> dict[str, str]:
+    """Map each scope to its stub tool name, failing loudly on a collision.
+
+    Snake-casing can in principle fold two different scopes onto one name
+    (e.g. ``okta.fooBar.read`` and ``okta.foo.bar.read``). Two stubs with one
+    name would make FastMCP silently keep only one, so a collision raises.
+    """
+    names: dict[str, str] = {}
+    owners: dict[str, str] = {}
+    for scope in sorted(set(scopes)):
+        name = _scope_to_stub_name(scope)
+        if name in owners:
+            raise ValueError(
+                f"Scope stub name collision: '{owners[name]}' and '{scope}' both map to '{name}'"
+            )
+        owners[name] = scope
+        names[scope] = name
+    return names
 
 
 def _build_stub_description(scope: str, tools: list[str]) -> str:
@@ -104,13 +128,17 @@ def _register_stubs() -> None:
     for tool_name, required_scope in TOOL_SCOPE_REGISTRY.items():
         by_scope.setdefault(required_scope, []).append(tool_name)
 
+    # Checked across every registry scope, not only the missing ones, so a
+    # collision fails regardless of which scopes this server is configured with.
+    stub_names = _stub_names_by_scope(by_scope)
+
     registered = 0
     for scope in sorted(by_scope.keys()):
         if scope in configured:
             continue  # real tools for this scope are active — no stub needed
 
         tools = by_scope[scope]
-        stub_name = _scope_to_stub_name(scope)
+        stub_name = stub_names[scope]
         SCOPE_STUB_REGISTRY[stub_name] = scope
 
         # Wrap in the same json_response boundary every statically-defined

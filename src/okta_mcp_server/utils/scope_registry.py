@@ -180,4 +180,11 @@ TOOL_SCOPE_REGISTRY: dict[str, str] = {
     "replace_email_domain":                 "okta.emailDomains.manage",
     "delete_email_domain":                  "okta.emailDomains.manage",
     "verify_email_domain":                  "okta.emailDomains.manage",
+    # ------------------------------------------------------------------
+    # Governance — Access Requests (read-only)
+    # (src/okta_mcp_server/tools/governance/governance.py)
+    # ------------------------------------------------------------------
+    "list_app_request_conditions":          "okta.accessRequests.condition.read",
+    "get_app_request_condition":            "okta.accessRequests.condition.read",
+    "list_catalog_entries":                 "okta.accessRequests.catalog.read",
 }

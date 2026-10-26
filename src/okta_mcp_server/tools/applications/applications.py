@@ -6,7 +6,6 @@
 # See the License for the specific language governing permissions and limitations under the License.
 
 import asyncio
-import json
 from typing import Any, Dict, Optional
 from urllib.parse import urlencode
 
@@ -47,6 +46,7 @@ from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DEACTIVATE_APPLICATION, DELETE_APPLICATION
 from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
+from okta_mcp_server.utils.raw_request import okta_raw_request
 from okta_mcp_server.utils.scope_guard import require_scopes
 from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import validate_ids
@@ -495,38 +495,6 @@ _CATALOG_MAX_PAGES = 500
 _CATALOG_PAGE_DELAY_SECONDS = 0.1
 
 
-async def _catalog_request(
-    client, method: str, url: str, body: Optional[Dict[str, Any]] = None, keep_empty_params: bool = False
-) -> tuple:
-    """Issue a raw request for catalog/OIN endpoints the typed SDK can't serve.
-
-    The typed SDK create path strips the catalog ``name`` key and exposes no
-    catalog-apps surface at all, so these tools go through the request
-    executor directly.
-
-    Args:
-        keep_empty_params: Pass True to forward the body verbatim — by default
-            the SDK's create_request prunes empty-string/list/dict values from
-            the body (``clear_empty_params``).
-
-    Returns:
-        Tuple of ``(response, parsed_body, error)`` — the transport response,
-        the JSON-decoded body (``None`` when the body is empty), and the SDK
-        error (``None`` on success). ``response`` and ``parsed_body`` are
-        ``None`` whenever ``error`` is set.
-    """
-    executor = client.get_request_executor()
-    request, err = await executor.create_request(
-        method=method, url=url, body=body or {}, headers={}, oauth=False, keep_empty_params=keep_empty_params
-    )
-    if err:
-        return None, None, err
-    response, response_body, err = await executor.execute(request)
-    if err:
-        return None, None, err
-    return response, json.loads(response_body) if response_body else None, None
-
-
 def _catalog_url(params: Dict[str, Any]) -> str:
     query_string = urlencode(params)
     return "/api/v1/catalog/apps" + (f"?{query_string}" if query_string else "")
@@ -608,7 +576,7 @@ async def list_catalog_apps(
         page_size = limit if limit else _CATALOG_DEFAULT_PAGE_SIZE
         exhausted_below = min(page_size, _CATALOG_DEFAULT_PAGE_SIZE)
 
-        _, apps, err = await _catalog_request(client, "GET", _catalog_url(query_params))
+        _, apps, err = await okta_raw_request(client, "GET", _catalog_url(query_params), scopes=["okta.apps.read"])
         if err:
             logger.error(f"Okta API error while browsing catalog: {err}")
             return {"error": str(err)}
@@ -637,7 +605,9 @@ async def list_catalog_apps(
             await asyncio.sleep(_CATALOG_PAGE_DELAY_SECONDS)
             next_params = dict(query_params)
             next_params["after"] = cursor
-            _, page, page_err = await _catalog_request(client, "GET", _catalog_url(next_params))
+            _, page, page_err = await okta_raw_request(
+                client, "GET", _catalog_url(next_params), scopes=["okta.apps.read"]
+            )
             if page_err:
                 logger.warning(f"Error fetching catalog page {pages_fetched + 1}: {page_err}")
                 pagination_info["stopped_early"] = True
@@ -704,7 +674,9 @@ async def get_catalog_app(ctx: Context, app_name: str) -> dict:
 
     try:
         client = await get_okta_client(manager)
-        _, app, err = await _catalog_request(client, "GET", f"/api/v1/catalog/apps/{app_name}?expand=schema")
+        _, app, err = await okta_raw_request(
+            client, "GET", f"/api/v1/catalog/apps/{app_name}?expand=schema", scopes=["okta.apps.read"]
+        )
         if err:
             logger.error(f"Okta API error while getting catalog app {app_name}: {err}")
             return {"error": str(err)}
@@ -771,7 +743,9 @@ async def install_oin_app(
 
         # keep_empty_params: some OIN apps require settings fields whose value
         # is legitimately an empty string; the SDK would otherwise prune them.
-        _, app, err = await _catalog_request(client, "POST", url, body=app_body, keep_empty_params=True)
+        _, app, err = await okta_raw_request(
+            client, "POST", url, scopes=["okta.apps.manage"], body=app_body, keep_empty_params=True
+        )
         if err:
             logger.error(f"Okta API error while installing OIN app '{name}': {err}")
             return {"error": str(err)}

@@ -64,7 +64,7 @@ _SCOPE_ERROR_TEMPLATE = (
 )
 
 
-def _scope_error_message(scopes: list[str]) -> str:
+def scope_error_message(scopes: list[str]) -> str:
     """Return the canonical scope-error string for the given missing scopes."""
     return _SCOPE_ERROR_TEMPLATE.format(scopes=", ".join(sorted(scopes)))
 
@@ -80,7 +80,7 @@ def build_scope_error(scopes: list[str], return_type: str = "dict") -> Any:
     Returns:
         ``{"error": "<message>"}`` or ``[{"error": "<message>"}]``.
     """
-    msg = _scope_error_message(scopes)
+    msg = scope_error_message(scopes)
     if return_type == "list":
         return [{"error": msg}]
     return {"error": msg}

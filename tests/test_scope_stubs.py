@@ -19,8 +19,12 @@ to close.
 from __future__ import annotations
 
 import asyncio
+import re
 
-from okta_mcp_server.utils.scope_stubs import _make_stub_fn
+import pytest
+
+from okta_mcp_server.utils.scope_registry import TOOL_SCOPE_REGISTRY
+from okta_mcp_server.utils.scope_stubs import _make_stub_fn, _scope_to_stub_name, _stub_names_by_scope
 
 
 def test_stub_success_returns_json_native_dict():
@@ -97,3 +101,96 @@ def test_register_stubs_wraps_with_json_response(monkeypatch):
         "The function registered via mcp.tool()(...) must be the "
         "json_response-wrapped stub, not the raw closure."
     )
+
+
+# ---------------------------------------------------------------------------
+# Stub naming
+# ---------------------------------------------------------------------------
+
+def _legacy_stub_name(scope: str) -> str:
+    """The pre-governance naming rule (parts [1] and [2] only), kept to pin
+    that every existing three-part scope keeps its published stub name."""
+    parts = scope.split(".")
+    resource_snake = re.sub(r"(?<!^)(?=[A-Z])", "_", parts[1]).lower()
+    return f"{resource_snake}_{parts[2]}_scope_info"
+
+
+def test_existing_three_part_scope_stub_names_unchanged():
+    three_part = {s for s in TOOL_SCOPE_REGISTRY.values() if len(s.split(".")) == 3}
+    assert three_part, "expected the registry to still contain three-part scopes"
+    for scope in three_part:
+        assert _scope_to_stub_name(scope) == _legacy_stub_name(scope), scope
+
+
+@pytest.mark.parametrize(
+    ("scope", "expected"),
+    [
+        ("okta.brands.read", "brands_read_scope_info"),
+        ("okta.deviceAssurance.read", "device_assurance_read_scope_info"),
+        ("okta.emailDomains.manage", "email_domains_manage_scope_info"),
+        ("okta.accessRequests.condition.read", "access_requests_condition_read_scope_info"),
+        ("okta.accessRequests.catalog.read", "access_requests_catalog_read_scope_info"),
+    ],
+)
+def test_stub_name_examples(scope, expected):
+    assert _scope_to_stub_name(scope) == expected
+
+
+def test_four_part_read_and_manage_scopes_get_distinct_names():
+    # The legacy rule mapped both of these to 'access_requests_condition_scope_info'.
+    read = _scope_to_stub_name("okta.accessRequests.condition.read")
+    manage = _scope_to_stub_name("okta.accessRequests.condition.manage")
+    assert read != manage
+    assert _legacy_stub_name("okta.accessRequests.condition.read") == _legacy_stub_name(
+        "okta.accessRequests.condition.manage"
+    )
+
+
+def test_every_registry_scope_has_a_unique_stub_name():
+    names = _stub_names_by_scope(TOOL_SCOPE_REGISTRY.values())
+    assert len(set(names.values())) == len(set(TOOL_SCOPE_REGISTRY.values()))
+
+
+def test_stub_name_collision_raises():
+    with pytest.raises(ValueError, match="collision"):
+        _stub_names_by_scope(["okta.fooBar.read", "okta.foo.bar.read"])
+
+
+def test_register_stubs_uses_full_names_for_governance_scopes(monkeypatch):
+    import okta_mcp_server.utils.scope_stubs as scope_stubs_module
+
+    registered = []
+
+    class _FakeMcp:
+        def tool(self):
+            def _decorator(fn):
+                registered.append(fn.__name__)
+                return fn
+            return _decorator
+
+    class _FakeServerModule:
+        mcp = _FakeMcp()
+
+    monkeypatch.setitem(__import__("sys").modules, "okta_mcp_server.server", _FakeServerModule())
+    monkeypatch.setattr(scope_stubs_module, "SCOPE_STUB_REGISTRY", {})
+    monkeypatch.setenv("OKTA_SCOPES", "okta.apps.read")
+    monkeypatch.setattr(
+        scope_stubs_module,
+        "TOOL_SCOPE_REGISTRY",
+        {
+            "list_applications": "okta.apps.read",
+            "list_app_request_conditions": "okta.accessRequests.condition.read",
+            "list_catalog_entries": "okta.accessRequests.catalog.read",
+        },
+    )
+
+    scope_stubs_module._register_stubs()
+
+    assert sorted(registered) == [
+        "access_requests_catalog_read_scope_info",
+        "access_requests_condition_read_scope_info",
+    ]
+    assert scope_stubs_module.SCOPE_STUB_REGISTRY == {
+        "access_requests_catalog_read_scope_info": "okta.accessRequests.catalog.read",
+        "access_requests_condition_read_scope_info": "okta.accessRequests.condition.read",
+    }
