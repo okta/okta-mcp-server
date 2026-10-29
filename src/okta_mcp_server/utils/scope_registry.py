@@ -57,6 +57,7 @@ TOOL_SCOPE_REGISTRY: dict[str, str] = {
     # ------------------------------------------------------------------
     "list_group_rules":                     "okta.groups.read",
     "get_group_rule":                       "okta.groups.read",
+    "export_group_rules_csv":               "okta.groups.read",
     "create_group_rule":                    "okta.groups.manage",
     "update_group_rule":                    "okta.groups.manage",
     "delete_group_rule":                    "okta.groups.manage",
