@@ -10,9 +10,11 @@ import sys
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 from loguru import logger
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from okta_mcp_server.utils.auth.auth_manager import OktaAuthManager
 from okta_mcp_server.utils.auth.token_refresh import (
@@ -60,11 +62,36 @@ async def okta_authorisation_flow(server: FastMCP) -> AsyncIterator[OktaAppConte
     yield OktaAppContext(okta_auth_manager=manager)
 
 
+def _transport_security(public_url: str | None) -> TransportSecuritySettings:
+    """Allow only the Host and Origin headers this server is really reached by.
+
+    FastMCP turns DNS rebinding protection on only when bound to localhost, so a server bound to
+    0.0.0.0 behind a reverse proxy would accept any Host. Here it is always on: localhost (for
+    direct access and health checks), the host of OKTA_MCP_PUBLIC_URL (which a reverse proxy such
+    as Caddy forwards unchanged), and any extra hosts in OKTA_MCP_ALLOWED_HOSTS. Browsers send an
+    Origin header, so only the public URL's origin is accepted from them.
+    """
+    allowed_hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+    allowed_origins = []
+    if public_url:
+        parts = urlsplit(public_url)
+        allowed_hosts.append(parts.netloc)
+        allowed_origins.append(f"{parts.scheme}://{parts.netloc}")
+    allowed_hosts.extend(os.environ.get("OKTA_MCP_ALLOWED_HOSTS", "").split())
+    return TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=allowed_hosts,
+        allowed_origins=allowed_origins,
+    )
+
+
 def _server_options() -> dict:
     """Build FastMCP options for the configured transport and auth mode."""
+    public_url = os.environ.get("OKTA_MCP_PUBLIC_URL") or None
     options = {
         "host": os.environ.get("OKTA_MCP_HOST", "127.0.0.1"),
         "port": int(os.environ.get("OKTA_MCP_PORT", "8000")),
+        "transport_security": _transport_security(public_url),
     }
     if AUTH_MODE == "user":
         org_url = os.environ.get("OKTA_ORG_URL")
@@ -76,7 +103,7 @@ def _server_options() -> dict:
             org_url=org_url,
             client_id=client_id,
             scopes=os.environ.get("OKTA_SCOPES", "").split(),
-            public_url=os.environ.get("OKTA_MCP_PUBLIC_URL") or None,
+            public_url=public_url,
         )
         options.update(auth=auth, token_verifier=token_verifier)
     return options
