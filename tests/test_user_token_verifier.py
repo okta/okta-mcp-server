@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -88,14 +89,102 @@ class TestVerifyToken:
             assert await verifier.verify_token(_token()) is None
 
     @pytest.mark.asyncio
-    async def test_does_not_cache_rejections(self):
+    @pytest.mark.parametrize("status_code", [401, 403])
+    async def test_remembers_tokens_okta_rejected(self, status_code):
+        verifier = OktaUserTokenVerifier(ORG_URL, CLIENT_ID)
+        token = _token()
+        patcher, client = _patch_userinfo(_userinfo_response(status_code=status_code))
+        with patcher:
+            assert await verifier.verify_token(token) is None
+            assert await verifier.verify_token(token) is None
+        client.get.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_forgets_a_rejection_after_a_minute(self):
         verifier = OktaUserTokenVerifier(ORG_URL, CLIENT_ID)
         token = _token()
         patcher, client = _patch_userinfo(_userinfo_response(status_code=401))
         with patcher:
             await verifier.verify_token(token)
+            with patch("okta_mcp_server.utils.auth.user_token_verifier.time.time", return_value=time.time() + 61):
+                await verifier.verify_token(token)
+        assert client.get.await_count == 2
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status_code", [429, 500, 503])
+    async def test_does_not_remember_transient_failures(self, status_code):
+        verifier = OktaUserTokenVerifier(ORG_URL, CLIENT_ID)
+        token = _token()
+        patcher, client = _patch_userinfo(_userinfo_response(status_code=status_code))
+        with patcher:
+            await verifier.verify_token(token)
             await verifier.verify_token(token)
         assert client.get.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_does_not_remember_unreachable_okta(self):
+        verifier = OktaUserTokenVerifier(ORG_URL, CLIENT_ID)
+        token = _token()
+        patcher, client = _patch_userinfo(side_effect=httpx.ConnectError("boom"))
+        with patcher:
+            await verifier.verify_token(token)
+            await verifier.verify_token(token)
+        assert client.get.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_caps_lookups_for_unseen_tokens(self):
+        verifier = OktaUserTokenVerifier(ORG_URL, CLIENT_ID, lookups_per_second=0.0, lookup_burst=2)
+        known = _token(jti="known")
+        patcher, client = _patch_userinfo(_userinfo_response(status_code=401))
+        with patcher:
+            for i in range(5):
+                assert await verifier.verify_token(_token(jti=f"forged-{i}")) is None
+        assert client.get.await_count == 2
+
+        patcher, client = _patch_userinfo(_userinfo_response())
+        with patcher:
+            assert await verifier.verify_token(known) is None
+        client.get.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_verified_tokens_keep_working_when_the_budget_is_spent(self):
+        verifier = OktaUserTokenVerifier(ORG_URL, CLIENT_ID, lookups_per_second=0.0, lookup_burst=1)
+        token = _token()
+        patcher, _ = _patch_userinfo(_userinfo_response())
+        with patcher:
+            assert await verifier.verify_token(token) is not None
+            assert await verifier.verify_token(_token(jti="forged")) is None
+            assert await verifier.verify_token(token) is not None
+
+    @pytest.mark.asyncio
+    async def test_concurrent_requests_share_one_lookup(self):
+        verifier = OktaUserTokenVerifier(ORG_URL, CLIENT_ID)
+        token = _token()
+        release = asyncio.Event()
+
+        async def slow_userinfo(*args, **kwargs):
+            await release.wait()
+            return _userinfo_response()
+
+        patcher, client = _patch_userinfo(side_effect=slow_userinfo)
+        with patcher:
+            pending = [asyncio.create_task(verifier.verify_token(token)) for _ in range(5)]
+            await asyncio.sleep(0)
+            release.set()
+            results = await asyncio.gather(*pending)
+
+        assert all(r is not None for r in results)
+        client.get.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_remembers_a_uid_mismatch(self):
+        verifier = OktaUserTokenVerifier(ORG_URL, CLIENT_ID)
+        token = _token()
+        patcher, client = _patch_userinfo(_userinfo_response(sub="00uSOMEONEELSE"))
+        with patcher:
+            await verifier.verify_token(token)
+            await verifier.verify_token(token)
+        client.get.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_rejects_when_userinfo_unreachable(self):
