@@ -186,6 +186,62 @@ class TestBroker:
 
         assert await broker.access_token_for(REFRESH_TOKEN) is None
 
+    @pytest.mark.asyncio
+    async def test_a_non_json_error_body_returns_none(self):
+        broker, _ = _broker(lambda r: httpx.Response(502, text="<html>Bad Gateway</html>"))
+
+        assert await broker.access_token_for(REFRESH_TOKEN) is None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            httpx.ConnectError("boom"),
+            httpx.Response(503, json={"error": "server_error"}),
+            httpx.Response(502, text="<html>Bad Gateway</html>"),
+            httpx.Response(200, json={"token_type": "Bearer"}),
+        ],
+        ids=["transport-error", "5xx", "non-json", "no-access-token"],
+    )
+    async def test_a_transient_failure_keeps_the_rotated_refresh_token(self, failure):
+        def raise_failure(request: httpx.Request) -> httpx.Response:
+            if isinstance(failure, Exception):
+                raise failure
+            return failure
+
+        handler = MagicMock(
+            side_effect=[
+                _token_response("at-1", expires_in=30, refresh_token="rt-rotated"),
+                raise_failure,
+                _token_response("at-3"),
+            ]
+        )
+
+        def dispatch(request: httpx.Request):
+            result = handler(request)
+            return result(request) if callable(result) else result
+
+        broker, requests = _broker(dispatch)
+        await broker.access_token_for(REFRESH_TOKEN)
+
+        # A static client keeps presenting the original value through the failure.
+        assert await broker.access_token_for(REFRESH_TOKEN) is None
+        result = await broker.access_token_for(REFRESH_TOKEN)
+
+        assert result.access_token == "at-3"
+        assert httpx.QueryParams(requests[2].read().decode())["refresh_token"] == "rt-rotated"
+
+    @pytest.mark.asyncio
+    async def test_a_zero_expires_in_is_not_treated_as_an_hour(self):
+        handler = AsyncMock(side_effect=[_token_response("at-1", expires_in=0), _token_response("at-2")])
+        broker, requests = _broker(handler)
+
+        await broker.access_token_for(REFRESH_TOKEN)
+        second = await broker.access_token_for(REFRESH_TOKEN)
+
+        assert second.access_token == "at-2"
+        assert len(requests) == 2
+
 
 def _scope(headers: dict[str, str], scope_type: str = "http") -> dict:
     return {

@@ -42,6 +42,8 @@ value for the caller's session.
 _DEFAULT_EXPIRES_IN_SECONDS = 3600.0
 _REFRESH_MARGIN_SECONDS = 60
 _MAX_SESSIONS = 1024
+_REFUSED = object()
+"""Returned by the token endpoint call when Okta rejected the refresh token itself."""
 
 Receive = Callable[[], Awaitable[dict[str, Any]]]
 Send = Callable[[dict[str, Any]], Awaitable[None]]
@@ -128,18 +130,22 @@ class OktaRefreshTokenBroker:
 
     async def _refresh(self, session: _Session) -> RefreshedToken | None:
         payload = await self._post_for_token(session.refresh_token)
-        if payload is None:
+        if payload is _REFUSED:
             self._drop(session)
+            return None
+        if payload is None:
+            # Transient failure: keep the session, since it may hold the only copy of a rotated
+            # refresh token and the caller would otherwise be locked out for good.
             return None
 
         access_token = payload.get("access_token")
         if not access_token:
-            logger.warning("Okta refresh response carried no access_token; dropping the caller session")
-            self._drop(session)
+            logger.warning("Okta refresh response carried no access_token; keeping the caller session")
             return None
 
+        expires_in = payload.get("expires_in")
         session.access_token = access_token
-        session.expires_at = time.time() + float(payload.get("expires_in") or _DEFAULT_EXPIRES_IN_SECONDS)
+        session.expires_at = time.time() + float(_DEFAULT_EXPIRES_IN_SECONDS if expires_in is None else expires_in)
 
         rotated = payload.get("refresh_token")
         is_rotated = bool(rotated) and rotated != session.refresh_token
@@ -151,7 +157,10 @@ class OktaRefreshTokenBroker:
         logger.info("Minted a fresh Okta access token for a caller")
         return RefreshedToken(access_token=access_token, rotated_refresh_token=rotated if is_rotated else None)
 
-    async def _post_for_token(self, refresh_token: str) -> dict | None:
+    async def _post_for_token(self, refresh_token: str) -> dict | object | None:
+        """Run the grant: the token payload, ``_REFUSED`` if Okta rejected the refresh token
+        itself, or None for any other failure (network error, 5xx, unparseable body).
+        """
         data = {
             "client_id": self.client_id,
             "client_secret": self.client_secret,
@@ -168,13 +177,24 @@ class OktaRefreshTokenBroker:
             if self._http_client is None:
                 await client.aclose()
 
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            logger.warning(f"Okta token endpoint returned HTTP {response.status_code} with a non-JSON body")
+            return None
+
         if response.status_code != 200:
+            error = body.get("error", "")
+            if response.status_code == 400 and error == "invalid_grant":
+                logger.warning("Okta refused the caller's refresh token (invalid_grant); dropping the caller session")
+                return _REFUSED
             logger.warning(
-                f"Okta rejected the refresh_token grant (HTTP {response.status_code} "
-                f"{response.json().get('error', '')}); dropping the caller session"
+                f"Okta token endpoint failed (HTTP {response.status_code} {error}); keeping the caller session"
             )
             return None
-        return response.json()
+        return body
 
 
 class OktaRefreshTokenMiddleware:
