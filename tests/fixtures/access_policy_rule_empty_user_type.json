@@ -1,0 +1,30 @@
+{
+  "id": "rul000000000000000001",
+  "name": "Example Control Access Policy Rule",
+  "type": "ACCESS_POLICY",
+  "status": "ACTIVE",
+  "priority": 1,
+  "system": false,
+  "created": "2026-01-02T03:04:05.000Z",
+  "lastUpdated": "2026-01-02T03:04:05.000Z",
+  "conditions": {
+    "people": {
+      "groups": {
+        "include": [
+          "00g000000000000000000"
+        ]
+      }
+    },
+    "userType": {
+      "exclude": [],
+      "include": [
+        "otyp00000000000000000"
+      ]
+    }
+  },
+  "_links": {
+    "self": {
+      "href": "https://example.invalid/api/v1/policies/rst000000000000000001/rules/rul000000000000000001"
+    }
+  }
+}
