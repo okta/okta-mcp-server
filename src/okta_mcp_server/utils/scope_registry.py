@@ -53,6 +53,17 @@ TOOL_SCOPE_REGISTRY: dict[str, str] = {
     "add_user_to_group":                    "okta.groups.manage",
     "remove_user_from_group":               "okta.groups.manage",
     # ------------------------------------------------------------------
+    # Group Rules  (src/okta_mcp_server/tools/group_rules/group_rules.py)
+    # ------------------------------------------------------------------
+    "list_group_rules":                     "okta.groups.read",
+    "get_group_rule":                       "okta.groups.read",
+    "export_group_rules_csv":               "okta.groups.read",
+    "create_group_rule":                    "okta.groups.manage",
+    "update_group_rule":                    "okta.groups.manage",
+    "delete_group_rule":                    "okta.groups.manage",
+    "activate_group_rule":                  "okta.groups.manage",
+    "deactivate_group_rule":                "okta.groups.manage",
+    # ------------------------------------------------------------------
     # Applications  (src/okta_mcp_server/tools/applications/applications.py)
     # ------------------------------------------------------------------
     "list_applications":                    "okta.apps.read",

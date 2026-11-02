@@ -199,4 +199,6 @@ def mock_okta_client():
     client.deactivate_application.return_value = (None, None)
     client.deactivate_policy.return_value = (None, None)
     client.deactivate_policy_rule.return_value = (None, None)
+    client.delete_group_rule.return_value = (None, None)
+    client.deactivate_group_rule.return_value = (None, None)
     return client
