@@ -59,6 +59,11 @@ from typing import Any, Callable
 
 from loguru import logger
 
+from okta_mcp_server.utils.tolerant_deserialization import (
+    get_deserialization_warnings,
+    reset_deserialization_warnings,
+)
+
 
 # ---------------------------------------------------------------------------
 # Module constants
@@ -316,6 +321,46 @@ def none_body_error(tool_name: str, action: str, hint: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Deserialization warnings
+# ---------------------------------------------------------------------------
+
+#: Key under which per-request deserialization warnings are attached to a
+#: dict-shaped tool result.
+_WARNINGS_KEY = "warnings"
+
+
+def _attach_deserialization_warnings(result: Any) -> Any:
+    """Attach any per-item deserialization warnings to a dict-shaped ``result``.
+
+    ``okta_mcp_server.utils.tolerant_deserialization`` drops list elements that
+    the SDK's generated models reject and records each one in a contextvar.  The
+    operator still needs to know their inventory is incomplete, so the collected
+    warnings ride out on the tool's own JSON payload.
+
+    Non-dict results (a bare list, a string, ``None``) are returned untouched —
+    there is nowhere to put the key without changing the response shape.  An
+    existing ``"warnings"`` key set by the tool itself is never overwritten;
+    deserialization warnings are appended to it when it is already a list, and
+    otherwise left alone.
+    """
+    warnings = get_deserialization_warnings()
+    if not warnings or not isinstance(result, dict):
+        return result
+
+    existing = result.get(_WARNINGS_KEY)
+    if existing is None and _WARNINGS_KEY not in result:
+        result[_WARNINGS_KEY] = warnings
+    elif isinstance(existing, list):
+        result[_WARNINGS_KEY] = [*existing, *warnings]
+    else:
+        logger.warning(
+            f"[json_response] not clobbering existing non-list {_WARNINGS_KEY!r} key; "
+            f"{len(warnings)} deserialization warning(s) dropped from the response"
+        )
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Decorator
 # ---------------------------------------------------------------------------
 
@@ -327,7 +372,12 @@ def json_response(fn: Callable) -> Callable:
     ``@validate_ids``) then only ever observe JSON-native data.
 
     Behavior:
-      * Success → ``to_jsonable(result)`` is returned.
+      * The per-request deserialization-warning collection is reset before
+        ``fn`` runs, so warnings never leak between tool calls.
+      * Success → ``to_jsonable(result)`` is returned, with any warnings raised
+        by :mod:`okta_mcp_server.utils.tolerant_deserialization` attached under
+        a ``"warnings"`` key when the result is a ``dict``.  See
+        :func:`_attach_deserialization_warnings`.
       * ANY exception raised while running ``fn`` (not only a
         :func:`to_jsonable` failure) → :func:`_failure_envelope` is returned
         as a normal value and the full traceback is logged via
@@ -343,8 +393,9 @@ def json_response(fn: Callable) -> Callable:
 
         @functools.wraps(fn)
         async def async_wrapper(*args, **kwargs):
+            reset_deserialization_warnings()
             try:
-                return to_jsonable(await fn(*args, **kwargs))
+                return _attach_deserialization_warnings(to_jsonable(await fn(*args, **kwargs)))
             except Exception as exc:  # noqa: BLE001 — boundary safeguard
                 logger.exception(f"[json_response] {fn.__name__} failed to serialize response")
                 return _failure_envelope(fn.__name__, exc)
@@ -353,8 +404,9 @@ def json_response(fn: Callable) -> Callable:
 
     @functools.wraps(fn)
     def sync_wrapper(*args, **kwargs):
+        reset_deserialization_warnings()
         try:
-            return to_jsonable(fn(*args, **kwargs))
+            return _attach_deserialization_warnings(to_jsonable(fn(*args, **kwargs)))
         except Exception as exc:  # noqa: BLE001 — boundary safeguard
             logger.exception(f"[json_response] {fn.__name__} failed to serialize response")
             return _failure_envelope(fn.__name__, exc)
