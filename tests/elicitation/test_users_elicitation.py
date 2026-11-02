@@ -5,7 +5,7 @@
 # Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and limitations under the License.
 
-"""Tests for user deactivation and deletion with elicitation support."""
+"""Tests for user lifecycle operations including unlock, deactivation, and deletion."""
 
 from __future__ import annotations
 
@@ -16,10 +16,52 @@ import pytest
 from okta_mcp_server.tools.users.users import (
     deactivate_user,
     delete_deactivated_user,
+    unlock_user,
 )
 
 
 USER_ID = "00u1234567890ABCDEF"
+
+
+# ===================================================================
+# unlock_user
+# ===================================================================
+
+class TestUnlockUser:
+    """Tests for unlock_user (non-destructive, no elicitation required)."""
+
+    @pytest.mark.asyncio
+    @patch("okta_mcp_server.tools.users.users.get_okta_client")
+    async def test_unlock_success(self, mock_get_client, ctx_elicit_accept_true, mock_okta_client):
+        """Unlock succeeds and returns a success message."""
+        mock_get_client.return_value = mock_okta_client
+
+        result = await unlock_user(user_id=USER_ID, ctx=ctx_elicit_accept_true)
+
+        mock_okta_client.unlock_user.assert_awaited_once_with(USER_ID)
+        assert "unlocked successfully" in result[0]
+
+    @pytest.mark.asyncio
+    @patch("okta_mcp_server.tools.users.users.get_okta_client")
+    async def test_unlock_okta_api_error(self, mock_get_client, ctx_elicit_accept_true):
+        """Okta API error is surfaced to the caller."""
+        client = AsyncMock()
+        client.unlock_user.return_value = (None, "API Error: user is not locked out")
+        mock_get_client.return_value = client
+
+        result = await unlock_user(user_id=USER_ID, ctx=ctx_elicit_accept_true)
+
+        assert "Error" in result[0]
+
+    @pytest.mark.asyncio
+    @patch("okta_mcp_server.tools.users.users.get_okta_client")
+    async def test_unlock_exception(self, mock_get_client, ctx_elicit_accept_true):
+        """Generic exception is surfaced to the caller."""
+        mock_get_client.side_effect = Exception("Connection refused")
+
+        result = await unlock_user(user_id=USER_ID, ctx=ctx_elicit_accept_true)
+
+        assert "Exception" in result[0]
 
 
 # ===================================================================
