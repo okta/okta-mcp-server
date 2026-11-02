@@ -1,6 +1,31 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
+## v1.1.8
+
+### Security
+- Cleared all **28 open Dependabot security alerts** (2 critical, 11 high, 14 medium, 1 low) in a single re-resolve. Four of the five affected packages are transitive, so their floors were raised in `[tool.uv] constraint-dependencies` — the same approach as v1.1.5 and v1.1.7, which bounds a package without declaring it a direct dependency and keeps the floor durable against a future `uv lock`:
+
+  | Floor | Locked | Reached via | Alerts |
+  | --- | --- | --- | --- |
+  | `pyjwt>=2.15.1` | 2.13.0 → **2.15.1** | `mcp[crypto]`, `okta`; also imported by `utils/auth/auth_manager.py` | 15, incl. `CVE-2026-102268` (critical) |
+  | `aiohttp>=3.14.5` | 3.14.3 → **3.14.5** | `okta` (its async HTTP layer) | 8 |
+  | `urllib3>=2.8.0` | 2.7.0 → **2.8.0** | `requests` ← `okta`, and our own `requests` dep | 3 |
+  | `certifi>=2026.10.23` | 2025.4.26 → **2026.10.23** | `requests`, `httpx`/`httpcore` ← `mcp` | 1, `GHSA-6q48-6c7w-9gw2` (critical) |
+
+  Also updates `yarl` 1.20.0 → **1.25.1** (pulled by `aiohttp`). Locked graph stays at 79 packages; no source changes; suite passes unchanged (**558 tests**).
+- Two advisories have misleading alert metadata:
+  - **`GHSA-gvp8-978c-rx2q`** (`CVE-2026-103001`, PyJWT) reports no patched version upstream, but 2.15.1 does fix it — verified behaviourally: `jwt.decode()` no longer mutates a caller-supplied `options` dict. This server was never exposed regardless, since `_token_is_unexpired` passes a fresh literal dict per call and never reuses one, which the advisory requires.
+  - **`GHSA-84m7-p3x7-pcfv`** (MCP Python SDK) is unbounded session accumulation in the **Streamable HTTP** transport. This server is **stdio-only** (`server.py` calls bare `mcp.run()`), so it was never exposed — the bump is hygiene, not remediation.
+
+### Improvements
+- Raised the `mcp[cli]` floor from **1.28.1 → 1.30.0** in `[project] dependencies`, retaining the `<2.0.0` major cap. Unlike the transitive floors above, `mcp` is a declared dependency, so this bump also reaches PyPI consumers. Verified against a real 1.30.0 install: all six imported symbols still resolve, `lifespan=` remains a `FastMCP.__init__` parameter, and the private `_tool_manager` API that `utils/scope_guard.py` uses for startup pruning still works (exercised end-to-end — 129 tools registered, 103 pruned, 26 enabled).
+  - Future change, deliberately not included: 1.30.0 adds a **public `remove_tool()`**, which would resolve the standing TODO in `utils/scope_guard.py` about using the private `_tool_manager`. It alters the scope-pruning path, so it belongs in its own change rather than a security bump.
+- Bumped the `Version` label in the `Dockerfile` to **1.1.8**.
+
+### Documentation
+- Scope note: `[tool.uv] constraint-dependencies` is uv-specific config and is **not** carried in published wheel metadata, so PyPI installs (`uvx`, `pipx`, `pip`) resolve fresh from `[project] dependencies` and do not inherit the transitive floors above. Those protect the Docker image, CI, and repo-based installs; closing the gap for PyPI consumers needs the upstream bumps in `okta` (`aiohttp`, `PyJWT`, `requests`).
+
 ## v1.1.7
 
 ### Security
