@@ -201,6 +201,159 @@ async def get_application(ctx: Context, app_id: str, expand: Optional[str] = Non
 
 
 @mcp.tool()
+@require_scopes("okta.apps.read", error_return_type="dict")
+@validate_ids("app_id", error_return_type="dict")
+@json_response
+async def list_application_group_assignments(
+    ctx: Context,
+    app_id: str,
+    q: Optional[str] = None,
+    after: Optional[str] = None,
+    limit: Optional[int] = None,
+    expand: Optional[str] = None,
+    fetch_all: bool = False,
+) -> dict:
+    """List all groups assigned to an application in the Okta organization.
+
+    This is the reverse of list_group_apps: given an application, it returns the
+    groups assigned to it.
+
+    Parameters:
+        app_id (str, required): The ID of the application
+        q (str, optional): Filters assigned groups by name (startsWith match on the group name)
+        after (str, optional): Specifies the pagination cursor for the next page of results
+        limit (int, optional): Specifies the number of results per page (min 20, max 200)
+        expand (str, optional): Use "group" to embed the assigned group object, or "metadata" to embed
+        the group assignment metadata, in the `_embedded` property
+        fetch_all (bool, optional): If True, automatically fetch all pages of results. Default: False.
+
+    Examples:
+        For pagination:
+        - First call: list_application_group_assignments(app_id="0oa...")
+        - Next page: list_application_group_assignments(app_id="0oa...", after="cursor_value")
+        - All pages: list_application_group_assignments(app_id="0oa...", fetch_all=True)
+
+    Returns:
+        Dict containing:
+        - items: List of application group assignment objects (each has the group `id` and `priority`)
+        - total_fetched: Number of group assignments returned
+        - has_more: Boolean indicating if more results are available
+        - next_cursor: Cursor for the next page (if has_more is True)
+        - fetch_all_used: Boolean indicating if fetch_all was used
+        - pagination_info: Additional pagination metadata (when fetch_all=True)
+    """
+    logger.info(f"Listing groups assigned to application: {app_id}")
+    logger.debug(f"Query parameters: q='{q}', after='{after}', limit={limit}, fetch_all={fetch_all}")
+
+    # Validate limit parameter range
+    if limit is not None:
+        if limit < 20:
+            logger.warning(f"Limit {limit} is below minimum (20), setting to 20")
+            limit = 20
+        elif limit > 200:
+            logger.warning(f"Limit {limit} exceeds maximum (200), setting to 200")
+            limit = 200
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        effective_limit = 200 if fetch_all else limit
+        query_params = build_query_params(q=q, after=after, limit=effective_limit, expand=expand)
+
+        logger.debug(f"Calling Okta API to list group assignments for application {app_id}")
+        assignments, response, err = await client.list_application_group_assignments(app_id, **query_params)
+
+        if err:
+            logger.error(f"Okta API error while listing group assignments for application {app_id}: {err}")
+            return {"error": str(err)}
+
+        if not assignments:
+            logger.info(f"No groups assigned to application {app_id}")
+            return create_paginated_response([], response, fetch_all_used=fetch_all)
+
+        _has_more = (hasattr(response, "has_next") and response.has_next()) or bool(extract_after_cursor(response))
+        if fetch_all and response and _has_more:
+            logger.info(f"fetch_all=True, auto-paginating from initial {len(assignments)} group assignments")
+
+            async def _next_page(cursor):
+                p = dict(query_params)
+                p["after"] = cursor
+                return await client.list_application_group_assignments(app_id, **p)
+
+            async def _on_page(pages, total):
+                await ctx.info(f"Fetching group assignments... {total} fetched so far ({pages} pages)")
+
+            all_assignments, pagination_info = await paginate_all_results(
+                response, assignments, next_page_fn=_next_page, on_page=_on_page
+            )
+            logger.info(
+                f"Successfully retrieved {len(all_assignments)} group assignments for application {app_id} "
+                f"across {pagination_info['pages_fetched']} pages"
+            )
+            return create_paginated_response(
+                all_assignments, response, fetch_all_used=True, pagination_info=pagination_info
+            )
+
+        logger.info(f"Successfully retrieved {len(assignments)} group assignments for application {app_id}")
+        return create_paginated_response(assignments, response, fetch_all_used=fetch_all)
+    except Exception as e:
+        logger.error(f"Exception while listing group assignments for application {app_id}: {type(e).__name__}: {e}")
+        return {"error": str(e)}
+
+
+@mcp.tool()
+@require_scopes("okta.apps.read")
+@validate_ids("app_id", "group_id", error_return_type="dict")
+@json_response
+async def get_application_group_assignment(
+    ctx: Context, app_id: str, group_id: str, expand: Optional[str] = None
+) -> Any:
+    """Get the assignment of a group to an application in the Okta organization.
+
+    Parameters:
+        app_id (str, required): The ID of the application
+        group_id (str, required): The ID of the assigned group
+        expand (str, optional): Use "group" to embed the assigned group object, or "metadata" to embed
+        the group assignment metadata, in the `_embedded` property
+
+    Returns:
+        Dictionary containing the application group assignment or error information.
+    """
+    logger.info(f"Getting assignment of group {group_id} to application {app_id}")
+
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+
+        query_params = {}
+        if expand:
+            query_params["expand"] = expand
+
+        assignment, _, err = await client.get_application_group_assignment(app_id, group_id, **query_params)
+
+        if err:
+            logger.error(f"Okta API error while getting group {group_id} assignment for application {app_id}: {err}")
+            return {"error": str(err)}
+
+        if assignment is None:
+            return none_body_error(
+                "get_application_group_assignment",
+                f"retrieving the assignment of group {group_id!r} to application {app_id!r}",
+                "Verify the IDs with list_application_group_assignments().",
+            )
+
+        logger.info(f"Successfully retrieved group {group_id} assignment for application {app_id}")
+        return assignment
+    except Exception as e:
+        logger.error(
+            f"Exception while getting group {group_id} assignment for application {app_id}: {type(e).__name__}: {e}"
+        )
+        return {"error": str(e)}
+
+
+@mcp.tool()
 @require_scopes("okta.apps.manage")
 @json_response
 async def create_application(ctx: Context, app_config: Dict[str, Any], activate: bool = True) -> Any:

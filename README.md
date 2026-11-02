@@ -594,6 +594,8 @@ The Okta Open Source MCP Server provides the following tools for LLMs to interac
 | ----------------------------- | ------------------------------------------------- |---------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `list_applications`           | List all applications in your Okta organization  | - `Show me the applications in my Okta org` <br> - `Find applications with 'API' in their name` <br> - `What SSO applications do we have configured?`         |
 | `get_application`             | Get detailed information about a specific app    | - `Show me details for the Salesforce application` <br> - `What are the callback URLs for our mobile app?` <br> - `Get the client ID for our web application` |
+| `list_application_group_assignments` | List the groups assigned to an application (reverse of `list_group_apps`) | - `Which groups are assigned to the Salesforce application?` <br> - `Who has access to our HR app via group assignment?` |
+| `get_application_group_assignment` | Get a single group's assignment to an application | - `Is the Engineering group assigned to the Jira app?` <br> - `Show the assignment priority of the Sales group on Salesforce` |
 | `create_application`          | Create a new application                          | - `Create a new SAML application for our HR system` <br> - `Set up a new API service application` <br> - `Add a mobile app integration`                       |
 | `update_application`          | Update an existing application                    | - `Update the callback URLs for our web app` <br> - `Change the logo for the Salesforce application` <br> - `Modify the SAML settings for our HR system`      |
 | `delete_application`          | Delete an application (prompts for confirmation)  | - `Delete the old legacy application` <br> - `Remove the unused test application` <br> - `Clean up deprecated integrations`                                   |
@@ -773,7 +775,7 @@ The Okta Open Source MCP Server uses a **scope-based tool loading** mechanism to
 | `okta.users.manage` | `create_user`, `update_user`, `deactivate_user`, `delete_deactivated_user` |
 | `okta.groups.read` | `list_groups`, `get_group`, `list_group_users`, `list_group_apps` |
 | `okta.groups.manage` | `create_group`, `update_group`, `delete_group`, `add_user_to_group`, `remove_user_from_group` |
-| `okta.apps.read` | `list_applications`, `get_application`, `list_catalog_apps`, `get_catalog_app` |
+| `okta.apps.read` | `list_applications`, `get_application`, `list_application_group_assignments`, `get_application_group_assignment`, `list_catalog_apps`, `get_catalog_app` |
 | `okta.apps.manage` | `create_application`, `update_application`, `delete_application`, `activate_application`, `deactivate_application`, `install_oin_app` |
 | `okta.policies.read` | `list_policies`, `get_policy`, `list_policy_rules`, `get_policy_rule` |
 | `okta.policies.manage` | `create_policy`, `update_policy`, `delete_policy`, `activate_policy`, `deactivate_policy`, `create_policy_rule`, `update_policy_rule`, `delete_policy_rule`, `activate_policy_rule`, `deactivate_policy_rule` |
