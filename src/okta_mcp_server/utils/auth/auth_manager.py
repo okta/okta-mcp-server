@@ -67,7 +67,17 @@ class OktaAuthManager:
             logger.debug(f"Added https:// prefix to org_url: {self.org_url}")
 
         logger.info(f"OktaAuthManager initialized with org_url: {self.org_url}, client_id: {self.client_id}")
+        logger.debug(f"Keyring service for this org and client: {self.keyring_service}")
         logger.debug(f"Configured scopes: {self.scopes}")
+
+    @property
+    def keyring_service(self) -> str:
+        """Keyring service name for this org and client.
+
+        Tokens are stored per org URL and client ID, so two server configs (for example a
+        sandbox org and a production org) don't overwrite each other's tokens.
+        """
+        return f"{SERVICE_NAME}:{self.org_url.rstrip('/')}:{self.client_id}"
 
     def _get_client_assertion(self) -> str:
         """Generate a JWT client assertion for browserless authentication."""
@@ -136,7 +146,7 @@ class OktaAuthManager:
 
                 if access_token:
                     logger.info("Successfully obtained access token via browserless authentication")
-                    keyring.set_password(SERVICE_NAME, "api_token", access_token)
+                    keyring.set_password(self.keyring_service, "api_token", access_token)
 
                     # Note: Client credentials flow doesn't provide refresh tokens
                     logger.debug("Note: Client credentials flow does not provide refresh tokens")
@@ -208,11 +218,11 @@ class OktaAuthManager:
 
                 if response.status_code == 200 and "access_token" in resp_json:
                     logger.info("Successfully obtained access token")
-                    keyring.set_password(SERVICE_NAME, "api_token", resp_json["access_token"])
+                    keyring.set_password(self.keyring_service, "api_token", resp_json["access_token"])
 
                     if "refresh_token" in resp_json:
                         logger.debug("Refresh token received and stored")
-                        keyring.set_password(SERVICE_NAME, "refresh_token", resp_json["refresh_token"])
+                        keyring.set_password(self.keyring_service, "refresh_token", resp_json["refresh_token"])
 
                     return resp_json["access_token"]
 
@@ -241,7 +251,7 @@ class OktaAuthManager:
         """Attempt to refresh the access token using the stored refresh token."""
         logger.info("Attempting to refresh access token")
 
-        refresh_token = keyring.get_password(SERVICE_NAME, "refresh_token")
+        refresh_token = keyring.get_password(self.keyring_service, "refresh_token")
         if not refresh_token:
             logger.warning("No refresh token available")
             return False
@@ -262,11 +272,11 @@ class OktaAuthManager:
 
             if response.status_code == 200:
                 resp_json = response.json()
-                keyring.set_password(SERVICE_NAME, "api_token", resp_json["access_token"])
+                keyring.set_password(self.keyring_service, "api_token", resp_json["access_token"])
 
                 if "refresh_token" in resp_json:
                     logger.debug("New refresh token received and stored")
-                    keyring.set_password(SERVICE_NAME, "refresh_token", resp_json["refresh_token"])
+                    keyring.set_password(self.keyring_service, "refresh_token", resp_json["refresh_token"])
 
                 logger.info("Token refreshed successfully")
                 return True
@@ -322,7 +332,7 @@ class OktaAuthManager:
         """
         logger.debug("Checking token validity")
 
-        api_token = keyring.get_password(SERVICE_NAME, "api_token")
+        api_token = keyring.get_password(self.keyring_service, "api_token")
 
         if api_token and self._token_is_unexpired(api_token):
             logger.debug("Cached token is valid")
@@ -339,7 +349,7 @@ class OktaAuthManager:
                 logger.warning("Token refresh failed or unavailable; initiating re-authentication")
                 await self.authenticate()
 
-        return keyring.get_password(SERVICE_NAME, "api_token") is not None
+        return keyring.get_password(self.keyring_service, "api_token") is not None
 
     @staticmethod
     def _token_is_unexpired(token: str) -> bool:
@@ -374,7 +384,7 @@ class OktaAuthManager:
         Distinguishes a true cache hit from a refresh/re-auth that just minted a token,
         so callers (e.g. the lifespan handler) can log accurately.
         """
-        api_token = keyring.get_password(SERVICE_NAME, "api_token")
+        api_token = keyring.get_password(self.keyring_service, "api_token")
         return bool(api_token and self._token_is_unexpired(api_token))
 
     def clear_tokens(self):
@@ -382,13 +392,13 @@ class OktaAuthManager:
         logger.info("Clearing stored tokens")
 
         try:
-            keyring.delete_password(SERVICE_NAME, "api_token")
+            keyring.delete_password(self.keyring_service, "api_token")
             logger.debug("API token deleted from keyring")
         except keyring.backend.errors.KeyringError as e:
             logger.warning(f"Failed to delete api_token from keyring: {e}")
 
         try:
-            keyring.delete_password(SERVICE_NAME, "refresh_token")
+            keyring.delete_password(self.keyring_service, "refresh_token")
             logger.debug("Refresh token deleted from keyring")
         except keyring.backend.errors.KeyringError as e:
             logger.warning(f"Failed to delete refresh_token from keyring: {e}")

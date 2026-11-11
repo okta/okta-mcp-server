@@ -9,7 +9,7 @@ import keyring
 from loguru import logger
 from okta.client import Client as OktaClient
 
-from okta_mcp_server.utils.auth.auth_manager import SERVICE_NAME, OktaAuthManager
+from okta_mcp_server.utils.auth.auth_manager import OktaAuthManager
 
 
 async def get_okta_client(manager: OktaAuthManager) -> OktaClient:
@@ -18,7 +18,7 @@ async def get_okta_client(manager: OktaAuthManager) -> OktaClient:
     if not await manager.is_valid_token():
         logger.warning("Token is invalid or expired, re-authenticating")
         await manager.authenticate()
-    api_token = keyring.get_password(SERVICE_NAME, "api_token")
+    api_token = keyring.get_password(manager.keyring_service, "api_token")
     config = {
         "orgUrl": manager.org_url,
         "token": api_token,
