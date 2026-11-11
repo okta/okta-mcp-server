@@ -27,6 +27,26 @@ from okta_mcp_server.utils.scope_guard import require_scopes
 from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import validate_ids
 
+# Workaround for an okta SDK gap (present in the pinned okta==3.4.6): PolicyPlatformOperatingSystemType only
+# lists ANDROID, ANY, IOS, OSX, OTHER and WINDOWS, but the Okta Policy API also returns LINUX (and CHROMEOS)
+# in `conditions.platform.{include,exclude}[].os.type`. A single such rule makes the whole list_policy_rules /
+# get_policy_rule response fail with a pydantic ValidationError (okta/okta-mcp-server#125).
+# Fix: relax the `type` annotation to Optional[str] and force a Pydantic schema rebuild, mirroring the
+# LogSecurityContext.user_behaviors workaround in system_logs.py.
+try:
+    from okta.models.platform_condition_evaluator_platform_operating_system import (
+        PlatformConditionEvaluatorPlatformOperatingSystem as _PlatformOS,
+    )
+
+    _patched_os_type = Optional[str]
+    _PlatformOS.__annotations__["type"] = _patched_os_type
+    if "type" in _PlatformOS.model_fields:
+        _PlatformOS.model_fields["type"].annotation = _patched_os_type
+    _PlatformOS.model_rebuild(force=True)
+    logger.debug("Applied platform OS type workaround for PlatformConditionEvaluatorPlatformOperatingSystem")
+except Exception as _patch_err:
+    logger.warning(f"Could not apply platform OS type workaround: {_patch_err}")
+
 
 # Mapping from Okta policy rule type → typed SDK model class.
 # The base PolicyRule model silently drops type-specific fields like `actions` and
