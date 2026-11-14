@@ -14,6 +14,7 @@ from mcp.server.fastmcp import Context
 
 from okta.models.create_user_request import CreateUserRequest
 from okta.models.update_user_request import UpdateUserRequest
+from okta.models.user_profile import UserProfile
 
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
@@ -23,6 +24,35 @@ from okta_mcp_server.utils.pagination import build_query_params, create_paginate
 from okta_mcp_server.utils.scope_guard import require_scopes
 from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import validate_ids
+
+
+def _profile_for_partial_update(profile: dict) -> UserProfile:
+    """Build a UserProfile that contains only the keys supplied by the caller.
+
+    ``UpdateUserRequest.from_dict({"profile": ...})`` marks every schema field as
+    set and serializes the rest as JSON null. Okta's POST ``/api/v1/users/{id}``
+    treats those nulls as clears, which wipes attributes mastered by an
+    external system. Constructing the model with only the provided keys keeps
+    the update incremental.
+    """
+    field_by_key: dict[str, str] = {}
+    for name, finfo in UserProfile.model_fields.items():
+        field_by_key[name] = name
+        if finfo.alias:
+            field_by_key[finfo.alias] = name
+
+    core: dict = {}
+    extra: dict = {}
+    for key, value in profile.items():
+        if key in field_by_key:
+            core[field_by_key[key]] = value
+        else:
+            extra[key] = value
+
+    user_profile = UserProfile(**core)
+    if extra:
+        user_profile.additional_properties = extra
+    return user_profile
 
 
 @mcp.tool()
@@ -358,11 +388,15 @@ async def create_user(profile: dict, activate: bool = True, ctx: Context = None)
 async def update_user(user_id: str, profile: dict, ctx: Context = None) -> list:
     """Update a user in the Okta organization.
 
-    This tool updates an existing user in the Okta organization with the provided profile.
+    This tool partially updates an existing user (Okta POST /api/v1/users/{id}).
+    Only the profile attributes you pass are modified. Unspecified attributes are
+    left alone, which matters when some fields are mastered by an external system.
+    Do not pass a full user profile unless you intend to change every field in
+    that payload.
 
     Parameters:
         user_id (str, required): The ID of the user to update.
-        profile (dict, required): The updated profile of the user.
+        profile (dict, required): The profile attributes to change.
 
     Returns:
         List containing the updated user details.
@@ -373,9 +407,10 @@ async def update_user(user_id: str, profile: dict, ctx: Context = None) -> list:
 
     try:
         client = await get_okta_client(manager)
-        # Wrap the profile in an UpdateUserRequest model as required by Okta SDK v3
-        user_data = UpdateUserRequest.from_dict({"profile": profile})
-        logger.debug(f"Calling Okta API to update user {user_id}")
+        # SDK v3: update_user -> POST (partial). replace_user -> PUT (full replace).
+        # Avoid UpdateUserRequest.from_dict(); it nulls omitted profile fields.
+        user_data = UpdateUserRequest(profile=_profile_for_partial_update(profile))
+        logger.debug(f"Calling Okta API to partially update user {user_id}")
 
         user, _, err = await client.update_user(user_id, user_data)
 
