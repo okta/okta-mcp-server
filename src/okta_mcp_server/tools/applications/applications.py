@@ -7,6 +7,7 @@
 
 import asyncio
 import json
+import re
 from typing import Any, Dict, Optional
 from urllib.parse import urlencode
 
@@ -15,6 +16,7 @@ from loguru import logger
 from mcp.server.fastmcp import Context
 
 from okta_mcp_server.server import mcp
+from okta_mcp_server.utils.sdk_fallback import fetch_raw_page, is_deserialization_error
 
 # Mapping of signOnMode -> Okta SDK model class for proper serialization
 _SIGN_ON_MODE_MODEL_MAP: Dict[str, Any] = {
@@ -52,6 +54,124 @@ from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import validate_ids
 
 
+def _raw_application_query_params(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Translate SDK argument names to the Applications API query names."""
+    raw_params = dict(query_params)
+    if "include_non_deleted" in raw_params:
+        raw_params["includeNonDeleted"] = raw_params.pop("include_non_deleted")
+    return raw_params
+
+
+def _mark_raw_fallback(result: dict) -> dict:
+    """Identify paginated responses containing raw application dictionaries."""
+    result["raw_fallback"] = True
+    result["notice"] = (
+        "Results were retrieved via a raw API fallback because the Okta SDK could not "
+        "deserialize one or more application objects (schema drift)."
+    )
+    return result
+
+
+def _application_group_assignment_dict(assignment: Any) -> Dict[str, Any]:
+    """Return an application-group assignment with Okta API aliases intact."""
+    if isinstance(assignment, dict):
+        return assignment
+    model_dump = getattr(assignment, "model_dump", None)
+    if callable(model_dump):
+        return model_dump(by_alias=True, exclude_none=True)
+    raise TypeError(
+        "Unsupported application-group assignment response type: "
+        f"{type(assignment).__name__}"
+    )
+
+
+def _normalize_application_group_assignment(assignment: Any) -> Dict[str, Any]:
+    """Flatten group identity while preserving app-specific assignment evidence."""
+    raw = _application_group_assignment_dict(assignment)
+    embedded_group = (raw.get("_embedded") or {}).get("group") or {}
+    group_profile = embedded_group.get("profile") or {}
+    return {
+        "group_id": raw.get("id") or embedded_group.get("id"),
+        "group_name": group_profile.get("name"),
+        "group_type": embedded_group.get("type"),
+        "assignment_profile": raw.get("profile") or {},
+        "priority": raw.get("priority"),
+        "lastUpdated": raw.get("lastUpdated"),
+        "raw": raw,
+    }
+
+
+def _application_user_dict(assignment: Any) -> Dict[str, Any]:
+    """Return one application-user assignment as an API-shaped dictionary."""
+    if isinstance(assignment, dict):
+        return assignment
+    model_dump = getattr(assignment, "model_dump", None)
+    if callable(model_dump):
+        return model_dump(by_alias=True, exclude_none=True)
+    raise TypeError(
+        "Unsupported application-user assignment response type: "
+        f"{type(assignment).__name__}"
+    )
+
+
+def _normalize_application_user(assignment: Any) -> Dict[str, Any]:
+    """Return only the identity and assignment fields needed for safe audits."""
+    raw = _application_user_dict(assignment)
+    embedded_user = (raw.get("_embedded") or {}).get("user") or {}
+    okta_profile = embedded_user.get("profile") or {}
+    app_profile = raw.get("profile") or {}
+    credentials = raw.get("credentials") or {}
+    app_username = (
+        credentials.get("userName")
+        or app_profile.get("userName")
+        or app_profile.get("login")
+        or app_profile.get("email")
+    )
+    return {
+        "app_user_id": raw.get("id"),
+        "user_id": embedded_user.get("id") or raw.get("id"),
+        "scope": raw.get("scope"),
+        "assignment_status": raw.get("status"),
+        "sync_state": raw.get("syncState"),
+        "app_username": app_username,
+        "okta_login": okta_profile.get("login"),
+        "okta_user_status": embedded_user.get("status"),
+    }
+
+
+def _endswith(value: Any, suffix: Optional[str]) -> bool:
+    """Case-insensitively match an optional suffix without coercing missing values."""
+    if suffix is None:
+        return True
+    return isinstance(value, str) and value.casefold().endswith(suffix.casefold())
+
+
+def _response_has_next_link(response: Any) -> bool:
+    """Return whether an Okta response advertises a next page in Link headers."""
+    headers = getattr(response, "headers", None)
+    if not headers:
+        return False
+
+    values: list[str] = []
+    getall = getattr(headers, "getall", None)
+    if callable(getall):
+        for name in ("Link", "link"):
+            try:
+                values.extend(str(value) for value in getall(name, []))
+            except TypeError:
+                values.extend(str(value) for value in getall(name))
+    else:
+        for name in ("Link", "link"):
+            value = headers.get(name) if hasattr(headers, "get") else None
+            if value:
+                values.append(str(value))
+
+    return any(
+        re.search(r"\brel\s*=\s*(['\"]?)next\1", value, flags=re.IGNORECASE)
+        for value in values
+    )
+
+
 @mcp.tool()
 @require_scopes("okta.apps.read", error_return_type="list")
 @json_response
@@ -72,8 +192,10 @@ async def list_applications(
         after (str, optional): Specifies the pagination cursor for the next page of results
         limit (int, optional): Specifies the number of results per page (min 20, max 100)
         filter (str, optional): Filters applications by status, user.id, group.id, or credentials.signing.kid
-        expand (str, optional): Expands the app user object to include the user's profile or expand the app group
-        object to include the group's profile
+        expand (str, optional): Okta only documents ``user/{user_id}``, used with
+            the matching ``filter=user.id eq "{user_id}"``. Do not use
+            ``expand="groups"``. For reliable assignment lookups, use the dedicated
+            endpoints described below instead.
         include_non_deleted (bool, optional): Include non-deleted applications in the results
         fetch_all (bool, optional): If True, automatically fetch all pages of results. Default: False.
 
@@ -82,6 +204,13 @@ async def list_applications(
         - First call: list_applications()
         - Next page: list_applications(after="cursor_value")
         - All pages: list_applications(fetch_all=True)
+
+        For application assignments:
+        - Group assignments: use ``list_application_groups(app_id,
+          expand_group=true)``, backed by GET ``/api/v1/apps/{app_id}/groups``
+        - Exact app-user assignment: GET ``/api/v1/apps/{app_id}/users/{user_id}``
+        These are separate Application Groups/Application Users endpoints; they
+        are not expansions of an application object.
 
     Returns:
         Dict containing:
@@ -114,7 +243,20 @@ async def list_applications(
         )
 
         logger.debug("Calling Okta API to list applications")
-        apps, response, err = await client.list_applications(**query_params)
+        raw_fallback_used = False
+        try:
+            apps, response, err = await client.list_applications(**query_params)
+        except Exception as sdk_exc:
+            if not is_deserialization_error(sdk_exc):
+                raise
+            logger.warning(
+                "SDK could not deserialize applications "
+                f"({type(sdk_exc).__name__}: {sdk_exc}); falling back to raw API fetch"
+            )
+            raw_fallback_used = True
+            apps, response, err = await fetch_raw_page(
+                client, "/api/v1/apps", _raw_application_query_params(query_params)
+            )
 
         if err:
             logger.error(f"Okta API error while listing applications: {err}")
@@ -122,7 +264,8 @@ async def list_applications(
 
         if not apps:
             logger.info("No applications found")
-            return create_paginated_response([], response, fetch_all)
+            result = create_paginated_response([], response, fetch_all)
+            return _mark_raw_fallback(result) if raw_fallback_used else result
 
         app_count = len(apps)
         logger.debug(f"Retrieved {app_count} applications in first page")
@@ -132,9 +275,22 @@ async def list_applications(
             logger.info(f"fetch_all=True, auto-paginating from initial {app_count} applications")
 
             async def _next_page(cursor):
+                nonlocal raw_fallback_used
                 p = dict(query_params)
                 p["after"] = cursor
-                return await client.list_applications(**p)
+                try:
+                    return await client.list_applications(**p)
+                except Exception as page_exc:
+                    if not is_deserialization_error(page_exc):
+                        raise
+                    logger.warning(
+                        "SDK could not deserialize a later page of applications "
+                        f"({type(page_exc).__name__}: {page_exc}); fetching this page via raw API"
+                    )
+                    raw_fallback_used = True
+                    return await fetch_raw_page(
+                        client, "/api/v1/apps", _raw_application_query_params(p)
+                    )
 
             async def _on_page(pages, total):
                 await ctx.info(f"Fetching applications... {total} fetched so far ({pages} pages)")
@@ -145,13 +301,297 @@ async def list_applications(
             logger.info(
                 f"Successfully retrieved {len(all_apps)} applications across {pagination_info['pages_fetched']} pages"
             )
-            return create_paginated_response(all_apps, response, fetch_all_used=True, pagination_info=pagination_info)
+            result = create_paginated_response(
+                all_apps, response, fetch_all_used=True, pagination_info=pagination_info
+            )
+            return _mark_raw_fallback(result) if raw_fallback_used else result
         else:
             logger.info(f"Successfully retrieved {app_count} applications")
-            return create_paginated_response(apps, response, fetch_all_used=fetch_all)
+            result = create_paginated_response(apps, response, fetch_all_used=fetch_all)
+            return _mark_raw_fallback(result) if raw_fallback_used else result
     except Exception as e:
         logger.error(f"Exception while listing applications: {type(e).__name__}: {e}")
         return {"error": str(e)}
+
+
+@mcp.tool()
+@require_scopes("okta.apps.read", error_return_type="dict")
+@validate_ids("app_id", error_return_type="dict")
+async def list_application_groups(
+    ctx: Context,
+    app_id: str,
+    expand_group: bool = True,
+) -> dict:
+    """List assigned groups for an application and expose each assignment profile.
+
+    Use this before adding a user to an access group to confirm which assigned
+    groups grant the application and which app-specific role/profile they apply.
+
+    Parameters:
+        app_id (str, required): Application ID.
+        expand_group (bool, optional): If true (default), include the assigned
+            Okta group resource so normalized results contain its name and type.
+
+    Behavior:
+        Calls ``GET /api/v1/apps/{app_id}/groups?limit=200&expand=group``
+        when expansion is enabled and follows every page. Each item exposes
+        ``group_id``, ``group_name``, ``group_type``, and the app-specific
+        ``assignment_profile`` while retaining the raw assignment as evidence.
+
+    Example evidence for an application:
+        ``group_name="example_app_prod"`` with
+        ``assignment_profile={"example_app_role": "Reader"}``.
+    """
+    logger.info(f"Listing assigned groups for application {app_id}")
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        query_params: Dict[str, Any] = {"limit": 200}
+        if expand_group:
+            query_params["expand"] = "group"
+
+        assignments, response, err = await client.list_application_group_assignments(
+            app_id,
+            **query_params,
+        )
+        if err:
+            logger.error(
+                f"Okta API error while listing groups for application {app_id}: {err}"
+            )
+            return {"success": False, "app_id": app_id, "error": str(err)}
+
+        async def _next_page(cursor: str):
+            page_params = dict(query_params)
+            page_params["after"] = cursor
+            page_items, page_response, page_err = (
+                await client.list_application_group_assignments(
+                    app_id,
+                    **page_params,
+                )
+            )
+            if page_err:
+                return page_items, page_response, page_err
+
+            if _response_has_next_link(page_response):
+                if not page_items:
+                    return (
+                        page_items,
+                        page_response,
+                        RuntimeError(
+                            "Okta returned an empty page with a next link; "
+                            "application group results may be incomplete"
+                        ),
+                    )
+                if not extract_after_cursor(page_response):
+                    return (
+                        page_items,
+                        page_response,
+                        RuntimeError(
+                            "Okta returned a next link without an extractable after cursor; "
+                            "application group results may be incomplete"
+                        ),
+                    )
+            return page_items, page_response, None
+
+        initial_incomplete_reason = None
+        if _response_has_next_link(response):
+            if not assignments:
+                initial_incomplete_reason = (
+                    "Okta returned an empty page with a next link; "
+                    "application group results may be incomplete"
+                )
+            elif not extract_after_cursor(response):
+                initial_incomplete_reason = (
+                    "Okta returned a next link without an extractable after cursor; "
+                    "application group results may be incomplete"
+                )
+
+        if initial_incomplete_reason:
+            all_assignments = list(assignments or [])
+            pagination_info = {
+                "pages_fetched": 1,
+                "total_fetched": len(all_assignments),
+                "stopped_early": True,
+                "stop_reason": initial_incomplete_reason,
+            }
+        else:
+            all_assignments, pagination_info = await paginate_all_results(
+                response,
+                assignments or [],
+                next_page_fn=_next_page,
+            )
+        items = [
+            _normalize_application_group_assignment(assignment)
+            for assignment in all_assignments
+        ]
+        if pagination_info.get("stopped_early"):
+            return {
+                "success": False,
+                "partial": bool(items),
+                "error_type": "pagination_incomplete",
+                "error": pagination_info.get("stop_reason")
+                or "Application group pagination stopped before completion",
+                "app_id": app_id,
+                "items": items,
+                "total_fetched": len(items),
+                "has_more": True,
+                "next_cursor": None,
+                "expand_group_used": expand_group,
+                "pagination_info": pagination_info,
+            }
+        return {
+            "success": True,
+            "app_id": app_id,
+            "items": items,
+            "total_fetched": len(items),
+            "has_more": False,
+            "next_cursor": None,
+            "expand_group_used": expand_group,
+            "pagination_info": pagination_info,
+        }
+    except Exception as e:
+        logger.error(
+            "Exception while listing groups for application "
+            f"{app_id}: {type(e).__name__}: {e}"
+        )
+        return {"success": False, "app_id": app_id, "error": str(e)}
+
+
+@mcp.tool()
+@require_scopes("okta.apps.read", error_return_type="dict")
+@validate_ids("app_id", error_return_type="dict")
+async def list_application_users(
+    ctx: Context,
+    app_id: str,
+    okta_login_suffix: Optional[str] = None,
+    app_username_suffix: Optional[str] = None,
+) -> dict:
+    """List complete, minimized application-user assignment evidence.
+
+    The tool calls the dedicated Application Users endpoint with ``expand=user``
+    so it can compare an Okta login with the application-specific username. It
+    follows every page, filters suffixes case-insensitively when supplied, and
+    deliberately excludes full Okta and application profiles from its result.
+
+    Parameters:
+        app_id: Immutable Okta application ID.
+        okta_login_suffix: Optional suffix for the embedded Okta user login.
+        app_username_suffix: Optional suffix for the application username.
+    """
+    logger.info(f"Listing application users for application {app_id}")
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        path = f"/api/v1/apps/{app_id}/users"
+        query_params: Dict[str, Any] = {"limit": 500, "expand": "user"}
+        assignments, response, err = await fetch_raw_page(
+            client,
+            path,
+            query_params,
+        )
+        if err:
+            return {
+                "success": False,
+                "app_id": app_id,
+                "error": str(err),
+            }
+
+        async def _next_page(cursor: str):
+            page_params = dict(query_params)
+            page_params["after"] = cursor
+            page_items, page_response, page_err = await fetch_raw_page(
+                client,
+                path,
+                page_params,
+            )
+            if page_err:
+                return page_items, page_response, page_err
+            if _response_has_next_link(page_response):
+                if not page_items:
+                    return (
+                        page_items,
+                        page_response,
+                        RuntimeError(
+                            "Okta returned an empty page with a next link; "
+                            "application user results may be incomplete"
+                        ),
+                    )
+                if not extract_after_cursor(page_response):
+                    return (
+                        page_items,
+                        page_response,
+                        RuntimeError(
+                            "Okta returned a next link without an extractable "
+                            "after cursor; application user results may be incomplete"
+                        ),
+                    )
+            return page_items, page_response, None
+
+        initial_incomplete_reason = None
+        if _response_has_next_link(response):
+            if not assignments:
+                initial_incomplete_reason = (
+                    "Okta returned an empty page with a next link; "
+                    "application user results may be incomplete"
+                )
+            elif not extract_after_cursor(response):
+                initial_incomplete_reason = (
+                    "Okta returned a next link without an extractable after cursor; "
+                    "application user results may be incomplete"
+                )
+
+        if initial_incomplete_reason:
+            all_assignments = list(assignments or [])
+            pagination_info = {
+                "pages_fetched": 1,
+                "total_items": len(all_assignments),
+                "stopped_early": True,
+                "stop_reason": initial_incomplete_reason,
+            }
+        else:
+            all_assignments, pagination_info = await paginate_all_results(
+                response,
+                assignments or [],
+                next_page_fn=_next_page,
+            )
+        normalized = [
+            _normalize_application_user(assignment)
+            for assignment in all_assignments
+        ]
+        matches = [
+            item
+            for item in normalized
+            if _endswith(item.get("okta_login"), okta_login_suffix)
+            and _endswith(item.get("app_username"), app_username_suffix)
+        ]
+        return {
+            "success": not pagination_info.get("stopped_early"),
+            "partial": bool(pagination_info.get("stopped_early")),
+            "error_type": (
+                "pagination_incomplete"
+                if pagination_info.get("stopped_early")
+                else None
+            ),
+            "error": pagination_info.get("stop_reason"),
+            "app_id": app_id,
+            "filters": {
+                "okta_login_suffix": okta_login_suffix,
+                "app_username_suffix": app_username_suffix,
+            },
+            "assignments_scanned": len(normalized),
+            "matches_returned": len(matches),
+            "items": matches,
+            "has_more": bool(pagination_info.get("stopped_early")),
+            "pagination_info": pagination_info,
+        }
+    except Exception as e:
+        logger.error(
+            f"Exception while listing users for application {app_id}: "
+            f"{type(e).__name__}: {e}"
+        )
+        return {"success": False, "app_id": app_id, "error": str(e)}
 
 
 @mcp.tool()
@@ -163,8 +603,18 @@ async def get_application(ctx: Context, app_id: str, expand: Optional[str] = Non
 
     Parameters:
         app_id (str, required): The ID of the application to retrieve
-        expand (str, optional): Expands the app user object to include the user's profile or expand the
-        app group object
+        expand (str, optional): Okta documents only ``user/{user_id}`` for this
+            endpoint. In practice, assignment lookups should use the dedicated
+            endpoints below rather than relying on expansion.
+
+    Assignment lookup guidance:
+        - Do not use ``expand="groups"``. List assigned groups with
+          ``list_application_groups(app_id, expand_group=true)``, backed by GET
+          ``/api/v1/apps/{app_id}/groups``.
+        - Prefer GET ``/api/v1/apps/{app_id}/users/{user_id}`` for an exact app-user
+          record instead of ``expand="user/{user_id}"``.
+        These endpoints return assignment resources directly and avoid malformed
+        or unsupported expansion errors.
 
     Returns:
         Dictionary containing the application details or error information.
@@ -180,7 +630,37 @@ async def get_application(ctx: Context, app_id: str, expand: Optional[str] = Non
         if expand:
             query_params["expand"] = expand
 
-        app, _, err = await client.get_application(app_id, **query_params)
+        try:
+            app, _, err = await client.get_application(app_id, **query_params)
+        except Exception as sdk_exc:
+            if not is_deserialization_error(sdk_exc):
+                raise
+            logger.warning(
+                f"SDK could not deserialize application {app_id} "
+                f"({type(sdk_exc).__name__}: {sdk_exc}); falling back to raw API fetch"
+            )
+            raw_apps, _, err = await fetch_raw_page(
+                client,
+                f"/api/v1/apps/{app_id}",
+                query_params,
+            )
+            if err:
+                logger.error(
+                    f"Okta API error while raw-fetching application {app_id}: {err}"
+                )
+                return {"error": str(err)}
+            if not raw_apps:
+                return {
+                    "error": (
+                        f"Okta returned an empty response while retrieving application {app_id}"
+                    )
+                }
+            app = raw_apps[0]
+            app["raw_fallback"] = True
+            app["notice"] = (
+                "Result was retrieved via a raw API fallback because the Okta SDK "
+                "could not deserialize the application object (schema drift)."
+            )
 
         if err:
             logger.error(f"Okta API error while getting application {app_id}: {err}")

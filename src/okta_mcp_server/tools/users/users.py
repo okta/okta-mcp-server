@@ -6,12 +6,12 @@
 # See the License for the specific language governing permissions and limitations under the License.
 
 import csv
+import json
 import os
 from typing import Optional
 
 from loguru import logger
 from mcp.server.fastmcp import Context
-
 from okta.models.create_user_request import CreateUserRequest
 from okta.models.update_user_request import UpdateUserRequest
 
@@ -19,10 +19,294 @@ from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeactivateConfirmation, DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DEACTIVATE_USER, DELETE_USER
-from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
+from okta_mcp_server.utils.pagination import (
+    build_query_params,
+    create_paginated_response,
+    extract_after_cursor,
+    paginate_all_results,
+)
 from okta_mcp_server.utils.scope_guard import require_scopes
 from okta_mcp_server.utils.serialization import json_response, none_body_error
+from okta_mcp_server.utils.sdk_fallback import fetch_raw_page
 from okta_mcp_server.utils.validation import validate_ids
+
+
+def _normalize_authenticator_enrollment(enrollment: dict) -> dict:
+    """Return only non-secret fields needed to review an enrollment."""
+    return {
+        "enrollment_id": enrollment.get("id"),
+        "key": enrollment.get("key"),
+        "type": enrollment.get("type"),
+        "name": enrollment.get("name"),
+        "status": enrollment.get("status"),
+        "created": enrollment.get("created"),
+        "last_updated": enrollment.get("lastUpdated"),
+    }
+
+
+@mcp.tool()
+@require_scopes("okta.users.read", error_return_type="dict")
+@validate_ids("user_id", error_return_type="dict")
+async def list_user_authenticator_enrollments(ctx: Context, user_id: str) -> dict:
+    """List a user's complete, secret-minimized authenticator enrollments.
+
+    Returns immutable enrollment ID, key, type, name, status, and lifecycle
+    timestamps. Profiles, methods, links, and credentials are deliberately
+    excluded from the result.
+    """
+    logger.info(f"Listing authenticator enrollments for user {user_id}")
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        enrollments, _, err = await fetch_raw_page(
+            client,
+            f"/api/v1/users/{user_id}/authenticator-enrollments",
+            {},
+        )
+        if err:
+            return {"success": False, "user_id": user_id, "error": str(err)}
+        items = [
+            _normalize_authenticator_enrollment(enrollment)
+            for enrollment in enrollments or []
+        ]
+        return {
+            "success": True,
+            "user_id": user_id,
+            "count": len(items),
+            "items": items,
+        }
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        logger.error(
+            f"Invalid authenticator enrollment response for user {user_id}: {exc}"
+        )
+        return {"success": False, "user_id": user_id, "error": str(exc)}
+    except Exception as exc:
+        logger.error(
+            f"Exception while listing authenticator enrollments for user {user_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        return {"success": False, "user_id": user_id, "error": str(exc)}
+
+
+@mcp.tool()
+@require_scopes("okta.users.manage", error_return_type="dict")
+@validate_ids("user_id", "enrollment_id", error_return_type="dict")
+async def unenroll_user_authenticator(
+    ctx: Context,
+    user_id: str,
+    enrollment_id: str,
+    expected_login: str,
+    expected_key: str,
+    expected_type: str,
+    expected_status: str = "ACTIVE",
+    confirmation: str = "",
+) -> dict:
+    """Guard selective unenrollment of one exact authenticator enrollment.
+
+    The operation fails closed unless the immutable user and enrollment IDs,
+    canonical login, lifecycle state, authenticator key/type/status, and exact
+    confirmation string all match a fresh preflight inventory. It never calls
+    the all-factor reset endpoint.
+    """
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+    try:
+        client = await get_okta_client(manager)
+        raw_users, _, user_err = await fetch_raw_page(
+            client, f"/api/v1/users/{user_id}", {}
+        )
+        if user_err or not raw_users:
+            return {
+                "success": False,
+                "user_id": user_id,
+                "error": str(user_err or "User not found"),
+            }
+        raw_user = raw_users[0]
+        profile = raw_user.get("profile") or {}
+        login = profile.get("login")
+        user_status = raw_user.get("status")
+        if raw_user.get("id") != user_id or login != expected_login:
+            return {
+                "success": False,
+                "error_type": "user_guard_mismatch",
+                "user_id": user_id,
+                "actual_login": login,
+                "actual_status": user_status,
+            }
+        if user_status != "ACTIVE":
+            return {
+                "success": False,
+                "error_type": "user_not_active",
+                "user_id": user_id,
+                "actual_login": login,
+                "actual_status": user_status,
+            }
+
+        raw_enrollments, _, enrollment_err = await fetch_raw_page(
+            client,
+            f"/api/v1/users/{user_id}/authenticator-enrollments",
+            {},
+        )
+        if enrollment_err:
+            return {
+                "success": False,
+                "user_id": user_id,
+                "error": str(enrollment_err),
+            }
+        enrollment = next(
+            (
+                item
+                for item in raw_enrollments or []
+                if item.get("id") == enrollment_id
+            ),
+            None,
+        )
+        if enrollment is None:
+            return {
+                "success": False,
+                "error_type": "enrollment_not_found",
+                "user_id": user_id,
+                "enrollment_id": enrollment_id,
+            }
+        normalized = _normalize_authenticator_enrollment(enrollment)
+        actual_guard = {
+            "key": normalized["key"],
+            "type": normalized["type"],
+            "status": normalized["status"],
+        }
+        expected_guard = {
+            "key": expected_key,
+            "type": expected_type,
+            "status": expected_status,
+        }
+        if actual_guard != expected_guard:
+            return {
+                "success": False,
+                "error_type": "enrollment_guard_mismatch",
+                "user_id": user_id,
+                "enrollment_id": enrollment_id,
+                "expected": expected_guard,
+                "actual": actual_guard,
+            }
+
+        preserved_ids = [
+            item.get("id")
+            for item in raw_enrollments or []
+            if item.get("id") and item.get("id") != enrollment_id
+        ]
+        required_confirmation = f"UNENROLL {expected_login} {enrollment_id}"
+        preflight = {
+            "user_id": user_id,
+            "login": login,
+            "user_status": user_status,
+            "enrollment": normalized,
+            "preserved_enrollment_ids": preserved_ids,
+        }
+        if confirmation != required_confirmation:
+            return {
+                "success": False,
+                "confirmation_required": True,
+                "required_confirmation": required_confirmation,
+                "preflight": preflight,
+            }
+
+        executor = client.get_request_executor()
+        delete_url = (
+            f"{client.get_base_url()}/api/v1/users/{user_id}/"
+            f"authenticator-enrollments/{enrollment_id}"
+        )
+        request, request_err = await executor.create_request(
+            "DELETE", delete_url, {}, {}
+        )
+        if request_err:
+            return {
+                "success": False,
+                "error_type": "delete_request_error",
+                "preflight": preflight,
+                "error": str(request_err),
+            }
+        response, _, delete_err = await executor.execute(request)
+        if delete_err:
+            return {
+                "success": False,
+                "error_type": "delete_api_error",
+                "preflight": preflight,
+                "error": str(delete_err),
+            }
+        http_status = getattr(response, "status", None)
+        if http_status != 204:
+            return {
+                "success": False,
+                "error_type": "unexpected_delete_status",
+                "preflight": preflight,
+                "http_status": http_status,
+            }
+
+        post_enrollments, _, post_err = await fetch_raw_page(
+            client,
+            f"/api/v1/users/{user_id}/authenticator-enrollments",
+            {},
+        )
+        if post_err:
+            return {
+                "success": False,
+                "error_type": "post_delete_read_error",
+                "preflight": preflight,
+                "http_status": http_status,
+                "error": str(post_err),
+            }
+        post_ids = {
+            item.get("id") for item in post_enrollments or [] if item.get("id")
+        }
+        missing_preserved_ids = sorted(set(preserved_ids) - post_ids)
+        if enrollment_id in post_ids or missing_preserved_ids:
+            return {
+                "success": False,
+                "error_type": "post_delete_verification_failed",
+                "preflight": preflight,
+                "http_status": http_status,
+                "target_still_present": enrollment_id in post_ids,
+                "missing_preserved_enrollment_ids": missing_preserved_ids,
+            }
+
+        post_users, _, post_user_err = await fetch_raw_page(
+            client, f"/api/v1/users/{user_id}", {}
+        )
+        post_user = post_users[0] if post_users else {}
+        post_profile = post_user.get("profile") or {}
+        if (
+            post_user_err
+            or post_user.get("id") != user_id
+            or post_profile.get("login") != expected_login
+            or post_user.get("status") != "ACTIVE"
+        ):
+            return {
+                "success": False,
+                "error_type": "post_delete_user_verification_failed",
+                "preflight": preflight,
+                "http_status": http_status,
+                "error": str(post_user_err) if post_user_err else None,
+                "actual_login": post_profile.get("login"),
+                "actual_status": post_user.get("status"),
+            }
+
+        return {
+            "success": True,
+            "http_status": http_status,
+            "user_id": user_id,
+            "login": expected_login,
+            "user_status": "ACTIVE",
+            "removed_enrollment_id": enrollment_id,
+            "removed_enrollment": normalized,
+            "preserved_enrollment_ids": preserved_ids,
+            "post_enrollment_count": len(post_enrollments or []),
+        }
+    except Exception as exc:
+        logger.error(
+            f"Exception while preparing authenticator unenrollment for user {user_id}: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        return {"success": False, "user_id": user_id, "error": str(exc)}
 
 
 @mcp.tool()
@@ -278,6 +562,69 @@ async def get_user(user_id: str, ctx: Context = None) -> list:
     except Exception as e:
         logger.error(f"Exception while getting user {user_id}: {type(e).__name__}: {e}")
         return [{"exception": str(e)}]
+
+
+@mcp.tool()
+@require_scopes("okta.users.read", error_return_type="dict")
+@validate_ids("user_id", error_return_type="dict")
+async def get_user_groups(user_id: str, ctx: Context = None) -> dict:
+    """List the groups an exact Okta user belongs to using the user-centric endpoint.
+
+    Use this tool for membership checks instead of downloading every member of a
+    broad group with ``list_group_users(fetch_all=True)``. It makes one request to
+    ``GET /api/v1/users/{user_id}/groups`` and returns compact group summaries.
+
+    Parameters:
+        user_id (str, required): Okta user ID, login, or unambiguous shortname.
+
+    Returns:
+        Dict containing:
+        - user_id: The user that was checked.
+        - groups: Compact group objects with id, name, description, and type.
+        - total_groups: Number of groups returned for the user.
+        - error: Present when Okta rejects or cannot complete the lookup.
+    """
+    logger.info(f"Listing groups for user: {user_id}")
+    manager = ctx.request_context.lifespan_context.okta_auth_manager
+
+    try:
+        client = await get_okta_client(manager)
+        groups, _, err = await fetch_raw_page(
+            client, f"/api/v1/users/{user_id}/groups"
+        )
+
+        if err:
+            logger.error(f"Okta API error while listing groups for user {user_id}: {err}")
+            return {"error": f"Error: {err}"}
+
+        summaries = []
+        for group in groups or []:
+            if not isinstance(group, dict):
+                logger.warning(
+                    f"Skipping malformed group entry while listing groups for user {user_id}"
+                )
+                continue
+            profile = group.get("profile")
+            if not isinstance(profile, dict):
+                profile = {}
+            summaries.append(
+                {
+                    "id": group.get("id"),
+                    "name": profile.get("name"),
+                    "description": profile.get("description"),
+                    "type": group.get("type"),
+                }
+            )
+
+        logger.info(f"User {user_id} belongs to {len(summaries)} groups")
+        return {
+            "user_id": user_id,
+            "groups": summaries,
+            "total_groups": len(summaries),
+        }
+    except Exception as e:
+        logger.error(f"Exception while listing groups for user {user_id}: {type(e).__name__}: {e}")
+        return {"error": f"Exception: {e}"}
 
 
 @mcp.tool()

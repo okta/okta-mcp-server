@@ -105,6 +105,41 @@ class TestExtractAfterCursorV3:
         }
         assert extract_after_cursor(response) == "cursor99"
 
+    def test_multidict_self_and_next_as_separate_headers(self):
+        """Regression: aiohttp exposes repeated Link headers via a CIMultiDictProxy.
+
+        Okta returns the self link and the next link as two SEPARATE ``Link``
+        headers. ``headers.get("Link")`` only returns the first (``rel="self"``),
+        so the next cursor must be recovered via ``getall``. This is the bug that
+        made ``fetch_all`` stop after the first page.
+        """
+        from multidict import CIMultiDict, CIMultiDictProxy
+
+        headers = CIMultiDict()
+        headers.add("Link", '<https://test.okta.com/api/v1/apps?limit=200>; rel="self"')
+        headers.add(
+            "Link",
+            '<https://test.okta.com/api/v1/apps?after=CUR_NEXT&limit=200>; rel="next"',
+        )
+        response = MagicMock()
+        del response.has_next
+        del response.next
+        response.headers = CIMultiDictProxy(headers)
+
+        assert extract_after_cursor(response) == "CUR_NEXT"
+
+    def test_multidict_only_self_header_returns_none(self):
+        from multidict import CIMultiDict, CIMultiDictProxy
+
+        headers = CIMultiDict()
+        headers.add("Link", '<https://test.okta.com/api/v1/apps?limit=200>; rel="self"')
+        response = MagicMock()
+        del response.has_next
+        del response.next
+        response.headers = CIMultiDictProxy(headers)
+
+        assert extract_after_cursor(response) is None
+
 
 # ---------------------------------------------------------------------------
 # extract_after_cursor — SDK v2 path

@@ -30,11 +30,14 @@ TOOL_SCOPE_REGISTRY: dict[str, str] = {
     # ------------------------------------------------------------------
     "list_users":                           "okta.users.read",
     "get_user":                             "okta.users.read",
+    "get_user_groups":                      "okta.users.read",
+    "list_user_authenticator_enrollments":  "okta.users.read",
     "get_user_profile_attributes":          "okta.users.read",
     "create_user":                          "okta.users.manage",
     "update_user":                          "okta.users.manage",
     "deactivate_user":                      "okta.users.manage",
     "delete_deactivated_user":              "okta.users.manage",
+    "unenroll_user_authenticator":          "okta.users.manage",
     # ------------------------------------------------------------------
     # User Resources  (src/okta_mcp_server/tools/user_resources/user_resources.py)
     # ------------------------------------------------------------------
@@ -56,7 +59,11 @@ TOOL_SCOPE_REGISTRY: dict[str, str] = {
     # Applications  (src/okta_mcp_server/tools/applications/applications.py)
     # ------------------------------------------------------------------
     "list_applications":                    "okta.apps.read",
+    "list_application_groups":              "okta.apps.read",
+    "list_application_users":               "okta.apps.read",
     "get_application":                      "okta.apps.read",
+    "list_group_push_mappings":             "okta.apps.read",
+    "find_apps_pushing_group":              "okta.apps.read",
     "create_application":                   "okta.apps.manage",
     "update_application":                   "okta.apps.manage",
     "delete_application":                   "okta.apps.manage",

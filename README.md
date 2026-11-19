@@ -562,13 +562,18 @@ The Okta Open Source MCP Server provides the following tools for LLMs to interac
 | Tool                            | Description                                              | Usage Examples                                                                                                                                                |
 | ------------------------------- | -------------------------------------------------------- |---------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `list_users`                    | List all users in your Okta organization                | - `Show me the users in my Okta org` <br> - `Find users with 'john' in their name` <br> - `What users do I have in the Engineering department?`                 |
-| `get_user`                      | Get detailed information about a specific user          | - `Show me details for user john.doe@company.com` <br> - `Get information about user ID 00u1234567890` <br> - `What groups is Jane Smith a member of?`        |
+| `get_user`                      | Get detailed information about a specific user          | - `Show me details for user john.doe@company.com` <br> - `Get information about user ID 00u1234567890`                                                    |
+| `get_user_groups`               | List compact summaries of the groups an exact user belongs to | - `What groups is Jane Smith a member of?` <br> - `Is user 00u1234567890 in the Example App production group?` <br> - `Check this user's group memberships without listing every group member` |
 | `create_user`                   | Create a new user in your Okta organization. Pass `activate=false` to create the user in `STAGED` status (no activation email sent); omit or pass `activate=true` (default) to create an active `PROVISIONED` user. | - `Create a new user named John Doe with email john.doe@company.com` <br> - `Add a new employee to the Sales department` <br> - `Create a staged user for john.doe@company.com without sending an activation email` |
 | `update_user`                   | Update an existing user's profile information           | - `Update John Doe's department to Engineering` <br> - `Change the phone number for user jane.smith@company.com` <br> - `Update the manager for this user`    |
 | `deactivate_user`               | Deactivate a user (prompts for confirmation)            | - `Deactivate the user john.doe@company.com` <br> - `Disable access for former employee Jane Smith` <br> - `Suspend the contractor account temporarily`       |
 | `delete_deactivated_user`       | Permanently delete a deactivated user (prompts for confirmation) | - `Delete the deactivated user john.doe@company.com` <br> - `Remove former employee Jane Smith permanently` <br> - `Clean up old contractor accounts`         |
 | `get_user_profile_attributes`   | Retrieve all supported user profile attributes          | - `What user profile fields are available?` <br> - `Show me all the custom attributes we can set` <br> - `List the standard Okta user attributes`             |
 | `list_user_groups`              | List all groups that a specific user is a member of     | - `What groups is john.doe@company.com in?` <br> - `Show me all group memberships for user ID 00u1234567890` <br> - `Which teams does Jane Smith belong to?` |
+| `list_user_authenticator_enrollments` | List a user's complete secret-minimized authenticator enrollment inventory | - `List Todd's authenticator enrollments before a selective reset` <br> - `Show immutable enrollment IDs without profiles or credentials` |
+| `unenroll_user_authenticator` | Selectively remove one exact authenticator enrollment after immutable user/enrollment guards and an exact confirmation string | - `Preflight removal of one inaccessible Okta Verify enrollment` <br> - `Remove only the approved enrollment and verify all others remain` |
+
+> **Selective authenticator safety:** `list_user_authenticator_enrollments` uses `GET /api/v1/users/{userId}/authenticator-enrollments` and returns only enrollment ID, key, type, name, status, and lifecycle timestamps. `unenroll_user_authenticator` never calls the all-factor reset endpoint; it requires a fresh canonical-login/status check, an exact enrollment guard tuple, and `UNENROLL <login> <enrollment-id>` confirmation, then reads the inventory and user back after HTTP 204. Okta Verify enrollment removal can remove its paired push/TOTP methods as one enrollment family, so verify System Log evidence and terminal target-application SSO separately.
 
 ### Groups
 
@@ -594,6 +599,8 @@ The Okta Open Source MCP Server provides the following tools for LLMs to interac
 | ----------------------------- | ------------------------------------------------- |---------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `list_applications`           | List all applications in your Okta organization  | - `Show me the applications in my Okta org` <br> - `Find applications with 'API' in their name` <br> - `What SSO applications do we have configured?`         |
 | `get_application`             | Get detailed information about a specific app    | - `Show me details for the Salesforce application` <br> - `What are the callback URLs for our mobile app?` <br> - `Get the client ID for our web application` |
+| `list_application_groups`     | List assigned groups and their app profiles      | - `list_application_groups(app_id="0oa...", expand_group=true)` <br> - `Which groups grant the Example App, and with what role?`                              |
+| `list_application_users`      | List minimized app-user identity and assignment evidence | - `list_application_users(app_id="0oa...", okta_login_suffix="@example.com", app_username_suffix="@example-app.com")` <br> - `Find app username mismatches without returning full profiles` |
 | `create_application`          | Create a new application                          | - `Create a new SAML application for our HR system` <br> - `Set up a new API service application` <br> - `Add a mobile app integration`                       |
 | `update_application`          | Update an existing application                    | - `Update the callback URLs for our web app` <br> - `Change the logo for the Salesforce application` <br> - `Modify the SAML settings for our HR system`      |
 | `delete_application`          | Delete an application (prompts for confirmation)  | - `Delete the old legacy application` <br> - `Remove the unused test application` <br> - `Clean up deprecated integrations`                                   |
@@ -602,6 +609,31 @@ The Okta Open Source MCP Server provides the following tools for LLMs to interac
 | `list_catalog_apps`           | Browse the OIN app catalog (find an app's `name` + features) | - `Find a SCIM 2.0 test app in the catalog` <br> - `Search the OIN catalog for Slack`                                                                        |
 | `get_catalog_app`             | Get a single OIN catalog app definition (incl. schema) | - `Show the catalog definition for the SCIM 2.0 test app`                                                                                                    |
 | `install_oin_app`             | Install an instance of an OIN catalog app (e.g. a provisioning-capable SCIM app) | - `Install the SCIM 2.0 test app as "HR Directory Sync"` <br> - `Add the Slack OIN app to my org`                                                            |
+
+> **Application assignment lookups:** Do not use `get_application(..., expand="groups")` to list assigned groups. Use `list_application_groups(app_id, expand_group=true)`, which calls `GET /api/v1/apps/{app_id}/groups?limit=200&expand=group`, follows every page, and normalizes `group_name` plus the app-specific `assignment_profile`. For a complete roster or username-suffix audit, use `list_application_users`, which calls `GET /api/v1/apps/{app_id}/users?limit=500&expand=user`, follows every page, and returns only minimized identity and assignment fields rather than full embedded user profiles. For one exact app-user assignment, prefer `GET /api/v1/apps/{app_id}/users/{user_id}` over `expand="user/{user_id}"`. These are separate Application Groups/Application Users endpoints, not application-object expansions.
+
+For example, the normalized result exposes both the purpose-built group and the role it grants:
+
+```json
+{
+  "group_id": "00g12345678901234567",
+  "group_name": "example_app_prod",
+  "assignment_profile": {
+    "example_app_role": "Reader"
+  }
+}
+```
+
+### Group Push
+
+> **Required scope:** `okta.apps.read`
+>
+> Group Push mappings are stored per application (`/api/v1/apps/{appId}/group-push/mappings`). Okta has no reverse index from a source group to the apps it is pushed to, so `find_apps_pushing_group` scans the `GROUP_PUSH`-enabled apps for you.
+
+| Tool                        | Description                                                       | Usage Examples                                                                                                                                               |
+| --------------------------- | ---------------------------------------------------------------- |-------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `list_group_push_mappings`  | List the Group Push mappings configured on a specific application | - `Show the group push mappings for the Workday app` <br> - `List push mappings on app 0oa... with status ERROR` <br> - `What groups are pushed to Slack?`   |
+| `find_apps_pushing_group`   | Find which applications a source group is pushed to via Group Push | - `Is the Engineering group being pushed to any app?` <br> - `Which apps does the Contractors group push to?` <br> - `Confirm Group Push for the Sales group` |
 
 ### Policies
 
@@ -769,11 +801,11 @@ The Okta Open Source MCP Server uses a **scope-based tool loading** mechanism to
 
 | Scope | Tools Unlocked |
 | ----- | -------------- |
-| `okta.users.read` | `list_users`, `get_user`, `get_user_profile_attributes`, `list_user_groups` |
-| `okta.users.manage` | `create_user`, `update_user`, `deactivate_user`, `delete_deactivated_user` |
+| `okta.users.read` | `list_users`, `get_user`, `get_user_groups`, `get_user_profile_attributes`, `list_user_groups`, `list_user_authenticator_enrollments` |
+| `okta.users.manage` | `create_user`, `update_user`, `deactivate_user`, `delete_deactivated_user`, `unenroll_user_authenticator` |
 | `okta.groups.read` | `list_groups`, `get_group`, `list_group_users`, `list_group_apps` |
 | `okta.groups.manage` | `create_group`, `update_group`, `delete_group`, `add_user_to_group`, `remove_user_from_group` |
-| `okta.apps.read` | `list_applications`, `get_application`, `list_catalog_apps`, `get_catalog_app` |
+| `okta.apps.read` | `list_applications`, `list_application_groups`, `list_application_users`, `get_application`, `list_group_push_mappings`, `find_apps_pushing_group`, `list_catalog_apps`, `get_catalog_app` |
 | `okta.apps.manage` | `create_application`, `update_application`, `delete_application`, `activate_application`, `deactivate_application`, `install_oin_app` |
 | `okta.policies.read` | `list_policies`, `get_policy`, `list_policy_rules`, `get_policy_rule` |
 | `okta.policies.manage` | `create_policy`, `update_policy`, `delete_policy`, `activate_policy`, `deactivate_policy`, `create_policy_rule`, `update_policy_rule`, `delete_policy_rule`, `activate_policy_rule`, `deactivate_policy_rule` |

@@ -13,6 +13,51 @@ from urllib.parse import parse_qs, urlparse
 from loguru import logger
 
 
+def _collect_link_header(headers) -> str:
+    """Return every ``Link`` header value joined into a single string.
+
+    Okta paginates with TWO separate ``Link`` headers — one ``rel="self"`` and
+    one ``rel="next"``. The response headers are exposed as aiohttp/multidict
+    ``CIMultiDictProxy`` objects (both in the SDK path, via
+    ``RESTResponse.getheaders()``, and in the raw-fetch fallback path). On a
+    multidict, ``get("Link")`` returns only the FIRST header — typically
+    ``rel="self"`` — which silently hides the ``next`` cursor and makes
+    ``fetch_all`` stop after a single page.
+
+    Using ``getall("Link")`` collects every value so the ``rel="next"`` link is
+    not lost. Plain ``dict`` headers (used in some tests/clients) fall back to a
+    single ``get``.
+    """
+    if not headers:
+        return ""
+
+    # multidict (aiohttp) exposes getall() for repeated headers; it is
+    # case-insensitive for CIMultiDict, so a single lookup covers Link/link.
+    getall = getattr(headers, "getall", None)
+    if callable(getall):
+        try:
+            values = getall("Link", [])
+            if values:
+                return ", ".join(values)
+        except Exception:
+            pass
+
+    # Plain mapping: a single (possibly comma-joined) value.
+    try:
+        single = headers.get("Link", "") or headers.get("link", "")
+        if single:
+            return single
+    except Exception:
+        # Last resort: manual case-insensitive scan.
+        try:
+            for key in headers:
+                if str(key).lower() == "link":
+                    return headers[key]
+        except Exception:
+            return ""
+    return ""
+
+
 def extract_after_cursor(response) -> Optional[str]:
     """Extract the 'after' cursor from the next page URL in Okta API response.
 
@@ -27,14 +72,7 @@ def extract_after_cursor(response) -> Optional[str]:
     """
     # --- Okta SDK v3: ApiResponse with Link header ---
     if response and hasattr(response, "headers") and response.headers:
-        link_header = ""
-        try:
-            link_header = response.headers.get("Link", "") or response.headers.get("link", "")
-        except Exception:
-            for key in response.headers:
-                if key.lower() == "link":
-                    link_header = response.headers[key]
-                    break
+        link_header = _collect_link_header(response.headers)
 
         if link_header and 'rel="next"' in link_header:
             match = re.search(r'<([^>]+)>;\s*rel="next"', link_header)

@@ -28,8 +28,15 @@ def _okta_env(monkeypatch):
     monkeypatch.delenv("OKTA_SCOPES", raising=False)
 
 
-def _jwt_with_exp(exp_offset_seconds: int) -> str:
-    return jwt.encode({"exp": int(time.time()) + exp_offset_seconds}, "test-secret", algorithm="HS256")
+def _jwt_with_exp(exp_offset_seconds: int, scopes: list[str] | None = None) -> str:
+    return jwt.encode(
+        {
+            "exp": int(time.time()) + exp_offset_seconds,
+            "scp": scopes or ["openid", "profile", "email", "offline_access"],
+        },
+        "test-secret",
+        algorithm="HS256",
+    )
 
 
 def _jwt_without_exp() -> str:
@@ -60,6 +67,36 @@ class TestIsValidToken:
             result = await manager.is_valid_token()
         assert result is True
         mock_auth.assert_not_called()
+        mock_refresh.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("okta_mcp_server.utils.auth.auth_manager.keyring")
+    async def test_unexpired_cached_jwt_missing_configured_scope_reauthenticates_without_refresh(
+        self, mock_keyring, monkeypatch
+    ):
+        monkeypatch.setenv("OKTA_SCOPES", "okta.users.read okta.users.manage")
+        stale = _jwt_with_exp(3600, ["openid", "profile", "email", "offline_access", "okta.users.read"])
+        replacement = _jwt_with_exp(
+            3600,
+            ["openid", "profile", "email", "offline_access", "okta.users.read", "okta.users.manage"],
+        )
+        tokens = iter([stale, replacement])
+
+        def keyring_value(_service, key):
+            if key == "api_token":
+                return next(tokens)
+            return None
+
+        mock_keyring.get_password.side_effect = keyring_value
+        manager = OktaAuthManager()
+        with (
+            patch.object(OktaAuthManager, "authenticate", new=AsyncMock()) as mock_auth,
+            patch.object(OktaAuthManager, "refresh_access_token", new=MagicMock()) as mock_refresh,
+        ):
+            result = await manager.is_valid_token()
+
+        assert result is True
+        mock_auth.assert_awaited_once()
         mock_refresh.assert_not_called()
 
     @pytest.mark.asyncio
@@ -215,6 +252,14 @@ class TestIsCachedTokenValid:
     def test_returns_true_for_valid_cached_jwt(self, mock_keyring):
         mock_keyring.get_password.return_value = _jwt_with_exp(3600)
         assert OktaAuthManager().is_cached_token_valid() is True
+
+    @patch("okta_mcp_server.utils.auth.auth_manager.keyring")
+    def test_returns_false_when_valid_cached_jwt_is_missing_configured_scope(self, mock_keyring, monkeypatch):
+        monkeypatch.setenv("OKTA_SCOPES", "okta.users.read okta.users.manage")
+        mock_keyring.get_password.return_value = _jwt_with_exp(
+            3600, ["openid", "profile", "email", "offline_access", "okta.users.read"]
+        )
+        assert OktaAuthManager().is_cached_token_valid() is False
 
     @patch("okta_mcp_server.utils.auth.auth_manager.keyring")
     def test_returns_false_when_no_token_cached(self, mock_keyring):

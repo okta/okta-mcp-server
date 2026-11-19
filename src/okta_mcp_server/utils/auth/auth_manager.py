@@ -325,8 +325,18 @@ class OktaAuthManager:
         api_token = keyring.get_password(SERVICE_NAME, "api_token")
 
         if api_token and self._token_is_unexpired(api_token):
-            logger.debug("Cached token is valid")
-            return True
+            if self._token_has_required_scopes(api_token):
+                logger.debug("Cached token is valid and contains all configured scopes")
+                return True
+
+            logger.info("Cached token is unexpired but missing configured scopes; initiating re-authentication")
+            await self.authenticate()
+            replacement = keyring.get_password(SERVICE_NAME, "api_token")
+            return bool(
+                replacement
+                and self._token_is_unexpired(replacement)
+                and self._token_has_required_scopes(replacement)
+            )
 
         logger.info("Token is expired, missing, or unparseable; attempting refresh or re-auth")
         if self.use_browserless_auth:
@@ -338,8 +348,47 @@ class OktaAuthManager:
             if not refreshed:
                 logger.warning("Token refresh failed or unavailable; initiating re-authentication")
                 await self.authenticate()
+            else:
+                refreshed_token = keyring.get_password(SERVICE_NAME, "api_token")
+                if (
+                    refreshed_token
+                    and self._token_is_unexpired(refreshed_token)
+                    and not self._token_has_required_scopes(refreshed_token)
+                ):
+                    logger.info("Refreshed token is missing configured scopes; initiating re-authentication")
+                    await self.authenticate()
 
         return keyring.get_password(SERVICE_NAME, "api_token") is not None
+
+    def _token_has_required_scopes(self, token: str) -> bool:
+        """Return True when a JWT contains every scope required by this manager.
+
+        Device-flow tokens require the built-in OIDC scopes plus ``OKTA_SCOPES``.
+        Browserless client-credentials tokens require only ``OKTA_SCOPES`` because
+        OIDC identity scopes are not valid for that grant.
+        """
+        try:
+            claims = jwt.decode(token, options={"verify_signature": False})
+        except jwt.DecodeError:
+            logger.debug("Token scopes cannot be inspected because the token is not a valid JWT")
+            return False
+
+        token_scopes = claims.get("scp", [])
+        if isinstance(token_scopes, str):
+            token_scopes = token_scopes.split()
+        if not isinstance(token_scopes, list):
+            logger.debug("JWT scp claim has an unexpected shape")
+            return False
+
+        required = set(os.environ.get("OKTA_SCOPES", "").split())
+        if not self.use_browserless_auth:
+            required.update({"openid", "profile", "email", "offline_access"})
+
+        missing = required - set(token_scopes)
+        if missing:
+            logger.info("Cached token is missing configured OAuth scopes: {}", ", ".join(sorted(missing)))
+            return False
+        return True
 
     @staticmethod
     def _token_is_unexpired(token: str) -> bool:
@@ -375,7 +424,11 @@ class OktaAuthManager:
         so callers (e.g. the lifespan handler) can log accurately.
         """
         api_token = keyring.get_password(SERVICE_NAME, "api_token")
-        return bool(api_token and self._token_is_unexpired(api_token))
+        return bool(
+            api_token
+            and self._token_is_unexpired(api_token)
+            and self._token_has_required_scopes(api_token)
+        )
 
     def clear_tokens(self):
         """Clear all stored tokens from keyring."""

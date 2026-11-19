@@ -14,10 +14,92 @@ from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
 from okta_mcp_server.utils.elicitation import DeleteConfirmation, elicit_or_fallback
 from okta_mcp_server.utils.messages import DELETE_GROUP
-from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
+from okta_mcp_server.utils.pagination import (
+    build_query_params,
+    create_paginated_response,
+    extract_after_cursor,
+    paginate_all_results,
+)
 from okta_mcp_server.utils.scope_guard import require_scopes
 from okta_mcp_server.utils.serialization import json_response, none_body_error
+from okta_mcp_server.utils.sdk_fallback import fetch_raw_page, is_deserialization_error
 from okta_mcp_server.utils.validation import validate_ids
+
+# Backwards-compatible alias: the deserialization-error detector now lives in the
+# shared sdk_fallback util so it can be reused by other tool modules.
+_is_deserialization_error = is_deserialization_error
+
+
+async def _fetch_group_apps_raw_page(
+    client, group_id: str, after: Optional[str], limit: int
+) -> tuple[Optional[list], object, Optional[Exception]]:
+    """Fetch a single page of group apps as raw dicts, bypassing SDK models.
+
+    Returns a ``(apps, response, err)`` tuple mirroring the SDK convention so it
+    can be reused by the pagination helper. ``apps`` is a list of plain dicts.
+    """
+    params = {"limit": limit}
+    if after:
+        params["after"] = after
+    return await fetch_raw_page(client, f"/api/v1/groups/{group_id}/apps", params)
+
+
+async def _list_group_apps_raw(
+    client, group_id: str, after: Optional[str], limit: int, fetch_all: bool
+) -> dict:
+    """Raw-fetch fallback for :func:`list_group_apps`.
+
+    Returns the same paginated-response shape as the SDK path but with plain app
+    dicts, so callers still get a complete, accurate list when SDK model
+    deserialization fails. Adds ``raw_fallback=True`` and a short notice so the
+    caller knows the data is complete and authoritative.
+    """
+    logger.info(f"Using raw API fallback to list applications for group {group_id}")
+    effective_limit = 200 if fetch_all else limit
+
+    apps, response, err = await _fetch_group_apps_raw_page(client, group_id, after, effective_limit)
+    if err:
+        logger.error(f"Raw fallback failed while listing applications for group {group_id}: {err}")
+        return {"error": str(err)}
+
+    if not apps:
+        result = create_paginated_response([], response, fetch_all_used=fetch_all)
+        result["raw_fallback"] = True
+        return result
+
+    notice = (
+        "Results were retrieved via a raw API fallback because the Okta SDK could not "
+        "deserialize one or more app objects (schema drift). The list is complete and "
+        "accurate; each app's 'features' array indicates capabilities such as 'GROUP_PUSH'."
+    )
+
+    _has_more = bool(extract_after_cursor(response))
+    if fetch_all and response and _has_more:
+        logger.info(f"fetch_all=True (raw), auto-paginating from initial {len(apps)} apps for group {group_id}")
+
+        async def _next_page(cursor):
+            return await _fetch_group_apps_raw_page(client, group_id, cursor, effective_limit)
+
+        async def _on_page(pages, total):
+            logger.info(f"[list_group_apps:raw] Page {pages} fetched — {total} apps so far")
+
+        all_apps, pagination_info = await paginate_all_results(
+            response, apps, next_page_fn=_next_page, on_page=_on_page
+        )
+        logger.info(
+            f"Successfully retrieved {len(all_apps)} apps (raw) for group {group_id} "
+            f"across {pagination_info['pages_fetched']} pages"
+        )
+        result = create_paginated_response(all_apps, response, fetch_all_used=True, pagination_info=pagination_info)
+        result["raw_fallback"] = True
+        result["notice"] = notice
+        return result
+
+    logger.info(f"Successfully retrieved {len(apps)} applications (raw) for group {group_id}")
+    result = create_paginated_response(apps, response, fetch_all_used=fetch_all)
+    result["raw_fallback"] = True
+    result["notice"] = notice
+    return result
 
 
 @mcp.tool()
@@ -502,6 +584,9 @@ async def list_group_apps(
             - next_cursor (str | None): Cursor for the next page
             - fetch_all_used (bool): Whether fetch_all was used
             - pagination_info (Dict): Detailed pagination metadata (when fetch_all=True)
+            - raw_fallback (bool): Present and True when results were retrieved via the
+              raw API fallback because the SDK could not deserialize one or more apps.
+              The list is still complete and accurate.
     """
     logger.info(f"Listing applications assigned to group: {group_id}")
     logger.debug(f"fetch_all: {fetch_all}, after: '{after}', limit: {limit}")
@@ -520,7 +605,19 @@ async def list_group_apps(
         query_params = build_query_params(after=after, limit=effective_limit)
         logger.debug(f"Calling Okta API to list applications for group {group_id}")
 
-        apps, response, err = await client.list_assigned_applications_for_group(group_id, **query_params)
+        try:
+            apps, response, err = await client.list_assigned_applications_for_group(group_id, **query_params)
+        except Exception as sdk_exc:
+            # The SDK parses the response into strict Pydantic models; a single app
+            # whose schema has drifted from the bundled OpenAPI spec aborts the whole
+            # call. Fall back to a raw fetch so the caller still gets the full list.
+            if _is_deserialization_error(sdk_exc):
+                logger.warning(
+                    f"SDK could not deserialize apps for group {group_id} "
+                    f"({type(sdk_exc).__name__}: {sdk_exc}); falling back to raw API fetch"
+                )
+                return await _list_group_apps_raw(client, group_id, after=after, limit=limit, fetch_all=fetch_all)
+            raise
 
         if err:
             logger.error(f"Okta API error while listing applications for group {group_id}: {err}")
@@ -537,7 +634,19 @@ async def list_group_apps(
             async def _next_page(cursor):
                 p = {k: v for k, v in query_params.items() if k != "after"}
                 p["after"] = cursor
-                return await client.list_assigned_applications_for_group(group_id, **p)
+                try:
+                    return await client.list_assigned_applications_for_group(group_id, **p)
+                except Exception as page_exc:
+                    # Keep paginating even if a later page contains an app the SDK
+                    # cannot deserialize: fetch that page as raw dicts instead of
+                    # silently stopping early with an incomplete list.
+                    if _is_deserialization_error(page_exc):
+                        logger.warning(
+                            f"SDK could not deserialize a later page of apps for group {group_id} "
+                            f"({type(page_exc).__name__}: {page_exc}); fetching this page via raw API"
+                        )
+                        return await _fetch_group_apps_raw_page(client, group_id, cursor, effective_limit)
+                    raise
 
             async def _on_page(pages, total):
                 logger.info(f"[list_group_apps] Page {pages} fetched — {total} apps so far")
