@@ -105,13 +105,13 @@ class TestDeletePolicyFallback:
 
     @pytest.mark.asyncio
     @patch("okta_mcp_server.tools.policies.policies.get_okta_client")
-    async def test_exception_fallback_proceeds_with_deletion(self, mock_get_client, ctx_elicit_exception, mock_okta_client):
+    async def test_elicitation_error_does_not_proceed(self, mock_get_client, ctx_elicit_exception, mock_okta_client):
         mock_get_client.return_value = mock_okta_client
 
         result = await delete_policy(ctx=ctx_elicit_exception, policy_id=POLICY_ID)
 
-        mock_okta_client.delete_policy.assert_awaited_once_with(POLICY_ID)
-        assert result["success"] is True
+        mock_okta_client.delete_policy.assert_not_awaited()
+        assert "cancelled" in result["message"]
 
 
 # ===================================================================
@@ -194,13 +194,13 @@ class TestDeletePolicyRuleFallback:
 
     @pytest.mark.asyncio
     @patch("okta_mcp_server.tools.policies.policies.get_okta_client")
-    async def test_exception_fallback_proceeds_with_deletion(self, mock_get_client, ctx_elicit_exception, mock_okta_client):
+    async def test_elicitation_error_does_not_proceed(self, mock_get_client, ctx_elicit_exception, mock_okta_client):
         mock_get_client.return_value = mock_okta_client
 
         result = await delete_policy_rule(ctx=ctx_elicit_exception, policy_id=POLICY_ID, rule_id=RULE_ID)
 
-        mock_okta_client.delete_policy_rule.assert_awaited_once_with(POLICY_ID, RULE_ID)
-        assert result["success"] is True
+        mock_okta_client.delete_policy_rule.assert_not_awaited()
+        assert "cancelled" in result["message"]
 
 
 # ===================================================================
@@ -283,13 +283,13 @@ class TestDeactivatePolicyRuleFallback:
 
     @pytest.mark.asyncio
     @patch("okta_mcp_server.tools.policies.policies.get_okta_client")
-    async def test_exception_fallback_auto_confirms(self, mock_get_client, ctx_elicit_exception, mock_okta_client):
+    async def test_elicitation_error_does_not_proceed(self, mock_get_client, ctx_elicit_exception, mock_okta_client):
         mock_get_client.return_value = mock_okta_client
 
         result = await deactivate_policy_rule(ctx=ctx_elicit_exception, policy_id=POLICY_ID, rule_id=RULE_ID)
 
-        mock_okta_client.deactivate_policy_rule.assert_awaited_once_with(POLICY_ID, RULE_ID)
-        assert result["success"] is True
+        mock_okta_client.deactivate_policy_rule.assert_not_awaited()
+        assert "cancelled" in result["message"]
 
 
 # ===================================================================
@@ -372,10 +372,10 @@ class TestDeactivatePolicyFallback:
 
     @pytest.mark.asyncio
     @patch("okta_mcp_server.tools.policies.policies.get_okta_client")
-    async def test_exception_fallback_auto_confirms(self, mock_get_client, ctx_elicit_exception, mock_okta_client):
+    async def test_elicitation_error_does_not_proceed(self, mock_get_client, ctx_elicit_exception, mock_okta_client):
         mock_get_client.return_value = mock_okta_client
 
         result = await deactivate_policy(ctx=ctx_elicit_exception, policy_id=POLICY_ID)
 
-        mock_okta_client.deactivate_policy.assert_awaited_once_with(POLICY_ID)
-        assert result["success"] is True
+        mock_okta_client.deactivate_policy.assert_not_awaited()
+        assert "cancelled" in result["message"]

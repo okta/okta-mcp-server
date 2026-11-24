@@ -113,12 +113,12 @@ class TestDeleteDeviceAssurancePolicyFallback:
 
     @pytest.mark.asyncio
     @patch("okta_mcp_server.tools.device_assurance.device_assurance.get_okta_client")
-    async def test_exception_fallback_proceeds_with_deletion(self, mock_get_client, ctx_elicit_exception, mock_okta_client):
+    async def test_elicitation_error_does_not_proceed(self, mock_get_client, ctx_elicit_exception, mock_okta_client):
         mock_get_client.return_value = mock_okta_client
 
         result = await delete_device_assurance_policy(
             ctx=ctx_elicit_exception, device_assurance_id=DEVICE_ASSURANCE_ID
         )
 
-        mock_okta_client.delete_device_assurance_policy.assert_awaited_once_with(DEVICE_ASSURANCE_ID)
-        assert result["success"] is True
+        mock_okta_client.delete_device_assurance_policy.assert_not_awaited()
+        assert "cancelled" in result["message"]
