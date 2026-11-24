@@ -143,6 +143,15 @@ class TestElicitOrFallback:
         assert outcome.fallback_response is not None
 
     @pytest.mark.asyncio
+    async def test_accept_with_no_data(self):
+        from mcp.server.elicitation import AcceptedElicitation
+        from tests.conftest import _build_ctx
+        ctx = _build_ctx(elicit_return=AcceptedElicitation.model_construct(action="accept", data=None))
+        outcome = await elicit_or_fallback(ctx, "Delete?", DeleteConfirmation)
+        assert outcome.confirmed is False
+        assert outcome.used_elicitation is True
+
+    @pytest.mark.asyncio
     async def test_deactivate_schema(self, ctx_elicit_accept_true):
         outcome = await elicit_or_fallback(
             ctx_elicit_accept_true, "Deactivate?", DeactivateConfirmation
@@ -163,14 +172,15 @@ class TestElicitOrFallback:
         assert outcome.fallback_response is None
 
     @pytest.mark.asyncio
-    async def test_auto_confirm_on_exception(self, ctx_elicit_exception):
+    async def test_no_auto_confirm_on_exception(self, ctx_elicit_exception):
+        """A failure from a client that advertised elicitation must never auto-confirm."""
         outcome = await elicit_or_fallback(
             ctx_elicit_exception, "Delete?", DeleteConfirmation,
             auto_confirm_on_fallback=True,
         )
-        assert outcome.confirmed is True
+        assert outcome.confirmed is False
         assert outcome.used_elicitation is False
-        assert outcome.fallback_response is None
+        assert outcome.fallback_response is not None
 
     @pytest.mark.asyncio
     async def test_auto_confirm_false_still_returns_payload(self, ctx_no_elicitation):
@@ -219,12 +229,12 @@ class TestElicitOrFallback:
         assert outcome.fallback_response is not None
 
     @pytest.mark.asyncio
-    async def test_mcp_error_other_code_auto_confirm(self, ctx_elicit_mcp_error_other):
-        """McpError with non-METHOD_NOT_FOUND code auto-confirms when configured."""
+    async def test_mcp_error_other_code_no_auto_confirm(self, ctx_elicit_mcp_error_other):
+        """McpError with non-METHOD_NOT_FOUND code never auto-confirms."""
         outcome = await elicit_or_fallback(
             ctx_elicit_mcp_error_other, "Delete?", DeleteConfirmation,
             auto_confirm_on_fallback=True,
         )
-        assert outcome.confirmed is True
+        assert outcome.confirmed is False
         assert outcome.used_elicitation is False
-        assert outcome.fallback_response is None
+        assert outcome.fallback_response is not None

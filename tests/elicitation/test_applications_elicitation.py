@@ -223,10 +223,10 @@ class TestDeactivateApplicationFallback:
 
     @pytest.mark.asyncio
     @patch("okta_mcp_server.tools.applications.applications.get_okta_client")
-    async def test_exception_fallback_auto_confirms(self, mock_get_client, ctx_elicit_exception, mock_okta_client):
+    async def test_elicitation_error_does_not_proceed(self, mock_get_client, ctx_elicit_exception, mock_okta_client):
         mock_get_client.return_value = mock_okta_client
 
         result = await deactivate_application(ctx=ctx_elicit_exception, app_id=APP_ID)
 
-        mock_okta_client.deactivate_application.assert_awaited_once_with(APP_ID)
-        assert "deactivated successfully" in result[0]["message"]
+        mock_okta_client.deactivate_application.assert_not_awaited()
+        assert "cancelled" in result[0]["message"]
