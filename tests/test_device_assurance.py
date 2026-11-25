@@ -1381,3 +1381,341 @@ class TestReplaceDeviceAssurancePolicy:
         assert isinstance(result, dict)
         assert "error" in result
         assert "osVersion" in result["error"]
+
+
+# ---------------------------------------------------------------------------
+# Advanced Posture Checks
+#
+# The Okta SDK types DevicePostureChecks.include as List[StrictStr] while the API returns
+# List[dict], so a policy using Advanced Posture Checks raised a ValidationError from inside
+# the SDK and broke all five Device Assurance tools for the whole org. device_assurance.py
+# patches the annotation at import time; these tests guard that fix and the write-path guards
+# that must accompany it.
+# ---------------------------------------------------------------------------
+
+ADVANCED_INCLUDE = [
+    {"variableName": "crowdstrike_zta_score", "operator": "GTE", "value": "70"}
+]
+
+ADVANCED_MACOS_POLICY_DICT = {
+    **MACOS_POLICY_DICT,
+    "name": "MacOS Advanced Posture",
+    "devicePostureChecks": {"include": ADVANCED_INCLUDE},
+}
+
+
+class TestAdvancedPostureChecksDeserialization:
+    """AC1 / AC3: the SDK annotation patch is applied at import time and is shape-agnostic."""
+
+    def test_advanced_object_form_deserializes(self):
+        """AC1: the object form the API actually returns must deserialize."""
+        from okta.models.device_assurance import DeviceAssurance
+
+        policy = DeviceAssurance.from_dict(
+            {
+                "id": DEVICE_ASSURANCE_ID,
+                "name": "adv",
+                "platform": "MACOS",
+                "devicePostureChecks": {"include": ADVANCED_INCLUDE},
+            }
+        )
+        assert policy is not None
+
+    def test_legacy_string_form_still_deserializes(self):
+        """AC3 regression guard: widening the annotation must not break the string form."""
+        from okta.models.device_assurance import DeviceAssurance
+
+        policy = DeviceAssurance.from_dict(
+            {
+                "id": DEVICE_ASSURANCE_ID,
+                "name": "legacy",
+                "platform": "MACOS",
+                "devicePostureChecks": {"include": ["some_variable_name"]},
+            }
+        )
+        assert policy is not None
+
+    @pytest.mark.parametrize("platform", ["MACOS", "WINDOWS", "IOS", "ANDROID", "CHROMEOS"])
+    def test_advanced_form_deserializes_on_every_platform(self, platform):
+        """DeviceAssurance dispatches to a platform subclass, so every one must work."""
+        from okta.models.device_assurance import DeviceAssurance
+
+        policy = DeviceAssurance.from_dict(
+            {
+                "id": DEVICE_ASSURANCE_ID,
+                "name": f"adv-{platform}",
+                "platform": platform,
+                "devicePostureChecks": {"include": ADVANCED_INCLUDE},
+            }
+        )
+        assert policy is not None
+
+    def test_patch_is_applied_at_import_time(self):
+        """Contract test: if a refactor drops the module-level patch, fail loudly here.
+
+        Asserts on DevicePostureChecks directly rather than via a tool, so the failure message
+        points at the patch rather than at whichever tool happened to be exercised.
+        """
+        from okta.models.device_posture_checks import DevicePostureChecks
+
+        checks = DevicePostureChecks.from_dict({"include": ADVANCED_INCLUDE})
+        assert checks is not None, (
+            "DevicePostureChecks rejected the object form — the import-time annotation patch in "
+            "device_assurance.py is missing or no longer effective"
+        )
+
+
+class TestAdvancedPostureChecksReadPath:
+    """AC2 / AC6: reads succeed and carry the write-limitation advisory."""
+
+    @pytest.mark.asyncio
+    @patch("okta_mcp_server.tools.device_assurance.device_assurance.get_okta_client")
+    async def test_get_returns_posture_checks_content(self, mock_get_client, ctx_no_elicitation):
+        """AC1: the devicePostureChecks content is returned, not just a non-error."""
+        client = AsyncMock()
+        client.get_device_assurance_policy.return_value = (
+            _make_policy_model(ADVANCED_MACOS_POLICY_DICT),
+            MagicMock(),
+            None,
+        )
+        mock_get_client.return_value = client
+
+        result = await get_device_assurance_policy(
+            ctx=ctx_no_elicitation, device_assurance_id=DEVICE_ASSURANCE_ID
+        )
+
+        assert "error" not in result
+        assert result["devicePostureChecks"]["include"] == ADVANCED_INCLUDE
+
+    @pytest.mark.asyncio
+    @patch("okta_mcp_server.tools.device_assurance.device_assurance.get_okta_client")
+    async def test_get_flags_advanced_posture_checks(self, mock_get_client, ctx_no_elicitation):
+        """AC6: the response tells the calling model that writes are unavailable."""
+        client = AsyncMock()
+        client.get_device_assurance_policy.return_value = (
+            _make_policy_model(ADVANCED_MACOS_POLICY_DICT),
+            MagicMock(),
+            None,
+        )
+        mock_get_client.return_value = client
+
+        result = await get_device_assurance_policy(
+            ctx=ctx_no_elicitation, device_assurance_id=DEVICE_ASSURANCE_ID
+        )
+
+        advisory = result["advanced_posture_checks"]
+        assert advisory["present"] is True
+        assert advisory["write_operations_supported"] is False
+        assert "Admin Console" in advisory["message"]
+
+    @pytest.mark.asyncio
+    @patch("okta_mcp_server.tools.device_assurance.device_assurance.get_okta_client")
+    async def test_standard_policy_has_no_advisory(self, mock_get_client, ctx_no_elicitation):
+        """The advisory must not appear on policies that do not use the feature."""
+        client = AsyncMock()
+        client.get_device_assurance_policy.return_value = (
+            _make_policy_model(MACOS_POLICY_DICT),
+            MagicMock(),
+            None,
+        )
+        mock_get_client.return_value = client
+
+        result = await get_device_assurance_policy(
+            ctx=ctx_no_elicitation, device_assurance_id=DEVICE_ASSURANCE_ID
+        )
+
+        assert "advanced_posture_checks" not in result
+
+    @pytest.mark.asyncio
+    @patch("okta_mcp_server.tools.device_assurance.device_assurance.get_okta_client")
+    async def test_mixed_list_returns_all_policies(self, mock_get_client, ctx_no_elicitation):
+        """AC2: a mix of standard and advanced policies must all be returned.
+
+        Before the fix one advanced policy failed the whole page, so list_ returned nothing.
+        """
+        client = AsyncMock()
+        client.list_device_assurance_policies.return_value = (
+            [
+                _make_policy_model(MACOS_POLICY_DICT),
+                _make_policy_model(ADVANCED_MACOS_POLICY_DICT),
+                _make_policy_model(IOS_POLICY_DICT),
+            ],
+            MagicMock(),
+            None,
+        )
+        mock_get_client.return_value = client
+
+        result = await list_device_assurance_policies(ctx=ctx_no_elicitation)
+
+        assert "error" not in result
+        assert len(result["policies"]) == 3
+        names = {p["name"] for p in result["policies"]}
+        assert "MacOS Advanced Posture" in names
+
+
+class TestAdvancedPostureChecksWriteGuard:
+    """AC4 / AC5: writes are refused rather than silently destroying posture checks."""
+
+    @pytest.mark.asyncio
+    @patch("okta_mcp_server.tools.device_assurance.device_assurance.DeviceAssurance")
+    @patch("okta_mcp_server.tools.device_assurance.device_assurance.get_okta_client")
+    async def test_replace_refused_and_put_never_issued(
+        self, mock_get_client, mock_da_cls, ctx_no_elicitation
+    ):
+        """AC4: the guard must prevent the PUT, not merely report an error afterwards.
+
+        This is the data-loss check: replace_ builds its body from PolicyDataInput, which cannot
+        express devicePostureChecks, so a PUT that still fired would wipe them server-side.
+        """
+        client = AsyncMock()
+        client.get_device_assurance_policy.return_value = (
+            _make_policy_model(ADVANCED_MACOS_POLICY_DICT),
+            MagicMock(),
+            None,
+        )
+        client.replace_device_assurance_policy.return_value = (
+            _make_policy_model(ADVANCED_MACOS_POLICY_DICT),
+            MagicMock(),
+            None,
+        )
+        mock_get_client.return_value = client
+        mock_da_cls.from_dict.return_value = MagicMock()
+
+        result = await replace_device_assurance_policy(
+            ctx=ctx_no_elicitation,
+            device_assurance_id=DEVICE_ASSURANCE_ID,
+            policy_data={"name": "Renamed", "platform": "MACOS"},
+        )
+
+        assert client.replace_device_assurance_policy.call_count == 0, (
+            "replace was issued against a policy using Advanced Posture Checks — this would "
+            "have permanently removed them"
+        )
+        assert result["replacement_performed"] is False
+        assert "PERMANENTLY REMOVE" in result["error"]
+        assert "Admin Console" in result["error"]
+
+    @pytest.mark.asyncio
+    @patch("okta_mcp_server.tools.device_assurance.device_assurance.DeviceAssurance")
+    @patch("okta_mcp_server.tools.device_assurance.device_assurance.get_okta_client")
+    async def test_replace_still_works_on_standard_policy(
+        self, mock_get_client, mock_da_cls, ctx_no_elicitation
+    ):
+        """The guard must not block policies that do not use the feature."""
+        before = {**MACOS_POLICY_DICT, "name": "Old Name"}
+        after = {**MACOS_POLICY_DICT, "name": "New Name"}
+        client = AsyncMock()
+        client.get_device_assurance_policy.return_value = (
+            _make_policy_model(before), MagicMock(), None
+        )
+        client.replace_device_assurance_policy.return_value = (
+            _make_policy_model(after), MagicMock(), None
+        )
+        mock_get_client.return_value = client
+        mock_da_cls.from_dict.return_value = MagicMock()
+
+        result = await replace_device_assurance_policy(
+            ctx=ctx_no_elicitation,
+            device_assurance_id=DEVICE_ASSURANCE_ID,
+            policy_data={"name": "New Name", "platform": "MACOS"},
+        )
+
+        assert client.replace_device_assurance_policy.call_count == 1
+        assert "after" in result
+
+    @pytest.mark.asyncio
+    @patch("okta_mcp_server.tools.device_assurance.device_assurance.get_okta_client")
+    async def test_create_rejects_posture_checks_in_policy_data(
+        self, mock_get_client, ctx_no_elicitation
+    ):
+        """AC5: a readable message, not a raw Pydantic extra_forbidden dump."""
+        client = AsyncMock()
+        mock_get_client.return_value = client
+
+        result = await create_device_assurance_policy(
+            ctx=ctx_no_elicitation,
+            policy_data={
+                "name": "New",
+                "platform": "MACOS",
+                "devicePostureChecks": {"include": ADVANCED_INCLUDE},
+            },
+            user_stated_os_version="14.6.1",
+        )
+
+        assert "devicePostureChecks must NOT be included" in result["error"]
+        assert "Admin Console" in result["error"]
+        assert "extra_forbidden" not in result["error"]
+        assert client.create_device_assurance_policy.call_count == 0
+
+    @pytest.mark.asyncio
+    @patch("okta_mcp_server.tools.device_assurance.device_assurance.get_okta_client")
+    async def test_replace_rejects_posture_checks_in_policy_data(
+        self, mock_get_client, ctx_no_elicitation
+    ):
+        """AC5: same friendly rejection on the replace path."""
+        client = AsyncMock()
+        mock_get_client.return_value = client
+
+        result = await replace_device_assurance_policy(
+            ctx=ctx_no_elicitation,
+            device_assurance_id=DEVICE_ASSURANCE_ID,
+            policy_data={
+                "name": "New",
+                "platform": "MACOS",
+                "devicePostureChecks": {"include": ADVANCED_INCLUDE},
+            },
+            user_stated_os_version="14.6.1",
+        )
+
+        assert "devicePostureChecks must NOT be included" in result["error"]
+        assert "extra_forbidden" not in result["error"]
+        assert client.replace_device_assurance_policy.call_count == 0
+
+
+class TestSdkValidationErrorSafeguard:
+    """AC7: other SDK model mismatches degrade to an actionable error, not a Pydantic dump."""
+
+    @pytest.mark.asyncio
+    @patch("okta_mcp_server.tools.device_assurance.device_assurance.get_okta_client")
+    async def test_get_handles_sdk_validation_error(self, mock_get_client, ctx_no_elicitation):
+        from pydantic import BaseModel, StrictStr, ValidationError
+
+        class _Probe(BaseModel):
+            field: StrictStr
+
+        try:
+            _Probe(field=123)
+        except ValidationError as exc:
+            real_error = exc
+
+        client = AsyncMock()
+        client.get_device_assurance_policy.side_effect = real_error
+        mock_get_client.return_value = client
+
+        result = await get_device_assurance_policy(
+            ctx=ctx_no_elicitation, device_assurance_id=DEVICE_ASSURANCE_ID
+        )
+
+        assert "could not deserialize" in result["error"]
+        assert "do not retry" in result["error"]
+
+    @pytest.mark.asyncio
+    @patch("okta_mcp_server.tools.device_assurance.device_assurance.get_okta_client")
+    async def test_list_handles_sdk_validation_error(self, mock_get_client, ctx_no_elicitation):
+        from pydantic import BaseModel, StrictStr, ValidationError
+
+        class _Probe(BaseModel):
+            field: StrictStr
+
+        try:
+            _Probe(field=123)
+        except ValidationError as exc:
+            real_error = exc
+
+        client = AsyncMock()
+        client.list_device_assurance_policies.side_effect = real_error
+        mock_get_client.return_value = client
+
+        result = await list_device_assurance_policies(ctx=ctx_no_elicitation)
+
+        assert "could not deserialize" in result["error"]
