@@ -22,6 +22,49 @@ from okta_mcp_server.utils.scope_guard import require_scopes
 from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import validate_ids, validate_os_version_params
 
+# Workaround for an Okta SDK typing bug (observed in okta==3.4.6): when a Device Assurance
+# Policy uses Okta's Advanced Posture Checks feature, the API returns
+# `devicePostureChecks.include` as List[dict] (e.g. {"variableName": "crowdstrike_zta_score",
+# "operator": "GTE", "value": "70"}), but DevicePostureChecks types it as List[StrictStr].
+# The SDK's own field description already documents it as "An array of key value pairs", so the
+# generated type contradicts the documented contract.
+#
+# Without this patch the ValidationError is RAISED (not returned) from inside the SDK's
+# response_deserialize(), which uses try/finally with no except. The tool's
+# `policy, resp, err = await okta_client.get_...()` line therefore never completes, `err` is
+# never assigned, and all five Device Assurance tools fail for the whole org -- list_ returns
+# no policies at all, because the list is validated atomically.
+#
+# Fix: relax the annotation to Optional[List[Any]] and force a Pydantic schema rebuild.
+# `Any` is deliberate and shape-agnostic -- the fix does not depend on knowing the exact object
+# shape Okta returns, and the legacy string form keeps working.
+#
+# Only the leaf class is rebuilt, and that is sufficient. The five platform subclasses
+# (DeviceAssuranceMacOSPlatform, ...Windows..., ...IOS..., ...Android..., ...ChromeOS...) do NOT
+# annotate this field with the DevicePostureChecks type; each one delegates at runtime inside its
+# own from_dict via `DevicePostureChecks.from_dict(obj["devicePostureChecks"])`. Because the value
+# is constructed by calling the leaf's own from_dict, no parent core schema embeds the old
+# annotation, so there is nothing upstream to invalidate. Verified on all five platforms,
+# including when every parent schema is pre-built before this patch runs. Do NOT add
+# model_rebuild() calls for the subclasses or the DeviceAssurance base -- they are redundant.
+#
+# Upstream bug to be filed: DevicePostureChecks.include should be List[Dict[str, Any]] or a
+# nested model. Once fixed upstream, this patch can be removed.
+try:
+    from okta.models.device_posture_checks import DevicePostureChecks as _DevicePostureChecks
+
+    _posture_include_type = Optional[List[Any]]
+    _DevicePostureChecks.__annotations__["include"] = _posture_include_type
+    if "include" in _DevicePostureChecks.model_fields:
+        _DevicePostureChecks.model_fields["include"].annotation = _posture_include_type
+    _DevicePostureChecks.model_rebuild(force=True)
+    logger.debug(
+        "Applied devicePostureChecks.include type workaround for DevicePostureChecks "
+        "(Advanced Posture Checks SDK bug)"
+    )
+except Exception as _patch_err:  # pragma: no cover - defensive; must never block tool registration
+    logger.warning(f"Could not apply devicePostureChecks workaround: {_patch_err}")
+
 
 # ---------------------------------------------------------------------------
 # Input types for create/replace tools
@@ -52,6 +95,71 @@ _OS_VERSION_IN_POLICY_DATA_ERROR = (
     "Then retry this call with osVersion removed from policy_data."
 )
 
+# Key used by the read path to flag Advanced Posture Checks to the calling model.
+ADVANCED_POSTURE_CHECKS_FIELD = "devicePostureChecks"
+_ADVANCED_POSTURE_CHECKS_ADVISORY_KEY = "advanced_posture_checks"
+
+# Returned when policy_data supplies devicePostureChecks on create/replace. Without this the LLM
+# receives a raw Pydantic `extra_forbidden` dump, which it cannot act on.
+_POSTURE_CHECKS_IN_POLICY_DATA_ERROR = (
+    "devicePostureChecks must NOT be included in policy_data — this tool cannot create or "
+    "modify Advanced Posture Checks. "
+    "Remove devicePostureChecks from policy_data and retry if you only need to change the "
+    "standard attributes (name, platform, diskEncryptionType, secureHardwarePresent, "
+    "screenLockType, jailbreak). "
+    "Advanced Posture Checks must be configured in the Okta Admin Console "
+    "(Security → Device Assurance). Do NOT retry this call with devicePostureChecks included."
+)
+
+# Returned when a replace targets a policy that already has Advanced Posture Checks configured.
+# This tool issues a full PUT built from PolicyDataInput, which cannot express
+# devicePostureChecks, so proceeding would remove the customer's posture checks server-side.
+_REPLACE_BLOCKED_BY_POSTURE_CHECKS_ERROR = (
+    "This policy uses Advanced Posture Checks, which this tool cannot preserve. "
+    "replace_device_assurance_policy performs a FULL replacement of the policy, and the "
+    "devicePostureChecks configuration cannot be included in the request — so completing this "
+    "operation would PERMANENTLY REMOVE the Advanced Posture Checks from this policy. "
+    "The replacement was NOT performed and the policy is unchanged. "
+    "To modify this policy, use the Okta Admin Console (Security → Device Assurance). "
+    "Tell the user this explicitly — do NOT retry this call."
+)
+
+
+def _sdk_validation_error(tool_name: str, exc: ValidationError) -> Dict[str, str]:
+    """Build an actionable error for an Okta SDK response-deserialization failure.
+
+    The SDK validates responses with Pydantic and *raises* ValidationError from inside
+    ``response_deserialize()`` (it uses try/finally with no except), so a model that disagrees
+    with what the API actually returns surfaces as an exception rather than an ``err`` value.
+    This converts it into something the calling model can relay, instead of a raw Pydantic dump.
+    """
+    return {
+        "error": (
+            f"The Okta SDK could not deserialize the API response for {tool_name}. This usually "
+            "means an SDK model's type does not match what the Okta API returned, not that the "
+            "data is invalid. Report this with the detail below; do not retry, as the result "
+            "will be the same. "
+            f"Detail: {exc}"
+        )
+    }
+
+
+def _has_advanced_posture_checks(policy_dict: Dict[str, Any]) -> bool:
+    """Return True if ``policy_dict`` carries a non-empty ``devicePostureChecks`` block.
+
+    Used by both the write guard (to refuse a destructive replace) and the read path (to flag
+    the limitation to the calling model). Treats an empty dict/list as absent, so a policy that
+    merely echoes an empty structure is not misreported as using the feature.
+    """
+    if not isinstance(policy_dict, dict):
+        return False
+    checks = policy_dict.get(ADVANCED_POSTURE_CHECKS_FIELD)
+    if not checks:
+        return False
+    if isinstance(checks, dict):
+        return any(bool(v) for v in checks.values())
+    return bool(checks)
+
 
 class PolicyDataInput(BaseModel):
     """Accepted fields for create/replace. ``osVersion`` is intentionally excluded —
@@ -75,6 +183,19 @@ class PolicyDataInput(BaseModel):
         """
         if isinstance(data, dict) and "osVersion" in data:
             raise ValueError(_OS_VERSION_IN_POLICY_DATA_ERROR)
+        return data
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_device_posture_checks(cls, data: Any) -> Any:
+        """Intercept devicePostureChecks before Pydantic's ``extra="forbid"`` fires.
+
+        Without this the LLM receives a raw ``extra_forbidden`` validation dump, which gives it
+        no indication that Advanced Posture Checks are simply unsupported on the write path and
+        must be configured in the Admin Console. Covers both create and replace from one place.
+        """
+        if isinstance(data, dict) and ADVANCED_POSTURE_CHECKS_FIELD in data:
+            raise ValueError(_POSTURE_CHECKS_IN_POLICY_DATA_ERROR)
         return data
 
     def as_api_dict(self) -> Dict[str, Any]:
@@ -205,6 +326,23 @@ def _enrich_policy_with_attribute_status(
     ``'unverifiable'`` rather than ``'not_configured'``, and a ``partial_failure``
     section is added to the response listing them explicitly.
     """
+    # Advanced Posture Checks advisory: flag the limitation on every read path so the calling
+    # model explains it to the user rather than attempting a write that will be refused.
+    # Set before the platform early-return so it applies even to policies with no platform.
+    if _has_advanced_posture_checks(policy_dict):
+        policy_dict[_ADVANCED_POSTURE_CHECKS_ADVISORY_KEY] = {
+            "present": True,
+            "write_operations_supported": False,
+            "message": (
+                "This policy uses Advanced Posture Checks (devicePostureChecks). These are "
+                "returned for reading, but create and replace operations are NOT supported for "
+                "them — replace_device_assurance_policy will refuse to run on this policy "
+                "because a full replacement would permanently remove them. "
+                "If the user wants to modify this policy, tell them to use the Okta Admin "
+                "Console (Security → Device Assurance)."
+            ),
+        }
+
     platform = policy_dict.get("platform")
     if not platform:
         return policy_dict
@@ -489,6 +627,12 @@ async def list_device_assurance_policies(
     except (ForbiddenException, UnauthorizedException) as e:
         logger.error(f"Access denied listing device assurance policies: {e}")
         return _build_scope_error("list", e.status)
+    except ValidationError as ve:
+        # Safety net for SDK model mismatches other than the devicePostureChecks bug patched at
+        # the top of this module. The SDK raises (rather than returns) ValidationError from
+        # inside response_deserialize(), so without this the LLM gets a raw Pydantic dump.
+        logger.error(f"SDK deserialization failed listing device assurance policies: {ve}")
+        return _sdk_validation_error("list_device_assurance_policies", ve)
     except Exception as e:
         logger.error(f"Exception listing device assurance policies: {e}")
         return {"error": str(e)}
@@ -559,6 +703,12 @@ async def get_device_assurance_policy(
     except (ForbiddenException, UnauthorizedException) as e:
         logger.error(f"Access denied getting device assurance policy {device_assurance_id}: {e}")
         return _build_scope_error("get", e.status)
+    except ValidationError as ve:
+        # See the matching handler in list_device_assurance_policies for rationale.
+        logger.error(
+            f"SDK deserialization failed getting device assurance policy {device_assurance_id}: {ve}"
+        )
+        return _sdk_validation_error("get_device_assurance_policy", ve)
     except Exception as e:
         logger.error(f"Exception getting device assurance policy {device_assurance_id}: {e}")
         return {"error": str(e)}
@@ -811,6 +961,25 @@ async def replace_device_assurance_policy(
             _enrich_policy_with_attribute_status(before_dict, before_unverifiable)
             if current_policy else {}
         )
+
+        # DATA-LOSS GUARD: refuse the replace if the target policy uses Advanced Posture Checks.
+        # The request body is built solely from PolicyDataInput, which cannot express
+        # devicePostureChecks, and the Okta API treats this as a full PUT replacement -- so
+        # issuing it would permanently remove the customer's posture checks server-side.
+        # This MUST stay above the PUT. Before the read-path deserialization fix this was
+        # unreachable (the internal get_ above raised first), so removing this guard would turn
+        # a loud failure into silent data loss.
+        if _has_advanced_posture_checks(before_dict):
+            logger.warning(
+                f"Refused replace of device assurance policy {device_assurance_id}: "
+                f"policy uses Advanced Posture Checks and a full replace would remove them"
+            )
+            return {
+                "error": _REPLACE_BLOCKED_BY_POSTURE_CHECKS_ERROR,
+                "policy_id": device_assurance_id,
+                "replacement_performed": False,
+                ADVANCED_POSTURE_CHECKS_FIELD: before_dict.get(ADVANCED_POSTURE_CHECKS_FIELD),
+            }
 
         policy_model = DeviceAssurance.from_dict(raw)
         policy, replace_resp, err = await okta_client.replace_device_assurance_policy(

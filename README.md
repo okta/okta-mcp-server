@@ -636,6 +636,17 @@ The Okta Open Source MCP Server provides the following tools for LLMs to interac
 | `replace_device_assurance_policy`     | Fully replace an existing Device Assurance Policy             | - `Update the MacOS policy to require OS 14.5` <br> - `Enable secure hardware requirement for our Windows policy` <br> - `Change the minimum OS version for our iOS policy`                      |
 | `delete_device_assurance_policy`      | Delete a Device Assurance Policy (prompts for confirmation)   | - `Delete the old Windows compliance policy` <br> - `Remove the deprecated Android policy` <br> - `Clean up unused device assurance policies`                                                    |
 
+> **Advanced Posture Checks are read-only.** Policies using Okta's Advanced Posture Checks
+> (`devicePostureChecks`) are fully readable — `list_device_assurance_policies` and
+> `get_device_assurance_policy` return their configuration, and read responses include an
+> `advanced_posture_checks` advisory noting the write limitation.
+>
+> They cannot be **created or modified** through this server. `replace_device_assurance_policy`
+> performs a full replacement and cannot include the `devicePostureChecks` configuration in its
+> request, so it deliberately **refuses** to run against such a policy rather than permanently
+> removing the posture checks. To change these policies, use the Okta Admin Console
+> (**Security → Device Assurance**).
+
 ### Logs
 
 > **Required scope:** `okta.logs.read`
