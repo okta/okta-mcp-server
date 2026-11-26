@@ -23,7 +23,7 @@ from okta_mcp_server.utils.messages import (
     DELETE_POLICY_RULE,
 )
 from okta_mcp_server.utils.scope_guard import require_scopes
-from okta_mcp_server.utils.serialization import json_response, none_body_error
+from okta_mcp_server.utils.serialization import json_response, none_body_error, to_jsonable
 from okta_mcp_server.utils.validation import validate_ids
 
 
@@ -73,8 +73,65 @@ def _build_policy_rule_model(rule_data: Dict[str, Any]) -> Any:
             "It must match the parent policy's type (e.g. PASSWORD rules for a PASSWORD policy, "
             "SIGN_ON rules for an OKTA_SIGN_ON policy). Use get_policy(policy_id) to check the policy type."
         )
+    normalised = {**rule_data, "type": rule_type}
+    status = _requested_status(rule_data)
+    if status is not None:
+        normalised["status"] = status
     logger.debug(f"Using model class '{model_cls.__name__}' for rule type '{rule_type}'")
-    return model_cls.from_dict({**rule_data, "type": rule_type})
+    return model_cls.from_dict(normalised)
+
+
+_VALID_RULE_STATUSES = ("ACTIVE", "INACTIVE")
+
+
+def _requested_status(rule_data: Dict[str, Any]) -> Optional[str]:
+    """Return the ``status`` the caller asked for, upper-cased, or ``None`` if omitted.
+
+    Okta ignores ``status`` in the body of a rule create or replace: a create
+    honours only the ``activate`` query parameter, and a replace keeps the
+    rule's current status. The rule tools therefore read the requested status
+    here and apply it through the API that actually controls it.
+
+    Raises:
+        ValueError: If ``status`` is present but is not ACTIVE or INACTIVE.
+    """
+    raw = rule_data.get("status")
+    if raw is None:
+        return None
+    status = str(raw).strip().upper()
+    if status not in _VALID_RULE_STATUSES:
+        raise ValueError(
+            f"Invalid policy rule: unsupported 'status' value {raw!r}. "
+            f"Set 'status' to one of: {', '.join(_VALID_RULE_STATUSES)}, or omit it."
+        )
+    return status
+
+
+def _status_value(rule: Any) -> Optional[str]:
+    """Return a rule's status as a plain string (the SDK uses a ``LifecycleStatus`` enum)."""
+    status = getattr(rule, "status", None)
+    return getattr(status, "value", status)
+
+
+def _status_mismatch(rule: Any, requested: Optional[str], rule_id: Optional[str], reason: str = "") -> Any:
+    """Return ``rule`` unchanged, or a dict copy carrying a ``warning`` if its status isn't ``requested``.
+
+    The warning is how the tools avoid silently returning a rule whose status
+    differs from what the caller asked for.
+    """
+    actual = _status_value(rule)
+    if requested is None or actual == requested:
+        return rule
+    fix_tool = "activate_policy_rule" if requested == "ACTIVE" else "deactivate_policy_rule"
+    rid = rule_id or getattr(rule, "id", None) or "<rule_id>"
+    message = f"Requested status {requested} but the rule is {actual}."
+    if reason:
+        message += f" {reason}"
+    message += f" Call {fix_tool}(policy_id, rule_id={rid!r}) to set it."
+    logger.warning(message)
+    result = to_jsonable(rule)
+    result["warning"] = message
+    return result
 
 
 @mcp.tool()
@@ -542,7 +599,10 @@ async def create_policy_rule(ctx: Context, policy_id: str, rule_data: Dict[str, 
               check the parent policy's type. Case-insensitive.
             - name (str, required): Rule name
             - priority (int, optional): Priority of the rule
-            - status (str, optional): ACTIVE or INACTIVE
+            - status (str, optional): ACTIVE (default) or INACTIVE.
+              Case-insensitive. Okta ignores ``status`` in the request body,
+              so INACTIVE is applied by creating the rule with
+              ``activate=false``.
             - conditions (dict, optional): Rule conditions
             - actions (dict, required for most types): Rule actions; the shape
               depends on ``type``
@@ -580,14 +640,20 @@ async def create_policy_rule(ctx: Context, policy_id: str, rule_data: Dict[str, 
 
     Returns:
         Dict containing the created rule details, or an ``error`` key on
-        failure (including a missing or invalid ``type``).
+        failure (including a missing or invalid ``type`` or ``status``). If
+        the created rule's status differs from the requested one, the rule is
+        returned with a ``warning`` key explaining the mismatch.
     """
     manager = ctx.request_context.lifespan_context.okta_auth_manager
     okta_client = await get_okta_client(manager)
 
     try:
         policy_rule = _build_policy_rule_model(rule_data)
-        rule, _, err = await okta_client.create_policy_rule(policy_id, policy_rule)
+        requested = _requested_status(rule_data)
+        if requested == "INACTIVE":
+            rule, _, err = await okta_client.create_policy_rule(policy_id, policy_rule, activate=False)
+        else:
+            rule, _, err = await okta_client.create_policy_rule(policy_id, policy_rule)
 
         if err:
             logger.error(f"Error creating policy rule: {err}")
@@ -600,7 +666,7 @@ async def create_policy_rule(ctx: Context, policy_id: str, rule_data: Dict[str, 
                 "Use list_policy_rules(policy_id=...) to confirm and retrieve the new rule.",
             )
 
-        return rule
+        return _status_mismatch(rule, requested, getattr(rule, "id", None))
 
     except Exception as e:
         logger.error(f"Exception creating policy rule: {e}")
@@ -632,7 +698,11 @@ async def update_policy_rule(
               (OKTA_SIGN_ON policies use SIGN_ON). Case-insensitive.
             - name (str, required): Rule name
             - priority (int, optional): Priority of the rule
-            - status (str, optional): ACTIVE or INACTIVE
+            - status (str, optional): ACTIVE or INACTIVE. Case-insensitive.
+              If omitted, the rule keeps its current status. Okta ignores
+              ``status`` in the replace body, so when it differs from the
+              rule's status after the replace, this tool activates or
+              deactivates the rule and returns the re-fetched result.
             - conditions (dict, optional): Rule conditions
             - actions (dict, required for most types): Rule actions
             See create_policy_rule for PASSWORD, SIGN_ON and ACCESS_POLICY
@@ -640,13 +710,16 @@ async def update_policy_rule(
 
     Returns:
         Dict containing the updated rule details, or an ``error`` key on
-        failure (including a missing or invalid ``type``).
+        failure (including a missing or invalid ``type`` or ``status``). If
+        the rule was replaced but its status could not be set as requested,
+        the rule is returned with a ``warning`` key explaining the mismatch.
     """
     manager = ctx.request_context.lifespan_context.okta_auth_manager
     okta_client = await get_okta_client(manager)
 
     try:
         policy_rule = _build_policy_rule_model(rule_data)
+        requested = _requested_status(rule_data)
         rule, _, err = await okta_client.replace_policy_rule(policy_id, rule_id, policy_rule)
 
         if err:
@@ -660,7 +733,35 @@ async def update_policy_rule(
                 "Re-fetch with get_policy_rule() to confirm the current state.",
             )
 
-        return rule
+        if requested is None or _status_value(rule) == requested:
+            return rule
+
+        # The replace succeeded but left the status unchanged. Apply the
+        # requested status with the lifecycle call. This goes to the SDK
+        # directly rather than the deactivate_policy_rule tool: the caller
+        # asked for this exact status in this call, and the replace itself
+        # is already a full overwrite of the rule.
+        lifecycle = okta_client.activate_policy_rule if requested == "ACTIVE" else okta_client.deactivate_policy_rule
+        logger.info(f"Setting rule {rule_id} in policy {policy_id} to {requested} after replace")
+        lifecycle_err = (await lifecycle(policy_id, rule_id))[-1]
+        if lifecycle_err:
+            logger.error(f"Error setting status {requested} on policy rule {rule_id}: {lifecycle_err}")
+            return _status_mismatch(
+                rule, requested, rule_id, f"The rule was replaced, but changing its status failed: {lifecycle_err}."
+            )
+
+        refreshed, _, get_err = await okta_client.get_policy_rule(policy_id, rule_id)
+        if get_err or refreshed is None:
+            logger.warning(f"Could not re-fetch rule {rule_id} after setting status: {get_err}")
+            result = to_jsonable(rule)
+            result["status"] = requested
+            result["warning"] = (
+                f"Status was set to {requested}, but re-reading the rule failed, so the other fields are "
+                "from the replace response. Use get_policy_rule() to confirm."
+            )
+            return result
+
+        return _status_mismatch(refreshed, requested, rule_id)
 
     except Exception as e:
         logger.error(f"Exception updating policy rule: {e}")
