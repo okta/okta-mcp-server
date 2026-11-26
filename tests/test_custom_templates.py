@@ -29,6 +29,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from okta.models.email_customization import EmailCustomization
 from okta.models.email_preview import EmailPreview
 from okta.models.email_preview_links import EmailPreviewLinks
 
@@ -42,6 +43,7 @@ from okta_mcp_server.tools.customization.custom_templates.custom_templates impor
     get_email_default_content_preview,
     list_email_customizations,
     list_email_templates,
+    replace_email_customization,
     send_test_email,
 )
 
@@ -996,3 +998,114 @@ class TestCreateEmailCustomizationLanguageDuplicateCheck:
         assert "error" in result
         assert "already exists" in result["error"]
         client.create_email_customization.assert_not_called()
+
+
+# ===========================================================================
+# replace_email_customization
+#
+# Okta treats the PUT as a full replace and the SDK drops None fields, so an
+# omitted is_default used to reach Okta as "not default" and was rejected with
+# E0000185 on the default customization.  The tool now reads the current
+# value first when the caller does not pass one.
+# ===========================================================================
+
+_PATCH_CLIENT = "okta_mcp_server.tools.customization.custom_templates.custom_templates.get_okta_client"
+
+
+def _existing_customization(is_default: bool) -> EmailCustomization:
+    return EmailCustomization(
+        id=CUSTOMIZATION_ID, language="en", subject=_SUBJECT, body=_BODY, is_default=is_default
+    )
+
+
+def _replace_client(existing=None, get_err=None) -> AsyncMock:
+    client = AsyncMock()
+    client.get_email_customization.return_value = (existing, MagicMock(), get_err)
+    client.replace_email_customization.return_value = (
+        _existing_customization(True), MagicMock(), None
+    )
+    return client
+
+
+def _sent_instance(client) -> EmailCustomization:
+    """Return the EmailCustomization the tool passed to the SDK PUT."""
+    return client.replace_email_customization.call_args.args[3]
+
+
+async def _replace(ctx, **overrides):
+    kwargs = dict(
+        ctx=ctx,
+        brand_id=BRAND_ID,
+        template_name=TEMPLATE_NAME,
+        customization_id=CUSTOMIZATION_ID,
+        language="en",
+        subject="New subject",
+        body=_BODY,
+    )
+    kwargs.update(overrides)
+    return await replace_email_customization(**kwargs)
+
+
+class TestReplaceEmailCustomizationIsDefault:
+    """is_default handling for replace_email_customization."""
+
+    @pytest.mark.asyncio
+    @patch(_PATCH_CLIENT)
+    async def test_omitted_on_default_customization_keeps_it_default(self, mock_get_client, ctx_no_elicitation):
+        client = _replace_client(existing=_existing_customization(True))
+        mock_get_client.return_value = client
+
+        result = await _replace(ctx_no_elicitation)
+
+        assert "error" not in result
+        client.get_email_customization.assert_awaited_once_with(BRAND_ID, TEMPLATE_NAME, CUSTOMIZATION_ID)
+        sent = _sent_instance(client)
+        assert sent.is_default is True
+        # Guard the wire format, not just the Python attribute: this is the
+        # field the SDK used to drop.
+        assert sent.to_dict()["isDefault"] is True
+
+    @pytest.mark.asyncio
+    @patch(_PATCH_CLIENT)
+    async def test_omitted_on_non_default_customization_stays_non_default(self, mock_get_client, ctx_no_elicitation):
+        client = _replace_client(existing=_existing_customization(False))
+        mock_get_client.return_value = client
+
+        await _replace(ctx_no_elicitation)
+
+        assert _sent_instance(client).to_dict()["isDefault"] is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("value", [True, False])
+    @patch(_PATCH_CLIENT)
+    async def test_explicit_value_is_sent_without_reading_current(self, mock_get_client, value, ctx_no_elicitation):
+        client = _replace_client()
+        mock_get_client.return_value = client
+
+        await _replace(ctx_no_elicitation, is_default=value)
+
+        client.get_email_customization.assert_not_called()
+        assert _sent_instance(client).to_dict()["isDefault"] is value
+
+    @pytest.mark.asyncio
+    @patch(_PATCH_CLIENT)
+    async def test_read_error_is_returned_and_replace_is_not_sent(self, mock_get_client, ctx_no_elicitation):
+        client = _replace_client(get_err=Exception("E0000007 Not found"))
+        mock_get_client.return_value = client
+
+        result = await _replace(ctx_no_elicitation)
+
+        assert result == {"error": "E0000007 Not found"}
+        client.replace_email_customization.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch(_PATCH_CLIENT)
+    async def test_empty_read_body_is_reported_and_replace_is_not_sent(self, mock_get_client, ctx_no_elicitation):
+        client = _replace_client(existing=None)
+        mock_get_client.return_value = client
+
+        result = await _replace(ctx_no_elicitation)
+
+        assert "error" in result
+        assert "is_default explicitly" in result["error"]
+        client.replace_email_customization.assert_not_called()
