@@ -45,6 +45,8 @@ Notes:
     - ``widget_customizations`` for sign-in page tools accepts a dict with
       snake_case keys matching the SDK field names, e.g.::
           {"sign_in_label": "Log in", "forgot_password_label": "Reset"}
+      Okta requires at least one field, so ``{}`` is rejected. Omitting it
+      keeps the page's current widget customizations.
     - ``content_security_policy_setting`` accepts a dict with keys
       ``mode`` ("enforced" | "report_only" | "disabled"), ``report_uri``
       (string), and ``src_list`` (list of strings).
@@ -52,7 +54,7 @@ Notes:
       ``EXTERNALLY_HOSTED`` redirects to the URL you provide.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 from mcp.server.fastmcp import Context
@@ -125,21 +127,101 @@ def _build_csp(
     )
 
 
+_WIDGET_EXAMPLE = '{"sign_in_label": "Sign in"}'
+
+_EMPTY_WIDGET_CUSTOMIZATIONS_ERROR = (
+    "widget_customizations cannot be empty: Okta requires at least one widget field "
+    f"(for example {_WIDGET_EXAMPLE}). Omit the parameter to keep the page's current "
+    "widget customizations."
+)
+
+
+def _cannot_keep_widget_customizations(reason: str) -> Dict[str, str]:
+    """Error returned when widget_customizations was omitted but cannot be carried over."""
+    return {
+        "error": (
+            f"widget_customizations was omitted, but the current values cannot be kept: {reason}. "
+            "Okta requires at least one widget field, so pass widget_customizations explicitly "
+            f"(for example {_WIDGET_EXAMPLE}). get_default_sign_in_page shows Okta's default values."
+        )
+    }
+
+
+def _parse_widget_customizations(
+    widget_customizations: Dict[str, Any],
+) -> Tuple[Optional[SignInPageAllOfWidgetCustomizations], Optional[Dict[str, str]]]:
+    """Validate caller-supplied widget customizations.
+
+    Okta rejects an empty ``widgetCustomizations`` object ("cannot be left
+    blank"). An empty dict, or one whose keys are all unrecognised (the SDK
+    model drops unknown keys silently, which leaves the same empty object), is
+    therefore rejected here, before any API call.
+
+    Returns:
+        ``(model, None)`` on success, or ``(None, {"error": ...})``.
+    """
+    if not widget_customizations:
+        return None, {"error": _EMPTY_WIDGET_CUSTOMIZATIONS_ERROR}
+    wc = SignInPageAllOfWidgetCustomizations(**widget_customizations)
+    if not wc.to_dict():
+        keys = ", ".join(sorted(str(k) for k in widget_customizations))
+        return None, {
+            "error": (
+                f"widget_customizations has no recognised fields (got: {keys}). Use snake_case "
+                f"field names such as sign_in_label or forgot_password_url, for example {_WIDGET_EXAMPLE}."
+            )
+        }
+    return wc, None
+
+
+async def _current_widget_customizations(
+    get_page: Any, brand_id: str
+) -> Tuple[Optional[SignInPageAllOfWidgetCustomizations], Optional[Dict[str, str]]]:
+    """Fetch the widget customizations of the page about to be replaced.
+
+    Used when the caller omits ``widget_customizations``: the replace is a full
+    PUT, so the existing values are carried over to make "omitted" mean "keep
+    the current values" rather than "send nothing" (which Okta rejects).
+
+    Args:
+        get_page: The SDK getter for the same page that is being replaced
+            (``client.get_customized_sign_in_page`` or
+            ``client.get_preview_sign_in_page``).
+        brand_id: The brand whose page is being replaced.
+
+    Returns:
+        ``(model, None)`` on success, or ``(None, {"error": ...})``.
+    """
+    result = await get_page(brand_id)
+    page = result[0]
+    err = result[-1]
+    if err:
+        logger.warning(f"Could not read current sign-in page for brand {brand_id} to keep widget settings: {err}")
+        return None, _cannot_keep_widget_customizations(f"reading the current page failed ({err})")
+
+    wc = getattr(page, "widget_customizations", None) if page is not None else None
+    if wc is None or not wc.to_dict():
+        return None, _cannot_keep_widget_customizations("the current page has no widget customizations")
+
+    logger.info(f"Keeping current widget customizations for brand: {brand_id}")
+    return wc, None
+
+
 def _build_sign_in_page(
     page_content: Optional[str],
     widget_version: Optional[str],
-    widget_customizations: Optional[Dict[str, Any]],
+    widget_customizations: Optional[SignInPageAllOfWidgetCustomizations],
     csp: Optional[ContentSecurityPolicySetting],
 ) -> SignInPage:
-    """Assemble a SignInPage model from the individual tool parameters."""
-    # Only construct the widget-customizations object when the caller actually
-    # provided values.  Passing an empty dict would create an all-None SDK
-    # model that Okta may interpret as an explicit reset of every widget field.
-    wc = SignInPageAllOfWidgetCustomizations(**widget_customizations) if widget_customizations else None
+    """Assemble a SignInPage model from the individual tool parameters.
+
+    ``widget_customizations`` must already be resolved by
+    :func:`_parse_widget_customizations` or :func:`_current_widget_customizations`.
+    """
     return SignInPage(
         page_content=page_content,
         widget_version=widget_version,
-        widget_customizations=wc,
+        widget_customizations=widget_customizations,
         content_security_policy_setting=csp,
     )
 
@@ -683,8 +765,12 @@ async def replace_customized_sign_in_page(
                     "custom_link1_url": "https://example.com/help"
                 }
 
-            Pass ``{}`` to keep all defaults. If omitted, an empty
-            widgetCustomizations object is sent (required by the API).
+            Okta requires at least one widget field, so ``{}`` (or a dict
+            with no recognised fields) is rejected with an error before any
+            API call. This is a full replace: the dict you pass replaces all
+            current widget customizations. If omitted, the customized page's
+            current widget customizations are kept. If the brand has no
+            customized page yet, you must pass at least one field.
         csp_mode (str, optional): Content Security Policy enforcement mode.
             Valid values: ``enforced``, ``report_only``, ``disabled``.
         csp_report_uri (str, optional): URI where CSP violation reports are
@@ -700,9 +786,20 @@ async def replace_customized_sign_in_page(
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
     try:
+        wc = None
+        if widget_customizations is not None:
+            wc, error = _parse_widget_customizations(widget_customizations)
+            if error:
+                return error
+
         client = await get_okta_client(manager)
+        if wc is None:
+            wc, error = await _current_widget_customizations(client.get_customized_sign_in_page, brand_id)
+            if error:
+                return error
+
         csp = _build_csp(csp_mode, csp_report_uri, csp_src_list)
-        sign_in_page = _build_sign_in_page(page_content, widget_version, widget_customizations, csp)
+        sign_in_page = _build_sign_in_page(page_content, widget_version, wc, csp)
         result = await client.replace_customized_sign_in_page(brand_id, sign_in_page)
         page = result[0]
         err = result[-1]
@@ -890,9 +987,15 @@ async def replace_preview_sign_in_page(
             Accepts wildcards and ranges, e.g. ``"*"``, ``"^5"``, ``"7"``,
             ``"5.15"``.
         widget_customizations (Dict[str, Any], optional): Dict of widget
-            customisation fields using snake_case keys. Pass ``{}`` to keep
-            all defaults. If omitted, an empty widgetCustomizations object is
-            sent (required by the API).
+            customisation fields using snake_case keys, e.g.
+            ``{"sign_in_label": "Log in"}`` (see
+            ``replace_customized_sign_in_page`` for more fields). Okta
+            requires at least one widget field, so ``{}`` (or a dict with no
+            recognised fields) is rejected with an error before any API call.
+            This is a full replace: the dict you pass replaces all current
+            widget customizations. If omitted, the preview page's current
+            widget customizations are kept. If the brand has no preview page
+            yet, you must pass at least one field.
         csp_mode (str, optional): Content Security Policy enforcement mode.
             Valid values: ``enforced``, ``report_only``, ``disabled``.
         csp_report_uri (str, optional): URI where CSP violation reports are
@@ -908,9 +1011,20 @@ async def replace_preview_sign_in_page(
     manager = ctx.request_context.lifespan_context.okta_auth_manager
 
     try:
+        wc = None
+        if widget_customizations is not None:
+            wc, error = _parse_widget_customizations(widget_customizations)
+            if error:
+                return error
+
         client = await get_okta_client(manager)
+        if wc is None:
+            wc, error = await _current_widget_customizations(client.get_preview_sign_in_page, brand_id)
+            if error:
+                return error
+
         csp = _build_csp(csp_mode, csp_report_uri, csp_src_list)
-        sign_in_page = _build_sign_in_page(page_content, widget_version, widget_customizations, csp)
+        sign_in_page = _build_sign_in_page(page_content, widget_version, wc, csp)
         result = await client.replace_preview_sign_in_page(brand_id, sign_in_page)
         page = result[0]
         err = result[-1]
