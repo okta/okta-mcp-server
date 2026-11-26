@@ -73,7 +73,7 @@ from okta_mcp_server.utils.messages import (
 )
 from okta_mcp_server.utils.pagination import build_query_params, create_paginated_response, extract_after_cursor, paginate_all_results
 from okta_mcp_server.utils.scope_guard import require_scopes
-from okta_mcp_server.utils.serialization import json_response
+from okta_mcp_server.utils.serialization import json_response, none_body_error
 from okta_mcp_server.utils.validation import validate_ids
 
 
@@ -566,8 +566,12 @@ async def replace_email_customization(
         body (str, required): Updated full HTML body of the email.  Must
             contain all required template variables.
         is_default (bool, optional): Whether this customization is the
-            default.  Setting to ``True`` clears the flag on any other
-            customization for the same template.
+            default.  If omitted, the customization's current default status
+            is preserved (it is read from Okta before the replace).  Setting
+            to ``True`` clears the flag on any other customization for the
+            same template.  Pass ``False`` only on a non-default
+            customization: a template must always keep exactly one default,
+            so Okta rejects ``False`` on the default one (E0000185).
 
     Returns:
         Dict containing the updated customization, or an ``error`` key on
@@ -578,6 +582,27 @@ async def replace_email_customization(
 
     try:
         client = await get_okta_client(manager)
+
+        # The PUT is a full replace and the SDK omits None fields, so an
+        # omitted is_default would reach Okta as "not default" and be rejected
+        # (E0000185) on the default customization.  Carry the current value.
+        if is_default is None:
+            existing, _, err = await client.get_email_customization(brand_id, template_name, customization_id)
+            if err:
+                logger.error(
+                    f"Okta API error reading current isDefault for customization {customization_id} "
+                    f"for template '{template_name}' on brand {brand_id}: {err}"
+                )
+                return {"error": str(err)}
+            if existing is None:
+                return none_body_error(
+                    "replace_email_customization",
+                    f"reading the current customization {customization_id!r} before replacing it",
+                    "Pass is_default explicitly, or verify the ID with list_email_customizations().",
+                )
+            is_default = existing.is_default
+            logger.debug(f"Preserving current isDefault={is_default} for customization {customization_id}")
+
         instance = EmailCustomization(
             language=language,
             subject=subject,

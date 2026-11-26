@@ -23,6 +23,9 @@ All notable changes to this project will be documented in this file.
   - Future change, deliberately not included: 1.30.0 adds a **public `remove_tool()`**, which would resolve the standing TODO in `utils/scope_guard.py` about using the private `_tool_manager`. It alters the scope-pruning path, so it belongs in its own change rather than a security bump.
 - Bumped the `Version` label in the `Dockerfile` to **1.1.8**.
 
+### Bug Fixes
+- Fixed `replace_email_customization` rejecting a replace of the default customization with **E0000185** when `is_default` was omitted. The PUT is a full replace and the SDK leaves `None` fields out of the body, so an omitted `isDefault` reached Okta as `false` — and a template must always keep one default. When `is_default` is not passed, the tool now reads the customization first and carries its current value; an explicit `True` / `False` is sent unchanged with no extra request.
+
 ### Documentation
 - Scope note: `[tool.uv] constraint-dependencies` is uv-specific config and is **not** carried in published wheel metadata, so PyPI installs (`uvx`, `pipx`, `pip`) resolve fresh from `[project] dependencies` and do not inherit the transitive floors above. Those protect the Docker image, CI, and repo-based installs; closing the gap for PyPI consumers needs the upstream bumps in `okta` (`aiohttp`, `PyJWT`, `requests`).
 
