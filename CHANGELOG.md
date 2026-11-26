@@ -23,6 +23,10 @@ All notable changes to this project will be documented in this file.
   - Future change, deliberately not included: 1.30.0 adds a **public `remove_tool()`**, which would resolve the standing TODO in `utils/scope_guard.py` about using the private `_tool_manager`. It alters the scope-pruning path, so it belongs in its own change rather than a security bump.
 - Bumped the `Version` label in the `Dockerfile` to **1.1.8**.
 
+### Bug Fixes
+- `create_policy_rule` / `update_policy_rule`: `rule_data.type` is now validated before any API call. A missing or unknown value previously surfaced as the SDK's cryptic "failed to lookup discriminator value" error; it now returns an actionable message listing the 9 valid rule types and the policy → rule type mapping (`OKTA_SIGN_ON` policies take `SIGN_ON` rules). `type` is also matched case-insensitively, so `"password"` now works. Docstrings mark `type` as required, add `PASSWORD` / `SIGN_ON` / `ACCESS_POLICY` examples, and state that `update_policy_rule` is a full replace.
+- `replace_customized_sign_in_page` / `replace_preview_sign_in_page`: `widget_customizations={}` (or a dict with no recognised fields) is now rejected with a clear message before any API call — Okta rejects an empty object ("cannot be left blank"), and the old docstring wrongly said `{}` kept all defaults. Omitting `widget_customizations` now keeps the page's current widget customizations instead of leaving the field out of the request; if there are none to keep, the tool says so rather than sending an invalid request.
+
 ### Documentation
 - Scope note: `[tool.uv] constraint-dependencies` is uv-specific config and is **not** carried in published wheel metadata, so PyPI installs (`uvx`, `pipx`, `pip`) resolve fresh from `[project] dependencies` and do not inherit the transitive floors above. Those protect the Docker image, CI, and repo-based installs; closing the gap for PyPI consumers needs the upstream bumps in `okta` (`aiohttp`, `PyJWT`, `requests`).
 

@@ -11,7 +11,6 @@ from loguru import logger
 from mcp.server.fastmcp import Context
 
 import okta.models as okta_models
-from okta.models.policy_rule import PolicyRule
 
 from okta_mcp_server.server import mcp
 from okta_mcp_server.utils.client import get_okta_client
@@ -51,11 +50,31 @@ def _build_policy_rule_model(rule_data: Dict[str, Any]) -> Any:
     The base PolicyRule model lacks type-specific fields such as `actions` and
     `conditions`. Without this mapping those fields are silently dropped, causing
     Okta API 400 errors like "Expecting an action but none were found".
+
+    ``type`` is required: it selects the model class. It is matched
+    case-insensitively and normalised to upper case before deserialising, so
+    ``"password"`` and ``"PASSWORD"`` are equivalent.
+
+    Raises:
+        ValueError: If ``type`` is missing or is not a supported rule type. The
+            message lists the valid values.
     """
-    rule_type = str(rule_data.get("type", "")).upper()
-    model_cls = _POLICY_RULE_MODEL_MAP.get(rule_type, PolicyRule)
+    raw_type = rule_data.get("type")
+    rule_type = str(raw_type or "").strip().upper()
+    model_cls = _POLICY_RULE_MODEL_MAP.get(rule_type)
+    if model_cls is None:
+        valid = ", ".join(sorted(_POLICY_RULE_MODEL_MAP))
+        if not rule_type:
+            problem = "rule_data is missing the required 'type' field"
+        else:
+            problem = f"rule_data has an unsupported 'type' value {raw_type!r}"
+        raise ValueError(
+            f"Invalid policy rule: {problem}. Set 'type' to one of: {valid}. "
+            "It must match the parent policy's type (e.g. PASSWORD rules for a PASSWORD policy, "
+            "SIGN_ON rules for an OKTA_SIGN_ON policy). Use get_policy(policy_id) to check the policy type."
+        )
     logger.debug(f"Using model class '{model_cls.__name__}' for rule type '{rule_type}'")
-    return model_cls.from_dict(rule_data)
+    return model_cls.from_dict({**rule_data, "type": rule_type})
 
 
 @mcp.tool()
@@ -514,14 +533,54 @@ async def create_policy_rule(ctx: Context, policy_id: str, rule_data: Dict[str, 
     Parameters:
         policy_id (str, required): The ID of the policy.
         rule_data (dict, required): The rule configuration containing:
+            - type (str, required): The rule type. It must match the parent
+              policy's type. Valid values: ACCESS_POLICY, DEVICE_SIGNAL_COLLECTION,
+              ENTITY_RISK, IDP_DISCOVERY, MFA_ENROLL, PASSWORD, POST_AUTH_SESSION,
+              PROFILE_ENROLLMENT, SIGN_ON. Policy type -> rule type: OKTA_SIGN_ON ->
+              SIGN_ON; every other policy type uses the same name (PASSWORD ->
+              PASSWORD, ACCESS_POLICY -> ACCESS_POLICY, ...). Use get_policy() to
+              check the parent policy's type. Case-insensitive.
             - name (str, required): Rule name
             - priority (int, optional): Priority of the rule
             - status (str, optional): ACTIVE or INACTIVE
             - conditions (dict, optional): Rule conditions
-            - actions (dict, optional): Rule actions
+            - actions (dict, required for most types): Rule actions; the shape
+              depends on ``type``
+
+    Examples:
+        PASSWORD rule (for a PASSWORD policy)::
+
+            {
+                "type": "PASSWORD",
+                "name": "Allow self-service reset",
+                "actions": {
+                    "passwordChange": {"access": "ALLOW"},
+                    "selfServicePasswordReset": {"access": "ALLOW"},
+                    "selfServiceUnlock": {"access": "DENY"},
+                },
+            }
+
+        SIGN_ON rule (for an OKTA_SIGN_ON policy)::
+
+            {
+                "type": "SIGN_ON",
+                "name": "Require MFA",
+                "actions": {"signon": {"access": "ALLOW", "requireFactor": True, "factorPromptMode": "ALWAYS"}},
+            }
+
+        ACCESS_POLICY rule (for an ACCESS_POLICY / app sign-on policy)::
+
+            {
+                "type": "ACCESS_POLICY",
+                "name": "Password plus another factor",
+                "actions": {
+                    "appSignOn": {"access": "ALLOW", "verificationMethod": {"type": "ASSURANCE", "factorMode": "2FA"}}
+                },
+            }
 
     Returns:
-        Dict containing the created rule details.
+        Dict containing the created rule details, or an ``error`` key on
+        failure (including a missing or invalid ``type``).
     """
     manager = ctx.request_context.lifespan_context.okta_auth_manager
     okta_client = await get_okta_client(manager)
@@ -557,13 +616,31 @@ async def update_policy_rule(
 ) -> Optional[Dict[str, Any]]:
     """Update an existing policy rule.
 
+    This is a full replace (HTTP PUT), not a partial patch: send the complete
+    rule. Fields left out are reset to Okta's defaults. Retrieve the current
+    rule with get_policy_rule() first and modify that.
+
     Parameters:
         policy_id (str, required): The ID of the policy.
         rule_id (str, required): The ID of the rule to update.
-        rule_data (dict, required): The updated rule configuration.
+        rule_data (dict, required): The complete rule configuration, in the
+            same shape as create_policy_rule:
+            - type (str, required): The rule type; must match the existing
+              rule and the parent policy's type. Valid values: ACCESS_POLICY,
+              DEVICE_SIGNAL_COLLECTION, ENTITY_RISK, IDP_DISCOVERY, MFA_ENROLL,
+              PASSWORD, POST_AUTH_SESSION, PROFILE_ENROLLMENT, SIGN_ON
+              (OKTA_SIGN_ON policies use SIGN_ON). Case-insensitive.
+            - name (str, required): Rule name
+            - priority (int, optional): Priority of the rule
+            - status (str, optional): ACTIVE or INACTIVE
+            - conditions (dict, optional): Rule conditions
+            - actions (dict, required for most types): Rule actions
+            See create_policy_rule for PASSWORD, SIGN_ON and ACCESS_POLICY
+            examples.
 
     Returns:
-        Dict containing the updated rule details.
+        Dict containing the updated rule details, or an ``error`` key on
+        failure (including a missing or invalid ``type``).
     """
     manager = ctx.request_context.lifespan_context.okta_auth_manager
     okta_client = await get_okta_client(manager)
